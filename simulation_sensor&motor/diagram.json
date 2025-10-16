@@ -67,10 +67,9 @@
     [ "drv2:1A", "stepper2:B+", "green", [] ],
     [ "drv2:2A", "stepper2:A+", "green", [] ],
     [ "drv2:2B", "stepper2:A-", "green", [] ],
-    [ "btn1:1.l", "esp:14", "green", [ "h-67.2", "v-142.4" ] ],
-    [ "btn1:2.l", "esp:14", "green", [ "h-76.8", "v-161.4" ] ],
-    [ "btn1:1.r", "esp:GND.2", "black", [ "h19.4", "v-248" ] ],
-    [ "btn1:2.r", "esp:GND.2", "black", [ "h9.8", "v-267" ] ]
+    [ "btn1:1.l", "esp:14", "green", [] ],
+    [ "btn1:2.r", "esp:GND.2", "black", [] ]
+
   ],
   "dependencies": {}
 }
