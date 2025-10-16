@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "author": "AlMed Equipments",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 40, "left": 60, "attrs": {} },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": -220,
+      "left": 120,
+      "attrs": { "temperature": "24", "humidity": "40" }
+    },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper1",
+      "top": -220,
+      "left": 380,
+      "attrs": { "size": "23", "display": "angle", "arrow": "red" }
+    },
+    { "type": "wokwi-a4988", "id": "drv1", "top": 120, "left": 360, "rotate": 270, "attrs": {} },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper2",
+      "top": -220,
+      "left": 640,
+      "attrs": { "size": "23", "display": "angle", "arrow": "green" }
+    },
+    { "type": "wokwi-a4988", "id": "drv2", "top": 120, "left": 620, "rotate": 270, "attrs": {} },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 303.8,
+      "left": 115.2,
+      "attrs": { "bounce": "0" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "dht1:VCC", "esp:3V3", "red", [ "h-87", "v173.9" ] ],
+    [ "dht1:GND", "esp:GND.2", "black", [ "h18.6", "v173.9" ] ],
+    [ "dht1:SDA", "esp:21", "green", [ "h28.3", "v221.9" ] ],
+    [ "esp:3V3", "drv1:VDD", "red", [ "v-11.2", "h347.71" ] ],
+    [ "esp:GND.2", "drv1:GND", "black", [] ],
+    [ "esp:5V", "drv1:VMOT", "red", [] ],
+    [ "esp:GND.2", "drv1:PGND", "black", [] ],
+    [ "drv1:SLEEP", "drv1:RESET", "green", [] ],
+    [ "drv1:SLEEP", "drv1:VDD", "green", [] ],
+    [ "drv1:EN", "drv1:GND", "black", [] ],
+    [ "esp:25", "drv1:STEP", "yellow", [] ],
+    [ "esp:26", "drv1:DIR", "orange", [] ],
+    [ "drv1:1B", "stepper1:B-", "green", [] ],
+    [ "drv1:1A", "stepper1:B+", "green", [] ],
+    [ "drv1:2A", "stepper1:A+", "green", [] ],
+    [ "drv1:2B", "stepper1:A-", "green", [] ],
+    [ "esp:3V3", "drv2:VDD", "red", [ "v-30.4", "h607.71" ] ],
+    [ "esp:GND.2", "drv2:GND", "black", [] ],
+    [ "esp:5V", "drv2:VMOT", "red", [ "v17.6", "h550.11" ] ],
+    [ "esp:GND.2", "drv2:PGND", "black", [] ],
+    [ "drv2:SLEEP", "drv2:RESET", "green", [] ],
+    [ "drv2:SLEEP", "drv2:VDD", "green", [] ],
+    [ "drv2:EN", "drv2:GND", "black", [] ],
+    [ "esp:32", "drv2:STEP", "yellow", [] ],
+    [ "esp:33", "drv2:DIR", "orange", [] ],
+    [ "drv2:1B", "stepper2:B-", "green", [] ],
+    [ "drv2:1A", "stepper2:B+", "green", [] ],
+    [ "drv2:2A", "stepper2:A+", "green", [] ],
+    [ "drv2:2B", "stepper2:A-", "green", [] ],
+    [ "btn1:1.l", "esp:14", "green", [ "h-67.2", "v-142.4" ] ],
+    [ "btn1:2.l", "esp:14", "green", [ "h-76.8", "v-161.4" ] ],
+    [ "btn1:1.r", "esp:GND.2", "black", [ "h19.4", "v-248" ] ],
+    [ "btn1:2.r", "esp:GND.2", "black", [ "h9.8", "v-267" ] ]
+  ],
+  "dependencies": {}
+}
