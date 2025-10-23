@@ -1,0 +1,16 @@
+╔═══════════════════════════════════════════════════════════════╗
+║              SAVE YOUR 2 COMPLETE LOGOS HERE                  ║
+╚═══════════════════════════════════════════════════════════════╝
+
+📁 Location: /home/almedproto/Documents/almed_ahu/ahu_dashboard/assets/images/
+
+🖼️  Image 1: Badge + ALMED with DARK TEXT
+   → Save as: logo_dark.png
+   → Used in LIGHT MODE
+
+🖼️  Image 2: Badge + ALMED with LIGHT TEXT
+   → Save as: logo_light.png
+   → Used in DARK MODE
+
+Both images contain the full logo (green badge + ALMED text).
+The app will automatically switch between them based on the theme!
