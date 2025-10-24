@@ -1,407 +1,275 @@
-# AHU Control Dashboard
+# ALMED AHU Dashboard - Flutter-Pi Touch Interface
 
-A professional touch-friendly Flutter dashboard for monitoring and controlling Air Handling Units (AHU) in hospital environments. Designed to run on Raspberry Pi with Flutter-Pi for embedded kiosk deployment.
+A professional touch-friendly dashboard for hospital AHU (Air Handling Unit) control, built with Flutter-Pi for Raspberry Pi deployment.
 
-## Features
+## 🎯 Features
 
-### 🏥 Hospital User Mode
-- Real-time monitoring of temperature and humidity
-- Visual status indicators for all AHU components
-- Start/Stop system control
-- Adjust temperature and humidity setpoints
-- View system logs in real-time
-- Monitor motor status (drain and filter cleaning)
-- Track compressor and heater operation
+### Core Functionality
+- **Dual User Roles**: Hospital (monitoring) and Admin (full control)
+- **Real-time MQTT Integration**: Live data from ESP32 AHU units
+- **Touch-Optimized UI**: Designed for kiosk mode on Raspberry Pi
+- **Theme Support**: Light (white/blue) and Dark (black/blue) modes
+- **Professional Branding**: ALMED logo and custom Vendura font
 
-### 🔧 Admin Mode
-- All hospital user features
-- WiFi provisioning for ESP32 devices
-  - Configure primary WiFi (Pi hotspot)
-  - Configure secondary WiFi (hospital network)
-- MQTT broker configuration
-- Advanced system settings
+### UI Components
+- **Login Screen**: Role selection with ALMED branding
+- **Dashboard**: AHU unit cards with status overview
+- **AHU Control**: Temperature/humidity setpoints, motor controls
+- **Admin Settings**: WiFi and MQTT broker provisioning
+- **Log Viewer**: Collapsible real-time logs with timestamps
 
-## System Architecture
+## 🚀 Quick Start
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Raspberry Pi (Dashboard)                  │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Flutter-Pi Dashboard (This App)              │   │
-│  │  • Touch-friendly UI                                 │   │
-│  │  • Real-time MQTT communication                      │   │
-│  │  • Multi-user support (Hospital/Admin)               │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                          ↕ MQTT                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │            Mosquitto MQTT Broker                     │   │
-│  │  • localhost:1883 or 10.42.0.1:1883                  │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                            ↕ MQTT (WiFi)
-┌─────────────────────────────────────────────────────────────┐
-│                    ESP32 AHU Controller                      │
-│  • SHT45 Temperature/Humidity Sensor                         │
-│  • L298N Motor Driver (2 motors)                             │
-│  • Relay control (Compressor + Heater)                       │
-│  • Dual WiFi support (Pi hotspot + Hospital network)         │
-└─────────────────────────────────────────────────────────────┘
-```
+### Prerequisites
+- Raspberry Pi (4B recommended)
+- Flutter SDK
+- MQTT broker (Mosquitto)
 
-## MQTT Topics
+### Installation
 
-The dashboard subscribes to these topics (wildcard: `almed/ahu/#`):
-
-- `almed/ahu/{site}/{room}/{ahu-id}/telemetry` - Real-time sensor data
-- `almed/ahu/{site}/{room}/{ahu-id}/state` - System state (retained)
-- `almed/ahu/{site}/{room}/{ahu-id}/log` - Log messages
-- `almed/ahu/{site}/{room}/{ahu-id}/status` - Online/offline status
-- `almed/ahu/{site}/{room}/{ahu-id}/cmd` - Command topic (publish)
-- `almed/ahu/{site}/{room}/{ahu-id}/provision/wifi` - WiFi provisioning (admin)
-- `almed/ahu/{site}/{room}/{ahu-id}/provision/broker` - Broker provisioning (admin)
-
-## Prerequisites
-
-### For Development (Desktop)
-- Flutter SDK 3.x or higher
-- Dart SDK
-- Linux, macOS, or Windows
-
-### For Deployment (Raspberry Pi)
-- Raspberry Pi 4 (2GB+ recommended) or Pi 3
-- Raspberry Pi OS (Lite or Desktop)
-- Touchscreen display (optional but recommended)
-- Flutter-Pi installed
-- Mosquitto MQTT broker running
-
-## Installation
-
-### 1. Clone the Repository
-
-```bash
-cd /home/almedproto/Documents/almed_ahu/ahu_dashboard
-```
-
-### 2. Install Dependencies
-
-```bash
-flutter pub get
-```
-
-### 3. Generate JSON Serialization Code
-
-```bash
-flutter pub run build_runner build --delete-conflicting-outputs
-```
-
-### 4. Run on Desktop (Development)
-
-```bash
-flutter run -d linux
-```
-
-### 5. Build for Flutter-Pi (Production)
-
-```bash
-# Build the Flutter bundle
-flutter build bundle
-
-# The output will be in build/flutter_assets/
-# Copy this to your Raspberry Pi
-```
-
-## Deployment on Raspberry Pi with Flutter-Pi
-
-### Step 1: Install Flutter-Pi
-
-```bash
-# On Raspberry Pi
-sudo apt update
-sudo apt install -y cmake libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
-  libdrm-dev libgbm-dev ttf-mscorefonts-installer fontconfig libsystemd-dev \
-  libinput-dev libudev-dev libxkbcommon-dev
-
-# Clone and build flutter-pi
-git clone https://github.com/ardera/flutter-pi
-cd flutter-pi
-mkdir build && cd build
-cmake ..
-make -j4
-sudo make install
-```
-
-### Step 2: Install Mosquitto MQTT Broker
-
-```bash
-sudo apt install -y mosquitto mosquitto-clients
-
-# Configure mosquitto to allow authentication
-sudo nano /etc/mosquitto/mosquitto.conf
-```
-
-Add these lines:
-```
-listener 1883
-allow_anonymous false
-password_file /etc/mosquitto/passwd
-```
-
-Create user credentials:
-```bash
-sudo mosquitto_passwd -c /etc/mosquitto/passwd almed
-# Enter password: Almed1234$
-
-sudo systemctl restart mosquitto
-sudo systemctl enable mosquitto
-```
-
-### Step 3: Deploy the Dashboard
-
-```bash
-# On your development machine, build the app
-cd /home/almedproto/Documents/almed_ahu/ahu_dashboard
-flutter build bundle --release
-
-# Copy to Raspberry Pi
-scp -r build/flutter_assets pi@<pi-ip>:/home/pi/ahu_dashboard
-```
-
-### Step 4: Run Flutter-Pi in Kiosk Mode
-
-```bash
-# On Raspberry Pi
-flutter-pi --release /home/pi/ahu_dashboard
-```
-
-### Step 5: Auto-Start on Boot (Kiosk Mode)
-
-Create a systemd service:
-
-```bash
-sudo nano /etc/systemd/system/ahu-dashboard.service
-```
-
-Add:
-```ini
-[Unit]
-Description=AHU Dashboard
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi
-ExecStart=/usr/local/bin/flutter-pi --release /home/pi/ahu_dashboard
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable ahu-dashboard.service
-sudo systemctl start ahu-dashboard.service
-```
-
-### Step 6: Admin Access (Debug Mode)
-
-To access the Raspbian OS for debugging, you can:
-
-1. **SSH into the Pi** (recommended):
+1. **Clone and Setup**:
    ```bash
-   ssh pi@<pi-ip>
+   cd /home/almedproto/Documents/almed_ahu/ahu_dashboard
+   flutter pub get
    ```
 
-2. **Stop the dashboard service**:
-   ```bash
-   sudo systemctl stop ahu-dashboard.service
+2. **Add Assets**:
+   - Save logo images to `assets/images/`:
+     - `logo_dark.png` (dark text for light mode)
+     - `logo_light.png` (light text for dark mode)
+   - Download Vendura font from [DaFont](https://www.dafont.com/vendura.font)
+   - Save `Vendura-SemiBold-Demo.otf` to `assets/fonts/`
+
+3. **Enable Custom Font**:
+   ```yaml
+   # In pubspec.yaml, uncomment:
+   fonts:
+     - family: Verdana
+       fonts:
+         - asset: assets/fonts/Vendura-SemiBold-Demo.otf
+           weight: 600
    ```
 
-3. **Restart to desktop** (if needed):
+4. **Run Locally**:
    ```bash
-   sudo systemctl set-default graphical.target
-   sudo reboot
+   flutter run -d linux
    ```
 
-4. **Return to kiosk mode**:
-   ```bash
-   sudo systemctl set-default multi-user.target
-   sudo systemctl start ahu-dashboard.service
-   ```
+## 🎨 UI Design
 
-## Configuration
+### Theme System
+- **Light Mode**: White/blue gradient backgrounds
+- **Dark Mode**: Black/blue gradient backgrounds
+- **Consistent Colors**: Blue primary, no orange except success/error
+- **Professional Cards**: Rounded corners, subtle borders
 
-### MQTT Broker Settings
+### Branding
+- **ALMED Logo**: Theme-aware switching
+- **Custom Font**: Vendura serif for "ALMED" text
+- **Typography**: Clean, modern, touch-friendly
+- **Spacing**: Optimized for touch interaction
 
-Edit `lib/providers/app_provider.dart` to change default MQTT settings:
+### Performance Optimizations
+- **Debounced Updates**: 100ms delay for MQTT data
+- **Selector Widgets**: Targeted rebuilds only
+- **Smooth Animations**: Fade-in, scale effects
+- **Memory Efficient**: Minimal widget rebuilds
 
-```dart
-Future<bool> initializeMqtt({
-  String broker = '127.0.0.1',  // Change to your broker IP
-  int port = 1883,
-  String username = 'almed',
-  String password = 'Almed1234\$',
-}) async {
-  // ...
-}
+## 📡 MQTT Integration
+
+### Topics Structure
+```
+almed/ahu/{hospital}/{unit}/{id}/
+├── telemetry    # Real-time sensor data
+├── state        # AHU operational state
+├── log          # System logs
+├── status       # Connection status
+├── cmd          # Commands (start/stop/setpoints)
+└── provision    # WiFi/broker settings
 ```
 
-### Default AHU Units
+### Data Models
+- **AhuTelemetry**: Temperature, humidity, motor status
+- **AhuState**: Run state, setpoints, component status
+- **AhuLog**: Timestamped log messages
+- **AhuUnit**: Unit identification and naming
 
-Edit `lib/providers/app_provider.dart` in the `loadDefaultAhus()` method:
+### ESP32 Integration
+- **Sensors**: SHT45 temperature/humidity
+- **Motors**: M1 (drain), M2 (filter clean)
+- **Relays**: CP (compressor), Heater
+- **Control**: Start/stop, setpoint adjustment
 
-```dart
-void loadDefaultAhus() {
-  final defaultAhu = AhuUnit(
-    id: 'ahu-01',
-    name: 'ICU-1 AHU',
-    site: 'hospitalA',
-    room: 'icu1',
-    org: 'almed',
-  );
-  addAhuUnit(defaultAhu);
-  
-  // Add more AHUs as needed
-}
+## 🏥 User Roles
+
+### Hospital User
+- **View Only**: Monitor AHU status and readings
+- **Dashboard**: AHU unit cards with real-time data
+- **Logs**: View system logs and alerts
+- **No Control**: Cannot modify settings
+
+### Admin User
+- **Full Control**: Start/stop AHU units
+- **Setpoints**: Adjust temperature/humidity targets
+- **Motor Control**: Manual drain/filter operations
+- **Provisioning**: WiFi and MQTT broker setup
+- **Logs**: Full system access
+
+## 🔧 Technical Architecture
+
+### State Management
+- **Provider Pattern**: Centralized app state
+- **AppProvider**: MQTT data, AHU units, connections
+- **ThemeProvider**: Light/dark mode switching
+- **Debounced Updates**: Performance optimization
+
+### Services
+- **MqttService**: Connection, subscriptions, publishing
+- **Stream Controllers**: Real-time data streams
+- **Error Handling**: Connection recovery, fallbacks
+
+### Widgets
+- **Reusable Components**: Sensor displays, motor status
+- **Optimized Builds**: Selector-based updates
+- **Touch Targets**: Minimum 44px touch areas
+- **Accessibility**: Screen reader support
+
+## 📱 Screen Layouts
+
+### Login Screen
+- **ALMED Branding**: Logo and custom font
+- **Role Selection**: Hospital vs Admin cards
+- **Theme Toggle**: Sun/moon icon
+- **Gradient Background**: Theme-aware colors
+
+### Dashboard
+- **AHU Cards**: Status, sensors, quick actions
+- **Connection Status**: MQTT indicator
+- **Navigation**: Back to login, logout
+- **Empty State**: ALMED logo when no units
+
+### AHU Control
+- **Real-time Data**: Temperature, humidity, motors
+- **Setpoint Controls**: Temperature/humidity targets
+- **Motor Status**: Drain and filter indicators
+- **Logs Section**: Collapsible real-time logs
+- **Start/Stop**: Primary control button
+
+### Admin Settings
+- **AHU Selection**: Dropdown with ALMED branding
+- **WiFi Provisioning**: Primary and secondary networks
+- **MQTT Broker**: Host and port configuration
+- **Status Feedback**: Success/error messages
+
+## 🎯 Performance Features
+
+### Optimizations
+- **Debounced MQTT**: 100ms delay prevents UI lag
+- **Selector Widgets**: Only rebuild changed components
+- **Lazy Loading**: Logs load on demand
+- **Memory Management**: Efficient state updates
+
+### Touch Optimization
+- **Large Touch Targets**: 44px minimum
+- **Smooth Scrolling**: Hardware acceleration
+- **Gesture Support**: Swipe, tap, long press
+- **Visual Feedback**: Button states, animations
+
+## 🔒 Security & Reliability
+
+### MQTT Security
+- **Connection Recovery**: Auto-reconnect on failure
+- **Error Handling**: Graceful degradation
+- **Data Validation**: JSON parsing with fallbacks
+- **Status Monitoring**: Connection health checks
+
+### UI Reliability
+- **Fallback Assets**: Default icons if images missing
+- **Error Boundaries**: Graceful error handling
+- **State Persistence**: Theme preferences saved
+- **Offline Support**: Cached data display
+
+## 📊 Data Flow
+
+```
+ESP32 → MQTT Broker → Flutter App → UI Updates
+  ↓           ↓            ↓           ↓
+Sensors → Telemetry → Provider → Widgets
+  ↓           ↓            ↓           ↓
+Motors → State Data → Selector → Rebuild
+  ↓           ↓            ↓           ↓
+Logs → Log Data → Stream → Display
 ```
 
-## Usage
+## 🎨 Customization
 
-### Hospital User Workflow
+### Branding
+- **Logo Images**: Replace in `assets/images/`
+- **Custom Font**: Add to `assets/fonts/`
+- **Colors**: Modify `lib/theme/app_theme.dart`
+- **Layout**: Adjust screen components
 
-1. **Login**: Select "Hospital User" on the login screen
-2. **Dashboard**: View all AHU units in your hospital
-3. **Select AHU**: Tap on an AHU card to open detailed controls
-4. **Monitor**: View real-time temperature, humidity, and component status
-5. **Control**: Start/stop the system, adjust setpoints
-6. **Logs**: Scroll through system logs at the bottom
+### MQTT Topics
+- **Topic Structure**: Modify in `lib/services/mqtt_service.dart`
+- **Data Parsing**: Update model classes
+- **Commands**: Add new control functions
 
-### Admin Workflow
+### UI Themes
+- **Color Schemes**: Light/dark mode colors
+- **Gradients**: Background styling
+- **Typography**: Font families and sizes
+- **Spacing**: Padding and margins
 
-1. **Login**: Select "Administrator" on the login screen
-2. **Dashboard**: View all AHU units
-3. **Admin Settings**: Tap the settings icon in the app bar
-4. **Select AHU**: Choose which AHU to configure
-5. **WiFi Provisioning**: 
-   - Enter primary WiFi credentials (Pi hotspot)
-   - Enter secondary WiFi credentials (hospital network)
-   - Tap "Provision WiFi"
-6. **Broker Settings**:
-   - Enter MQTT broker host and port
-   - Tap "Provision Broker"
+## 🚀 Deployment
 
-## Testing MQTT Connection
+See `DEPLOYMENT.md` for Raspberry Pi kiosk setup, Flutter-Pi installation, and production deployment instructions.
 
-Test the MQTT broker connection:
+## 📝 Development
 
+### Project Structure
+```
+lib/
+├── main.dart              # App entry point
+├── models/               # Data models
+├── providers/            # State management
+├── screens/              # UI screens
+├── services/             # MQTT service
+├── theme/               # Theme configuration
+└── widgets/             # Reusable components
+```
+
+### Key Files
+- **main.dart**: App initialization, routing
+- **app_provider.dart**: Central state management
+- **mqtt_service.dart**: MQTT communication
+- **app_theme.dart**: Light/dark themes
+- **login_screen.dart**: Role selection
+- **dashboard_screen.dart**: AHU overview
+- **ahu_control_screen.dart**: Unit control
+- **admin_screen.dart**: System settings
+
+## 🔧 Troubleshooting
+
+### Common Issues
+- **Font Not Loading**: Check `pubspec.yaml` fonts section
+- **Images Missing**: Verify `assets/images/` files
+- **MQTT Connection**: Check broker settings
+- **Performance**: Monitor debounce settings
+
+### Debug Mode
 ```bash
-# Subscribe to all AHU topics
-mosquitto_sub -h 127.0.0.1 -u almed -P 'Almed1234$' -t 'almed/#' -v
-
-# Publish a test command
-mosquitto_pub -h 127.0.0.1 -u almed -P 'Almed1234$' \
-  -t 'almed/ahu/hospitalA/icu1/ahu-01/cmd' \
-  -m '{"start":true}'
+flutter run -d linux --verbose
 ```
 
-## Troubleshooting
+### Logs
+- **MQTT Logs**: Connection status in console
+- **App Logs**: Flutter debug output
+- **Error Handling**: Graceful fallbacks
 
-### Dashboard won't connect to MQTT
+## 📄 License
 
-1. Check if Mosquitto is running:
-   ```bash
-   sudo systemctl status mosquitto
-   ```
+This project is for ALMED hospital AHU control systems. All rights reserved.
 
-2. Test MQTT connection:
-   ```bash
-   mosquitto_sub -h 127.0.0.1 -u almed -P 'Almed1234$' -t 'test' -v
-   ```
+---
 
-3. Check firewall settings:
-   ```bash
-   sudo ufw allow 1883/tcp
-   ```
-
-### ESP32 not appearing in dashboard
-
-1. Verify ESP32 is connected to WiFi
-2. Check ESP32 serial output for connection status
-3. Verify MQTT topics match between ESP32 and dashboard
-4. Check ESP32 can reach the MQTT broker
-
-### Touch not working on Pi
-
-1. Ensure touchscreen drivers are installed
-2. Check `/dev/input/` for touch device
-3. Consider using the custom touchscreen driver mentioned in the main project
-
-### Flutter-Pi won't start
-
-1. Check if all dependencies are installed
-2. Verify the Flutter bundle is complete
-3. Check logs:
-   ```bash
-   journalctl -u ahu-dashboard.service -f
-   ```
-
-## Project Structure
-
-```
-ahu_dashboard/
-├── lib/
-│   ├── main.dart                 # App entry point
-│   ├── models/                   # Data models
-│   │   ├── ahu_telemetry.dart   # Telemetry data model
-│   │   ├── ahu_state.dart       # State data model
-│   │   ├── ahu_log.dart         # Log message model
-│   │   ├── ahu_unit.dart        # AHU unit model
-│   │   └── user_role.dart       # User role enum
-│   ├── services/                 # Business logic
-│   │   └── mqtt_service.dart    # MQTT communication
-│   ├── providers/                # State management
-│   │   └── app_provider.dart    # Main app state
-│   ├── screens/                  # UI screens
-│   │   ├── login_screen.dart    # Login/role selection
-│   │   ├── dashboard_screen.dart # AHU list dashboard
-│   │   ├── ahu_control_screen.dart # Detailed AHU control
-│   │   └── admin_screen.dart    # Admin settings
-│   └── widgets/                  # Reusable components
-│       ├── sensor_display.dart  # Sensor readings widget
-│       ├── control_panel.dart   # Control buttons widget
-│       ├── motor_status.dart    # Motor status widget
-│       └── log_viewer.dart      # Log display widget
-├── pubspec.yaml                  # Dependencies
-└── README.md                     # This file
-```
-
-## Technologies Used
-
-- **Flutter** - UI framework
-- **Provider** - State management
-- **mqtt_client** - MQTT communication
-- **json_serializable** - JSON parsing
-- **fl_chart** - Data visualization (future use)
-- **shared_preferences** - Local storage
-
-## License
-
-This project is part of the Almed AHU Control System.
-
-## Support
-
-For issues or questions, please refer to the main project documentation or contact the development team.
-
-## Future Enhancements
-
-- [ ] Fan speed control (3 speeds)
-- [ ] Historical data charts
-- [ ] Alert notifications
-- [ ] Multi-site support
-- [ ] User authentication
-- [ ] Data export functionality
-- [ ] Maintenance scheduling
-- [ ] Energy consumption tracking
+**Built with Flutter-Pi for Raspberry Pi touch interfaces** 🚀

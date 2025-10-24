@@ -55,7 +55,7 @@ class LoginScreen extends StatelessWidget {
                   children: [
                     // Company Logo (theme-aware)
                     Container(
-                      constraints: const BoxConstraints(maxWidth: 350),
+                      constraints: const BoxConstraints(maxWidth: 200),
                       child: Image.asset(
                         isDark 
                             ? 'assets/images/logo_light.png'  // Light text for dark background

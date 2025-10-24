@@ -62,6 +62,24 @@ class _AdminScreenState extends State<AdminScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Row(
                   children: [
+                    // ALMED Branding
+                    Text(
+                      'ALMED',
+                      style: TextStyle(
+                        fontFamily: 'Verdana',
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Container(
+                      width: 1,
+                      height: 24,
+                      color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
+                    ),
+                    const SizedBox(width: 16),
                     // Back button
                     Container(
                       decoration: BoxDecoration(

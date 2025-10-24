@@ -44,6 +44,24 @@ class DashboardScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(20),
                 child: Row(
                   children: [
+                    // ALMED Branding
+                    Text(
+                      'ALMED',
+                      style: TextStyle(
+                        fontFamily: 'Verdana',
+                        fontSize: 24,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    Container(
+                      width: 1,
+                      height: 30,
+                      color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
+                    ),
+                    const SizedBox(width: 20),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
