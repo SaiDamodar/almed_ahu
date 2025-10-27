@@ -4,6 +4,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <esp_task_wdt.h>
 
 // ========================= USER TIMINGS (CHANGE HERE) =========================
 // Motor-1 (drain) run time right after START pressed
@@ -16,6 +17,12 @@ const unsigned long M2_INTERVAL  = 30UL * 1000UL;   // 30 s
 const unsigned long M2_RUN_TIME  = 10UL * 1000UL;   // 10 s
 // Delay before Motor-2 starts AFTER Motor-1 stops (boot & shutdown)
 const unsigned long M2_DELAY_AFTER_M1_STOP = 5UL * 1000UL; // 5 s
+// ============================================================================
+
+// ========================= WATCHDOG CONFIGURATION =========================
+const unsigned long WDT_TIMEOUT = 30;     // Watchdog timeout in seconds (30s)
+const unsigned long LOOP_TIMEOUT_MS = 25000; // Max loop cycle time (25s)
+const unsigned long WIFI_FAIL_RESET_MS = 60000; // Auto-reset if WiFi fails for 60s
 // ============================================================================
 
 // ============ DEFAULT / FIRST-BOOT PRIMARY WIFI (Pi hotspot or your lab) ============
@@ -114,6 +121,58 @@ Preferences prefs;
 String w1_ssid, w1_pass, w2_ssid, w2_pass;
 String mqttHost = "10.42.0.1";  // default is Pi hotspot IP (can be changed to "mqtt-broker.local")
 
+// ---------- Watchdog & State Recovery ----------
+unsigned long lastLoopTime = 0;
+unsigned long wifiFailStartTime = 0;
+bool wifiWasFailing = false;
+int consecutiveWifiFailures = 0;
+
+// ---------- State Persistence (for watchdog recovery) ----------
+void saveSystemState(){
+  prefs.putBool("runState", runState);
+  prefs.putBool("cpOn", cpOn);
+  prefs.putBool("heatOn", heatOn);
+  prefs.putBool("shuttingDown", shuttingDown);
+  prefs.putULong("saveTime", millis());
+}
+
+void restoreSystemState(){
+  // Only restore if saved within last 5 minutes (watchdog reset scenario)
+  unsigned long saveTime = prefs.getULong("saveTime", 0);
+  if (saveTime == 0 || millis() < 300000) { // First 5 min after boot
+    bool wasRunning = prefs.getBool("runState", false);
+    bool wasCpOn = prefs.getBool("cpOn", false);
+    bool wasHeatOn = prefs.getBool("heatOn", false);
+    bool wasShuttingDown = prefs.getBool("shuttingDown", false);
+    
+    if (wasRunning && !wasShuttingDown) {
+      runState = true;
+      cpOn = wasCpOn;
+      heatOn = wasHeatOn;
+      
+      // Restore relay states
+      cpWrite(cpOn);
+      heatWrite(heatOn);
+      
+      Serial.println("⚠️ WATCHDOG RECOVERY: Restored system state");
+      Serial.print("  Run: "); Serial.print(runState ? "ON" : "OFF");
+      Serial.print(" | CP: "); Serial.print(cpOn ? "ON" : "OFF");
+      Serial.print(" | Heater: "); Serial.println(heatOn ? "ON" : "OFF");
+      
+      // Don't restore motor states - let them follow normal startup sequence
+      // Motors will be managed by the run state machine
+    }
+  }
+}
+
+void clearSystemState(){
+  prefs.putBool("runState", false);
+  prefs.putBool("cpOn", false);
+  prefs.putBool("heatOn", false);
+  prefs.putBool("shuttingDown", false);
+  prefs.putULong("saveTime", 0);
+}
+
 // ---------- Logging ----------
 void mqttPublishLog(const char* level, const String& msg){
   if(!mqtt.connected()) return;
@@ -207,6 +266,7 @@ void stopSystem(){
   shuttingDown = true;
   shutdownStarted = false;   // NEW: ensure we start M1 post-drain only once
   shutdownM2Pending = false;
+  clearSystemState(); // Clear saved state on intentional stop
   motorLogMsg("[RUN] STOP requested → Shutdown Drain");
 }
 
@@ -300,13 +360,52 @@ bool tryConnectWiFiOnce(const char* ssid, const char* pass, unsigned long window
   unsigned long t0 = millis();
   while (WiFi.status()!=WL_CONNECTED && millis()-t0<windowMs){
     delay(250);
+    esp_task_wdt_reset(); // Feed watchdog during WiFi connection
   }
+  
+  // Check for WiFi association failure
+  if (WiFi.status() == WL_CONNECT_FAILED || WiFi.status() == WL_DISCONNECTED) {
+    consecutiveWifiFailures++;
+    if (consecutiveWifiFailures >= 3) {
+      Serial.println("⚠️ WiFi association failed multiple times - will reset");
+      motorLogMsg("WARN: WiFi association error detected");
+    }
+  } else if (WiFi.status() == WL_CONNECTED) {
+    consecutiveWifiFailures = 0; // Reset counter on success
+  }
+  
   return WiFi.status()==WL_CONNECTED;
 }
 
 void rotateWifiIfNeeded(){
-  if (WiFi.status()==WL_CONNECTED) return;
+  if (WiFi.status()==WL_CONNECTED) {
+    // Reset failure tracking on successful connection
+    if (wifiWasFailing) {
+      wifiWasFailing = false;
+      wifiFailStartTime = 0;
+      consecutiveWifiFailures = 0;
+    }
+    return;
+  }
+  
+  // Track WiFi failure duration
   unsigned long now = millis();
+  if (!wifiWasFailing) {
+    wifiWasFailing = true;
+    wifiFailStartTime = now;
+  }
+  
+  // Auto-reset if WiFi fails for too long (helps with association errors)
+  if (wifiWasFailing && (now - wifiFailStartTime > WIFI_FAIL_RESET_MS)) {
+    Serial.println("⚠️ WiFi failed for 60s - triggering watchdog reset");
+    motorLogMsg("ERROR: WiFi failure timeout - resetting ESP32");
+    saveSystemState(); // Save state before reset
+    delay(100);
+    esp_task_wdt_init(1, true); // 1 second timeout
+    esp_task_wdt_add(NULL);
+    while(1); // Trigger watchdog reset
+  }
+  
   if (now - lastWifiAttemptAt < WIFI_BACKOFF_MS) return;
   lastWifiAttemptAt = now;
 
@@ -463,6 +562,23 @@ void handleSerial(){
 // ---------- Setup ----------
 void setup(){
   Serial.begin(115200);
+  delay(500); // Allow serial to stabilize
+  
+  // ========== WATCHDOG INITIALIZATION ==========
+  Serial.println("\n========================================");
+  Serial.println("   ALMED AHU Controller v2.0");
+  Serial.println("   Watchdog Protection Enabled");
+  Serial.println("========================================");
+  
+  // Configure watchdog timer (30 seconds timeout)
+  esp_task_wdt_init(WDT_TIMEOUT, true); // Enable panic so ESP32 resets
+  esp_task_wdt_add(NULL); // Add current thread to WDT watch
+  Serial.print("✓ Watchdog enabled (");
+  Serial.print(WDT_TIMEOUT);
+  Serial.println("s timeout)");
+  
+  // Feed watchdog immediately
+  esp_task_wdt_reset();
 
   pinMode(IN1,OUTPUT); pinMode(IN2,OUTPUT); pinMode(ENA,OUTPUT);
   pinMode(IN3,OUTPUT); pinMode(IN4,OUTPUT); pinMode(ENB,OUTPUT);
@@ -477,15 +593,19 @@ void setup(){
   digitalWrite(PIN_HEAT, HIGH);  // OFF at boot
   cpLastOffAt = millis();
   heatLastOffAt = millis();
+  
+  esp_task_wdt_reset(); // Feed watchdog
 
   Wire.begin(21,22);
   if (!sht4.begin()){
-    motorLogMsg("SHT45 not found!");
+    Serial.println("⚠️ SHT45 not found!");
   } else {
     sht4.setPrecision(SHT4X_HIGH_PRECISION);
     sht4.setHeater(SHT4X_NO_HEATER);
-    motorLogMsg("SHT45 ready");
+    Serial.println("✓ SHT45 ready");
   }
+  
+  esp_task_wdt_reset(); // Feed watchdog
 
   prefs.begin("ahu", false);
 
@@ -504,16 +624,50 @@ void setup(){
   // Load broker host/port
   mqttHost = prefs.getString("mqtt_host", String("10.42.0.1")); // you can later provision "mqtt-broker.local"
   MQTT_PORT = prefs.getUShort("mqtt_port", 1883);
-
-  motorLogMsg("Boot complete. Send 'start' in Serial or via MQTT cmd.");
+  
+  esp_task_wdt_reset(); // Feed watchdog
+  
+  // ========== STATE RECOVERY (after watchdog reset) ==========
+  Serial.println("\n--- Checking for previous state ---");
+  restoreSystemState();
+  
+  Serial.println("\n✓ Boot complete. Ready for commands.");
+  Serial.println("  Temp setpoint: " + String(tempSet, 1) + "°C");
+  Serial.println("  Humidity setpoint: " + String(humSet, 1) + "%");
+  if (runState) {
+    Serial.println("  ⚠️ RECOVERED: System was running before reset");
+  }
+  Serial.println("========================================\n");
 
   // First Wi-Fi connect attempt starts immediately
   lastWifiAttemptAt = 0;
+  lastLoopTime = millis();
 }
 
 // ---------- Loop ----------
 void loop(){
   unsigned long now = millis();
+  
+  // ========== WATCHDOG MONITORING ==========
+  // Feed watchdog every loop cycle
+  esp_task_wdt_reset();
+  
+  // Check for loop hang (should never take more than LOOP_TIMEOUT_MS)
+  if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
+    Serial.println("⚠️ CRITICAL: Loop timeout detected!");
+    motorLogMsg("ERROR: Loop hang detected - forcing reset");
+    saveSystemState(); // Save state before reset
+    delay(100);
+    while(1); // Trigger watchdog reset
+  }
+  lastLoopTime = now;
+  
+  // Save system state periodically (every 10 seconds) when running
+  static unsigned long lastStateSave = 0;
+  if (runState && (now - lastStateSave > 10000)) {
+    saveSystemState();
+    lastStateSave = now;
+  }
 
   // Wi-Fi maintenance (STA-only, rotate between primary & secondary)
   if (WiFi.status()!=WL_CONNECTED) rotateWifiIfNeeded();
@@ -563,6 +717,7 @@ void loop(){
       shuttingDown = false;
       shutdownStarted = false;
       shutdownM2Pending = false;
+      clearSystemState(); // Clear state after complete shutdown
       motorLogMsg("System OFF");
       publishState();
     }

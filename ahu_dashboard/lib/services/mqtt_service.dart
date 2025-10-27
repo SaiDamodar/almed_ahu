@@ -228,27 +228,31 @@ class MqttService {
       final payloadString = MqttPublishPayload.bytesToStringAsString(payload.payload.message);
 
       try {
-        // Parse topic to extract AHU ID
+        // Parse topic to extract AHU metadata
+        // Expected format: almed/ahu/site/room/ahu-id/<type>
         final parts = topic.split('/');
         if (parts.length < 5) continue;
 
         final ahuId = parts[4]; // almed/ahu/site/room/ahu-id/...
+        
+        // Store topic metadata for later use
+        final topicData = '$ahuId|${parts.length > 2 ? parts[2] : 'hospitalA'}|${parts.length > 3 ? parts[3] : 'room1'}';
 
         // Determine message type based on topic suffix
         if (topic.endsWith('/telemetry')) {
           final data = jsonDecode(payloadString) as Map<String, dynamic>;
           final telemetry = AhuTelemetry.fromJson(data);
-          _telemetryController.add(MapEntry(ahuId, telemetry));
+          _telemetryController.add(MapEntry(topicData, telemetry));
         } else if (topic.endsWith('/state')) {
           final data = jsonDecode(payloadString) as Map<String, dynamic>;
           final state = AhuState.fromJson(data);
-          _stateController.add(MapEntry(ahuId, state));
+          _stateController.add(MapEntry(topicData, state));
         } else if (topic.endsWith('/log')) {
           final data = jsonDecode(payloadString) as Map<String, dynamic>;
           final log = AhuLog.fromJson(data);
-          _logController.add(MapEntry(ahuId, log));
+          _logController.add(MapEntry(topicData, log));
         } else if (topic.endsWith('/status')) {
-          _statusController.add(MapEntry(ahuId, payloadString));
+          _statusController.add(MapEntry(topicData, payloadString));
         }
       } catch (e) {
         print('MQTT: Error parsing message from $topic: $e');

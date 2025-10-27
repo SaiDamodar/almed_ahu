@@ -65,32 +65,48 @@ class AppProvider extends ChangeNotifier {
 
     // Listen to telemetry updates (debounced for performance)
     _mqttService!.telemetryStream.listen((entry) {
-      _telemetryData[entry.key] = entry.value;
+      final parts = entry.key.split('|');
+      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
+      
+      _ensureAhuRegistered(entry.key);
+      _telemetryData[ahuId] = entry.value;
       _debouncedNotify();
     });
 
     // Listen to state updates
     _mqttService!.stateStream.listen((entry) {
-      _stateData[entry.key] = entry.value;
+      final parts = entry.key.split('|');
+      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
+      
+      _ensureAhuRegistered(entry.key);
+      _stateData[ahuId] = entry.value;
       notifyListeners(); // State changes are important, notify immediately
     });
 
     // Listen to log updates (throttled)
     _mqttService!.logStream.listen((entry) {
-      if (!_logData.containsKey(entry.key)) {
-        _logData[entry.key] = [];
+      final parts = entry.key.split('|');
+      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
+      
+      _ensureAhuRegistered(entry.key);
+      if (!_logData.containsKey(ahuId)) {
+        _logData[ahuId] = [];
       }
-      _logData[entry.key]!.add(entry.value);
+      _logData[ahuId]!.add(entry.value);
       // Keep only last 100 logs
-      if (_logData[entry.key]!.length > 100) {
-        _logData[entry.key]!.removeAt(0);
+      if (_logData[ahuId]!.length > 100) {
+        _logData[ahuId]!.removeAt(0);
       }
       _debouncedNotify();
     });
 
     // Listen to status updates
     _mqttService!.statusStream.listen((entry) {
-      _statusData[entry.key] = entry.value;
+      final parts = entry.key.split('|');
+      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
+      
+      _ensureAhuRegistered(entry.key);
+      _statusData[ahuId] = entry.value;
       notifyListeners(); // Status changes are important
     });
 
@@ -134,6 +150,30 @@ class AppProvider extends ChangeNotifier {
       org: 'almed',
     );
     addAhuUnit(defaultAhu);
+  }
+
+  /// Auto-discover and register AHU when data arrives from unknown ID
+  /// topicData format: "ahuId|site|room"
+  void _ensureAhuRegistered(String topicData, {String? site, String? room}) {
+    // Parse topic data: format is "ahuId|site|room"
+    final parts = topicData.split('|');
+    final ahuId = parts.isNotEmpty ? parts[0] : topicData;
+    final discoveredSite = parts.length > 1 ? parts[1] : (site ?? 'hospitalA');
+    final discoveredRoom = parts.length > 2 ? parts[2] : (room ?? 'room1');
+    
+    if (_ahuUnits.containsKey(ahuId)) return;
+    
+    // Create new AHU unit automatically
+    final newAhu = AhuUnit(
+      id: ahuId,
+      name: 'AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
+      site: discoveredSite,
+      room: discoveredRoom,
+      org: 'almed',
+    );
+    
+    addAhuUnit(newAhu);
+    print('AppProvider: Auto-discovered new AHU - $ahuId at $discoveredSite/$discoveredRoom');
   }
 
   /// Start AHU
