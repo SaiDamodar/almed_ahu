@@ -20,9 +20,9 @@ const unsigned long M2_DELAY_AFTER_M1_STOP = 5UL * 1000UL; // 5 s
 // ============================================================================
 
 // ========================= WATCHDOG CONFIGURATION =========================
-const unsigned long WDT_TIMEOUT = 30;     // Watchdog timeout in seconds (30s)
-const unsigned long LOOP_TIMEOUT_MS = 25000; // Max loop cycle time (25s)
-const unsigned long WIFI_FAIL_RESET_MS = 60000; // Auto-reset if WiFi fails for 60s
+const unsigned long WDT_TIMEOUT = 7;      // Watchdog timeout in seconds (7s - FAST RECOVERY)
+const unsigned long LOOP_TIMEOUT_MS = 5000; // Max loop cycle time (5s)
+const unsigned long WIFI_FAIL_RESET_MS = 15000; // Auto-reset if WiFi fails for 15s
 // ============================================================================
 
 // ============ DEFAULT / FIRST-BOOT PRIMARY WIFI (Pi hotspot or your lab) ============
@@ -349,8 +349,8 @@ void readSensorIfDue(){
 enum WifiNet { NET_PRIMARY = 0, NET_SECONDARY = 1 };
 WifiNet currentTry = NET_PRIMARY;
 unsigned long lastWifiAttemptAt = 0;
-const unsigned long WIFI_TRY_WINDOW_MS = 15000;  // try each SSID up to 15s
-const unsigned long WIFI_BACKOFF_MS    = 5000;   // wait 5s between rotations
+const unsigned long WIFI_TRY_WINDOW_MS = 5000;   // try each SSID up to 5s (faster with 7s watchdog)
+const unsigned long WIFI_BACKOFF_MS    = 2000;   // wait 2s between rotations
 
 bool tryConnectWiFiOnce(const char* ssid, const char* pass, unsigned long windowMs){
   WiFi.mode(WIFI_STA);
@@ -397,7 +397,7 @@ void rotateWifiIfNeeded(){
   
   // Auto-reset if WiFi fails for too long (helps with association errors)
   if (wifiWasFailing && (now - wifiFailStartTime > WIFI_FAIL_RESET_MS)) {
-    Serial.println("⚠️ WiFi failed for 60s - triggering watchdog reset");
+    Serial.println("⚠️ WiFi failed for 15s - triggering watchdog reset");
     motorLogMsg("ERROR: WiFi failure timeout - resetting ESP32");
     saveSystemState(); // Save state before reset
     delay(100);
@@ -654,7 +654,7 @@ void loop(){
   
   // Check for loop hang (should never take more than LOOP_TIMEOUT_MS)
   if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
-    Serial.println("⚠️ CRITICAL: Loop timeout detected!");
+    Serial.println("⚠️ CRITICAL: Loop timeout detected (>5s)!");
     motorLogMsg("ERROR: Loop hang detected - forcing reset");
     saveSystemState(); // Save state before reset
     delay(100);
