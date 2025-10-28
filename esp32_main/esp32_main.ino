@@ -124,6 +124,7 @@ unsigned long wifiFailStartTime = 0;
 bool wifiWasFailing = false;
 int consecutiveWifiFailures = 0;
 bool wifiAssociationRefused = false; // Flag for immediate reset on association error
+bool pendingRecoveryStart = false;    // Flag: waiting for WiFi before starting motors after recovery
 
 // ---------- State Persistence (for watchdog recovery) ----------
 void saveSystemState(){
@@ -144,21 +145,21 @@ void restoreSystemState(){
     bool wasShuttingDown = prefs.getBool("shuttingDown", false);
     
     if (wasRunning && !wasShuttingDown) {
-      runState = true;
+      // CRITICAL: Set flag to delay motor start until WiFi is connected
+      // This prevents motors from running during WiFi connection (which can trigger loop timeout)
+      pendingRecoveryStart = true;
+      runState = false;  // Keep OFF until WiFi is connected
+      
+      // Restore relay states immediately (safe, no motors)
       cpOn = wasCpOn;
       heatOn = wasHeatOn;
-      
-      // Restore relay states
       cpWrite(cpOn);
       heatWrite(heatOn);
       
-      Serial.println("⚠️ WATCHDOG RECOVERY: Restored system state");
-      Serial.print("  Run: "); Serial.print(runState ? "ON" : "OFF");
-      Serial.print(" | CP: "); Serial.print(cpOn ? "ON" : "OFF");
-      Serial.print(" | Heater: "); Serial.println(heatOn ? "ON" : "OFF");
-      
-      // Don't restore motor states - let them follow normal startup sequence
-      // Motors will be managed by the run state machine
+      Serial.println("⚠️ WATCHDOG RECOVERY: State restored, waiting for WiFi before starting motors");
+      Serial.print("  CP: "); Serial.print(cpOn ? "ON" : "OFF");
+      Serial.print(" | Heater: "); Serial.print(heatOn ? "ON" : "OFF");
+      Serial.println("\n  Motors: DELAYED until WiFi connected (safety)");
     }
   }
 }
@@ -754,6 +755,16 @@ void loop(){
 
   // Wi-Fi maintenance (STA-only, rotate between primary & secondary)
   if (WiFi.status()!=WL_CONNECTED) rotateWifiIfNeeded();
+
+  // ========== PENDING RECOVERY START (after WiFi connected) ==========
+  // If we're waiting to start motors after watchdog recovery, do it now that WiFi is stable
+  if (pendingRecoveryStart && WiFi.status() == WL_CONNECTED && mqtt.connected()) {
+    pendingRecoveryStart = false;
+    runState = true;
+    // Start motor sequence (M1 will start in the running sequence below)
+    motorLogMsg("⚠️ RECOVERY START: Motors starting now (WiFi connected, MQTT ready)");
+    Serial.println("  System recovered and running safely");
+  }
 
   // MQTT maintenance
   if (WiFi.status()==WL_CONNECTED){ ensureMqtt(); if(mqtt.connected()) mqtt.loop(); }
