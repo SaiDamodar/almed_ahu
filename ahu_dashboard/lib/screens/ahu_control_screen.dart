@@ -414,17 +414,19 @@ class _ComponentStatus extends StatelessWidget {
             ),
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Text(
                 'Component Status',
                 style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 18),
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
                 alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Consumer<AppProvider>(
                     builder: (context, provider, child) {
@@ -523,6 +525,9 @@ class _StatusIndicator extends StatelessWidget {
         ),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Stack(
             alignment: Alignment.topRight,
@@ -553,6 +558,7 @@ class _StatusIndicator extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             isActive ? 'ACTIVE' : 'IDLE',
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w600,
@@ -564,6 +570,7 @@ class _StatusIndicator extends StatelessWidget {
           if (isClickable)
             Text(
               'Tap to configure',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 9,
                 fontStyle: FontStyle.italic,
