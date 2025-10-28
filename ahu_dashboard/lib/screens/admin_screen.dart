@@ -19,6 +19,13 @@ class _AdminScreenState extends State<AdminScreen> {
   final _secondaryPassController = TextEditingController();
   final _brokerHostController = TextEditingController();
   final _brokerPortController = TextEditingController(text: '1883');
+  
+  // Motor timing controllers
+  final _m1StartController = TextEditingController(text: '10');
+  final _m1PostController = TextEditingController(text: '10');
+  final _m2IntervalController = TextEditingController(text: '30');
+  final _m2RunController = TextEditingController(text: '10');
+  final _m2DelayController = TextEditingController(text: '5');
 
   @override
   void dispose() {
@@ -28,6 +35,11 @@ class _AdminScreenState extends State<AdminScreen> {
     _secondaryPassController.dispose();
     _brokerHostController.dispose();
     _brokerPortController.dispose();
+    _m1StartController.dispose();
+    _m1PostController.dispose();
+    _m2IntervalController.dispose();
+    _m2RunController.dispose();
+    _m2DelayController.dispose();
     super.dispose();
   }
 
@@ -417,6 +429,162 @@ class _AdminScreenState extends State<AdminScreen> {
                               ),
                             ),
                           ],
+                          
+                          // Motor Timing Configuration Section
+                          const SizedBox(height: 20),
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 20),
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).cardColor,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(Icons.timer, color: AppTheme.info),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Motor Timing Configuration',
+                                      style: Theme.of(context).textTheme.titleLarge,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                
+                                // M1 Start Run Time
+                                TextField(
+                                  controller: _m1StartController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Motor-1 Start Run Time (seconds)',
+                                    hintText: '10',
+                                    helperText: 'Duration Motor-1 runs after system starts',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    prefixIcon: const Icon(Icons.play_circle),
+                                    filled: true,
+                                    fillColor: Theme.of(context).colorScheme.surface,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // M1 Post Run Time
+                                TextField(
+                                  controller: _m1PostController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Motor-1 Post Run Time (seconds)',
+                                    hintText: '10',
+                                    helperText: 'Duration Motor-1 runs during shutdown drain',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    prefixIcon: const Icon(Icons.stop_circle),
+                                    filled: true,
+                                    fillColor: Theme.of(context).colorScheme.surface,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // M2 Interval
+                                TextField(
+                                  controller: _m2IntervalController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Motor-2 Interval (seconds)',
+                                    hintText: '30',
+                                    helperText: 'Time between Motor-2 filter clean cycles',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    prefixIcon: const Icon(Icons.refresh),
+                                    filled: true,
+                                    fillColor: Theme.of(context).colorScheme.surface,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // M2 Run Time
+                                TextField(
+                                  controller: _m2RunController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Motor-2 Run Time (seconds)',
+                                    hintText: '10',
+                                    helperText: 'Duration Motor-2 runs each cycle',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    prefixIcon: const Icon(Icons.schedule),
+                                    filled: true,
+                                    fillColor: Theme.of(context).colorScheme.surface,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // M2 Delay
+                                TextField(
+                                  controller: _m2DelayController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Motor-2 Delay After M1 (seconds)',
+                                    hintText: '5',
+                                    helperText: 'Delay before Motor-2 starts after Motor-1 stops',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    prefixIcon: const Icon(Icons.hourglass_empty),
+                                    filled: true,
+                                    fillColor: Theme.of(context).colorScheme.surface,
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                
+                                // Buttons row
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: _resetMotorTimings,
+                                        icon: const Icon(Icons.restore),
+                                        label: const Text('Reset to Defaults'),
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(vertical: 16),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        onPressed: () => _provisionMotorTimings(provider),
+                                        icon: const Icon(Icons.send_rounded),
+                                        label: const Text('Save Timings'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppTheme.info,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 16),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
                         ],
                       ),
                     );
@@ -428,6 +596,54 @@ class _AdminScreenState extends State<AdminScreen> {
         ),
       ),
     );
+  }
+  
+  void _resetMotorTimings() {
+    setState(() {
+      _m1StartController.text = '10';
+      _m1PostController.text = '10';
+      _m2IntervalController.text = '30';
+      _m2RunController.text = '10';
+      _m2DelayController.text = '5';
+    });
+    _showSuccess('Motor timings reset to defaults');
+  }
+  
+  void _provisionMotorTimings(AppProvider provider) {
+    if (selectedAhuId == null) {
+      _showError('Please select an AHU first');
+      return;
+    }
+
+    final m1Start = int.tryParse(_m1StartController.text);
+    final m1Post = int.tryParse(_m1PostController.text);
+    final m2Interval = int.tryParse(_m2IntervalController.text);
+    final m2Run = int.tryParse(_m2RunController.text);
+    final m2Delay = int.tryParse(_m2DelayController.text);
+
+    if (m1Start == null || m1Post == null || m2Interval == null || 
+        m2Run == null || m2Delay == null) {
+      _showError('Please enter valid numbers for all timing fields');
+      return;
+    }
+
+    if (m1Start < 1 || m1Start > 999 || m1Post < 1 || m1Post > 999 ||
+        m2Interval < 1 || m2Interval > 999 || m2Run < 1 || m2Run > 999 ||
+        m2Delay < 1 || m2Delay > 999) {
+      _showError('Timing values must be between 1 and 999 seconds');
+      return;
+    }
+
+    provider.provisionMotorTimings(
+      selectedAhuId!,
+      m1Start: m1Start,
+      m1Post: m1Post,
+      m2Interval: m2Interval,
+      m2Run: m2Run,
+      m2Delay: m2Delay,
+    );
+
+    _showSuccess('Motor timings sent to AHU. Check ESP32 logs for confirmation.');
   }
 
   void _provisionWifi(AppProvider provider) {
