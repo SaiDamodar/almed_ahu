@@ -293,15 +293,36 @@ class _TimingControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor.withValues(alpha: 0.2),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [
+                  color.withValues(alpha: 0.15),
+                  color.withValues(alpha: 0.2),
+                ]
+              : [
+                  color.withValues(alpha: 0.08),
+                  color.withValues(alpha: 0.12),
+                ],
+        ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: color.withValues(alpha: 0.3),
-          width: 2,
+          color: color.withValues(alpha: 0.4),
+          width: 1.5,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.15),
+            blurRadius: 8,
+            spreadRadius: 1,
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
