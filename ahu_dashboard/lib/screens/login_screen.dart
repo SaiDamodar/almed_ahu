@@ -4,7 +4,9 @@ import '../models/user_role.dart';
 import '../providers/app_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/passcode_dialog.dart';
 import 'dashboard_screen.dart';
+import 'admin_screen.dart';
 
 /// Modern, sleek login screen
 class LoginScreen extends StatelessWidget {
@@ -246,6 +248,20 @@ class _ModernRoleCard extends StatelessWidget {
   }
 
   void _selectRole(BuildContext context, UserRole role) async {
+    // Check if Admin role - show passcode dialog first
+    if (role == UserRole.admin) {
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const PasscodeDialog(),
+      );
+      
+      // If passcode incorrect or cancelled, return without navigating
+      if (result != true) {
+        return;
+      }
+    }
+    
     final provider = Provider.of<AppProvider>(context, listen: false);
 
     // Show loading
@@ -291,9 +307,16 @@ class _ModernRoleCard extends StatelessWidget {
       Navigator.of(context).pop();
 
       if (connected) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        );
+        // Navigate to appropriate screen based on role
+        if (role == UserRole.admin) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const AdminScreen()),
+          );
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const DashboardScreen()),
+          );
+        }
       } else {
         showDialog(
           context: context,
