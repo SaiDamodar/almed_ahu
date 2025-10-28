@@ -121,6 +121,80 @@ sudo systemctl restart hostapd
 sudo systemctl status hostapd
 ```
 
+**If restart fails, troubleshoot:**
+
+```bash
+# 1. Check the error details
+sudo journalctl -xeu hostapd.service --no-pager | tail -30
+
+# 2. Verify config file path in /etc/default/hostapd
+cat /etc/default/hostapd
+# Should have: DAEMON_CONF="/etc/hostapd/hostapd.conf"
+
+# 3. Check if interface exists
+ip link show wlan0
+# If not found, check available interfaces:
+ip link show
+
+# 4. Test config file syntax
+sudo hostapd -dd /etc/hostapd/hostapd.conf
+# Press Ctrl+C after seeing errors
+
+# 5. Check if NetworkManager is conflicting
+sudo systemctl stop NetworkManager
+sudo systemctl restart hostapd
+# If it works, disable NetworkManager managing WiFi:
+sudo systemctl disable NetworkManager
+
+# 6. Check if interface is already in use
+sudo iwconfig wlan0
+# If it shows "Access Point: Not-Associated", it's available
+
+# 7. For Broadcom built-in WiFi, try different driver:
+# In hostapd.conf, try changing:
+# driver=nl80211  →  driver=broadcom  or  driver=none
+
+# 8. Make sure interface is up
+sudo ip link set wlan0 up
+```
+
+**Common fixes:**
+
+**Issue: "Could not configure driver mode" or "nl80211: Driver does not support"**
+```bash
+# For Raspberry Pi built-in WiFi, try:
+sudo nano /etc/hostapd/hostapd.conf
+# Change: driver=nl80211
+# To: driver=broadcom
+# Or: driver=none  (if using AP mode via wpa_supplicant)
+```
+
+**Issue: "Interface not found"**
+```bash
+# Check actual interface name
+ls /sys/class/net/
+# Update hostapd.conf with correct interface (might be wlan1, wlx..., etc.)
+```
+
+**Issue: NetworkManager conflict**
+```bash
+# Stop NetworkManager
+sudo systemctl stop NetworkManager
+sudo systemctl disable NetworkManager
+
+# Configure wlan0 manually
+sudo nano /etc/network/interfaces
+# Add:
+# allow-hotplug wlan0
+# iface wlan0 inet static
+#     address 10.42.0.1
+#     netmask 255.255.255.0
+
+# Restart networking
+sudo systemctl restart networking
+sudo systemctl restart hostapd
+```
+
 ---
 
 ### Solution 2: Use Dedicated USB WiFi Adapter (Most Reliable)
