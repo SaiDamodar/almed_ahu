@@ -296,7 +296,7 @@ class _TimingControl extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: Theme.of(context).cardColor.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: color.withValues(alpha: 0.3),
@@ -329,102 +329,34 @@ class _TimingControl extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Decrement button
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onDecrement,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          color.withValues(alpha: 0.4),
-                          color.withValues(alpha: 0.5),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: color.withValues(alpha: 0.6),
-                        width: 1.5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: color.withValues(alpha: 0.2),
-                          blurRadius: 8,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      Icons.remove_rounded,
-                      color: color,
-                      size: 32,
-                    ),
-                  ),
-                ),
+              // Decrement button - exactly like temperature control
+              IconButton(
+                onPressed: value > 1 ? onDecrement : null,
+                icon: const Icon(Icons.remove_circle_rounded),
+                color: color,
+                iconSize: 40,
               ),
+              const SizedBox(width: 12),
               
               // Value display
-              Column(
-                children: [
-                  Text(
-                    value.toString(),
-                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                    ),
-                  ),
-                  Text(
-                    unit,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ],
-              ),
-              
-              // Increment button
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onIncrement,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          color.withValues(alpha: 0.4),
-                          color.withValues(alpha: 0.5),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: color.withValues(alpha: 0.6),
-                        width: 1.5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: color.withValues(alpha: 0.2),
-                          blurRadius: 8,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      Icons.add_rounded,
-                      color: color,
-                      size: 32,
-                    ),
-                  ),
+              Text(
+                '$value$unit',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: color,
                 ),
+              ),
+              const SizedBox(width: 12),
+              
+              // Increment button - exactly like temperature control
+              IconButton(
+                onPressed: value < 999 ? onIncrement : null,
+                icon: const Icon(Icons.add_circle_rounded),
+                color: color,
+                iconSize: 40,
               ),
             ],
           ),
