@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
+import '../models/user_role.dart';
 
 /// Modern AHU control screen
 class AhuControlScreen extends StatefulWidget {
@@ -183,13 +184,24 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                     _ComponentStatus(ahuId: widget.ahuId),
                     const SizedBox(height: 20),
 
-                    // Logs (collapsible)
-                    _LogsSection(
-                      ahuId: widget.ahuId,
-                      isExpanded: _showLogs,
-                      onToggle: () => setState(() => _showLogs = !_showLogs),
+                    // Logs (collapsible) - ADMIN ONLY
+                    Consumer<AppProvider>(
+                      builder: (context, provider, child) {
+                        if (provider.currentRole == UserRole.admin) {
+                          return Column(
+                            children: [
+                              _LogsSection(
+                                ahuId: widget.ahuId,
+                                isExpanded: _showLogs,
+                                onToggle: () => setState(() => _showLogs = !_showLogs),
+                              ),
+                              const SizedBox(height: 20),
+                            ],
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
                     ),
-                    const SizedBox(height: 20),
                   ],
                 ),
               ),
