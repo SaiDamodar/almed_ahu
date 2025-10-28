@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/user_role.dart';
+import '../widgets/motor_timing_dialog.dart';
 
 /// Modern AHU control screen
 class AhuControlScreen extends StatefulWidget {
@@ -425,17 +426,51 @@ class _ComponentStatus extends StatelessWidget {
                 runSpacing: 12,
                 alignment: WrapAlignment.center,
                 children: [
-                  _StatusIndicator(
-                    icon: Icons.water_rounded,
-                    label: 'Motor 1 (Drain)',
-                    isActive: data.state?.m1 ?? false,
-                    color: const Color(0xFF3B82F6),
+                  Consumer<AppProvider>(
+                    builder: (context, provider, child) {
+                      final isAdmin = provider.currentRole == UserRole.admin;
+                      return GestureDetector(
+                        onTap: isAdmin
+                            ? () => showDialog(
+                                  context: context,
+                                  builder: (context) => MotorTimingDialog(
+                                    ahuId: ahuId,
+                                    motorLabel: 'Motor 1 & 2 Timing',
+                                  ),
+                                )
+                            : null,
+                        child: _StatusIndicator(
+                          icon: Icons.water_rounded,
+                          label: 'Motor 1 (Drain)',
+                          isActive: data.state?.m1 ?? false,
+                          color: const Color(0xFF3B82F6),
+                          isClickable: isAdmin,
+                        ),
+                      );
+                    },
                   ),
-                  _StatusIndicator(
-                    icon: Icons.cleaning_services_rounded,
-                    label: 'Motor 2 (Filter)',
-                    isActive: data.state?.m2 ?? false,
-                    color: const Color(0xFF60A5FA),
+                  Consumer<AppProvider>(
+                    builder: (context, provider, child) {
+                      final isAdmin = provider.currentRole == UserRole.admin;
+                      return GestureDetector(
+                        onTap: isAdmin
+                            ? () => showDialog(
+                                  context: context,
+                                  builder: (context) => MotorTimingDialog(
+                                    ahuId: ahuId,
+                                    motorLabel: 'Motor 1 & 2 Timing',
+                                  ),
+                                )
+                            : null,
+                        child: _StatusIndicator(
+                          icon: Icons.cleaning_services_rounded,
+                          label: 'Motor 2 (Filter)',
+                          isActive: data.state?.m2 ?? false,
+                          color: const Color(0xFF60A5FA),
+                          isClickable: isAdmin,
+                        ),
+                      );
+                    },
                   ),
                   _StatusIndicator(
                     icon: Icons.ac_unit_rounded,
@@ -464,12 +499,14 @@ class _StatusIndicator extends StatelessWidget {
   final String label;
   final bool isActive;
   final Color color;
+  final bool isClickable;
 
   const _StatusIndicator({
     required this.icon,
     required this.label,
     required this.isActive,
     required this.color,
+    this.isClickable = false,
   });
 
   @override
@@ -487,10 +524,21 @@ class _StatusIndicator extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Icon(
-            icon,
-            color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
-            size: 28,
+          Stack(
+            alignment: Alignment.topRight,
+            children: [
+              Icon(
+                icon,
+                color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
+                size: 28,
+              ),
+              if (isClickable)
+                Icon(
+                  Icons.settings_rounded,
+                  size: 14,
+                  color: AppTheme.info.withValues(alpha: 0.7),
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
@@ -511,6 +559,17 @@ class _StatusIndicator extends StatelessWidget {
               color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
             ),
           ),
+          if (isClickable)
+            const SizedBox(height: 2),
+          if (isClickable)
+            Text(
+              'Tap to configure',
+              style: TextStyle(
+                fontSize: 9,
+                fontStyle: FontStyle.italic,
+                color: AppTheme.info.withValues(alpha: 0.7),
+              ),
+            ),
         ],
       ),
     );
