@@ -41,6 +41,14 @@ class AhuState {
       _$AhuStateFromJson(json);
 
   Map<String, dynamic> toJson() => _$AhuStateToJson(this);
+  
+  /// Get M2 wait time (interval - run time) for UI display
+  /// ESP32 sends actual interval, but UI shows wait time between cycles
+  int get m2WaitTime {
+    if (m2Interval == null || m2Run == null) return 30;
+    // Convert actual interval back to wait time
+    return (m2Interval! - m2Run!).clamp(1, 999);
+  }
 }
 
 

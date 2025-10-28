@@ -36,7 +36,8 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
         setState(() {
           _m1Start = state.m1Start ?? 10;
           _m1Post = state.m1Post ?? 10;
-          _m2Interval = state.m2Interval ?? 30;
+          // Use wait time (actual interval - run time) for display
+          _m2Interval = state.m2WaitTime;
           _m2Run = state.m2Run ?? 10;
           _m2Delay = state.m2Delay ?? 5;
         });
@@ -166,16 +167,16 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
                     ),
                     const SizedBox(height: 16),
                     
-                    // M2 Interval
+                    // M2 Interval (Wait Time)
                     _TimingControl(
                       icon: Icons.refresh_rounded,
-                      label: 'Motor-2 Interval',
+                      label: 'Motor-2 Wait Time',
                       value: _m2Interval,
                       unit: 's',
                       color: AppTheme.humidity,
                       onIncrement: () => setState(() => _m2Interval = (_m2Interval + 1).clamp(1, 999)),
                       onDecrement: () => setState(() => _m2Interval = (_m2Interval - 1).clamp(1, 999)),
-                      helpText: 'Time between Motor-2 clean cycles',
+                      helpText: 'Wait time between Motor-2 cycles',
                     ),
                     const SizedBox(height: 16),
                     
@@ -261,59 +262,33 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
   void _saveTimings(BuildContext context) {
     final provider = Provider.of<AppProvider>(context, listen: false);
     
-    // Check if interval will be auto-adjusted
-    bool willAdjust = _m2Interval < _m2Run;
-    int adjustedInterval = willAdjust ? (_m2Interval + _m2Run) : _m2Interval;
-    
+    // Note: _m2Interval is the WAIT TIME between cycles
+    // AppProvider will add run time to calculate actual interval for ESP32
     provider.provisionMotorTimings(
       widget.ahuId,
       m1Start: _m1Start,
       m1Post: _m1Post,
-      m2Interval: _m2Interval,
+      m2Interval: _m2Interval,  // Wait time (will be converted to actual interval)
       m2Run: _m2Run,
       m2Delay: _m2Delay,
     );
     
     Navigator.of(context).pop();
     
-    // Show feedback with auto-adjustment info if needed
+    // Show simple success message
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+        content: Row(
           children: [
-            Row(
-              children: [
-                Icon(
-                  willAdjust ? Icons.info_outline : Icons.check_circle,
-                  color: Colors.white,
-                ),
-                const SizedBox(width: 12),
-                Text(willAdjust ? 'Timings Saved with Adjustment' : 'Motor Timings Saved!'),
-              ],
-            ),
-            if (willAdjust) ...[
-              const SizedBox(height: 8),
-              Text(
-                'M2 Interval: ${_m2Interval}s → ${adjustedInterval}s',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Auto-adjusted: Interval must be ≥ Run Time',
-                style: TextStyle(fontSize: 12),
-              ),
-            ] else ...[
-              const SizedBox(height: 4),
-              Text('M1: ${_m1Start}s, M2: ${_m2Run}s, Interval: ${_m2Interval}s'),
-            ],
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 12),
+            Text('Motor timings saved! Wait: ${_m2Interval}s, Run: ${_m2Run}s'),
           ],
         ),
-        backgroundColor: willAdjust ? AppTheme.info : AppTheme.success,
+        backgroundColor: AppTheme.success,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: Duration(seconds: willAdjust ? 5 : 3),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
