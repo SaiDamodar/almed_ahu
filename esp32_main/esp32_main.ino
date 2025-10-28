@@ -126,6 +126,7 @@ unsigned long lastLoopTime = 0;
 unsigned long wifiFailStartTime = 0;
 bool wifiWasFailing = false;
 int consecutiveWifiFailures = 0;
+bool wifiAssociationRefused = false; // Flag for immediate reset on association error
 
 // ---------- State Persistence (for watchdog recovery) ----------
 void saveSystemState(){
@@ -352,6 +353,21 @@ unsigned long lastWifiAttemptAt = 0;
 const unsigned long WIFI_TRY_WINDOW_MS = 5000;   // try each SSID up to 5s (faster with 7s watchdog)
 const unsigned long WIFI_BACKOFF_MS    = 2000;   // wait 2s between rotations
 
+// WiFi event handler to catch association errors immediately
+void WiFiEvent(WiFiEvent_t event) {
+  switch(event) {
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      // Check if it's an association refusal (happens when "Association refused" error occurs)
+      if (WiFi.status() == WL_CONNECT_FAILED) {
+        wifiAssociationRefused = true;
+        Serial.println("⚠️ WiFi Association REFUSED - will reset immediately");
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 bool tryConnectWiFiOnce(const char* ssid, const char* pass, unsigned long windowMs){
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true, true);
@@ -384,8 +400,18 @@ void rotateWifiIfNeeded(){
       wifiWasFailing = false;
       wifiFailStartTime = 0;
       consecutiveWifiFailures = 0;
+      wifiAssociationRefused = false;
     }
     return;
+  }
+  
+  // IMMEDIATE RESET on WiFi association error (your specific issue)
+  if (wifiAssociationRefused) {
+    Serial.println("⚠️ WiFi Association Error - IMMEDIATE RESET");
+    motorLogMsg("ERROR: WiFi association refused - resetting ESP32");
+    saveSystemState(); // Save state before reset
+    delay(100);
+    ESP.restart(); // Immediate restart
   }
   
   // Track WiFi failure duration
@@ -401,7 +427,12 @@ void rotateWifiIfNeeded(){
     motorLogMsg("ERROR: WiFi failure timeout - resetting ESP32");
     saveSystemState(); // Save state before reset
     delay(100);
-    esp_task_wdt_init(1, true); // 1 second timeout
+    esp_task_wdt_config_t quick_reset = {
+      .timeout_ms = 1000,      // 1 second
+      .idle_core_mask = 0,
+      .trigger_panic = true
+    };
+    esp_task_wdt_init(&quick_reset);
     esp_task_wdt_add(NULL);
     while(1); // Trigger watchdog reset
   }
@@ -570,8 +601,13 @@ void setup(){
   Serial.println("   Watchdog Protection Enabled");
   Serial.println("========================================");
   
-  // Configure watchdog timer (30 seconds timeout)
-  esp_task_wdt_init(WDT_TIMEOUT, true); // Enable panic so ESP32 resets
+  // Configure watchdog timer (7 seconds timeout)
+  esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = WDT_TIMEOUT * 1000,  // Convert seconds to milliseconds
+    .idle_core_mask = 0,               // Watch all cores
+    .trigger_panic = true              // Enable panic so ESP32 resets
+  };
+  esp_task_wdt_init(&wdt_config);
   esp_task_wdt_add(NULL); // Add current thread to WDT watch
   Serial.print("✓ Watchdog enabled (");
   Serial.print(WDT_TIMEOUT);
@@ -626,6 +662,10 @@ void setup(){
   MQTT_PORT = prefs.getUShort("mqtt_port", 1883);
   
   esp_task_wdt_reset(); // Feed watchdog
+  
+  // Register WiFi event handler for immediate association error detection
+  WiFi.onEvent(WiFiEvent);
+  Serial.println("✓ WiFi event handler registered");
   
   // ========== STATE RECOVERY (after watchdog reset) ==========
   Serial.println("\n--- Checking for previous state ---");
