@@ -260,6 +260,11 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
   
   void _saveTimings(BuildContext context) {
     final provider = Provider.of<AppProvider>(context, listen: false);
+    
+    // Check if interval will be auto-adjusted
+    bool willAdjust = _m2Interval < _m2Run;
+    int adjustedInterval = willAdjust ? (_m2Interval + _m2Run) : _m2Interval;
+    
     provider.provisionMotorTimings(
       widget.ahuId,
       m1Start: _m1Start,
@@ -271,18 +276,44 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
     
     Navigator.of(context).pop();
     
+    // Show feedback with auto-adjustment info if needed
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Row(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Text('Motor timings saved! M1: ${_m1Start}s, M2: ${_m2Run}s'),
+            Row(
+              children: [
+                Icon(
+                  willAdjust ? Icons.info_outline : Icons.check_circle,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 12),
+                Text(willAdjust ? 'Timings Saved with Adjustment' : 'Motor Timings Saved!'),
+              ],
+            ),
+            if (willAdjust) ...[
+              const SizedBox(height: 8),
+              Text(
+                'M2 Interval: ${_m2Interval}s → ${adjustedInterval}s',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Auto-adjusted: Interval must be ≥ Run Time',
+                style: TextStyle(fontSize: 12),
+              ),
+            ] else ...[
+              const SizedBox(height: 4),
+              Text('M1: ${_m1Start}s, M2: ${_m2Run}s, Interval: ${_m2Interval}s'),
+            ],
           ],
         ),
-        backgroundColor: AppTheme.success,
+        backgroundColor: willAdjust ? AppTheme.info : AppTheme.success,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: Duration(seconds: willAdjust ? 5 : 3),
       ),
     );
   }

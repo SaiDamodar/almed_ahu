@@ -257,11 +257,23 @@ class AppProvider extends ChangeNotifier {
     if (_currentRole != UserRole.admin) return;
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
+      // Auto-adjust M2 Interval if it's less than M2 Run Time
+      // The interval must be >= run time, otherwise motor can't stop and restart
+      int adjustedM2Interval = m2Interval ?? 30;
+      int m2RunTime = m2Run ?? 10;
+      
+      if (adjustedM2Interval < m2RunTime) {
+        // If interval < run time, add them together
+        // e.g., interval=7s, run=10s → new interval = 7+10 = 17s
+        adjustedM2Interval = adjustedM2Interval + m2RunTime;
+        print('AppProvider: Auto-adjusted M2 Interval from ${m2Interval}s to ${adjustedM2Interval}s (must be >= run time of ${m2RunTime}s)');
+      }
+      
       _mqttService?.provisionMotorTimings(
         ahu,
         m1Start: m1Start,
         m1Post: m1Post,
-        m2Interval: m2Interval,
+        m2Interval: adjustedM2Interval,
         m2Run: m2Run,
         m2Delay: m2Delay,
       );
