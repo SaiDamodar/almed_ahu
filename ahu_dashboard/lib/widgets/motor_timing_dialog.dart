@@ -343,22 +343,26 @@ class _TimingControl extends StatelessWidget {
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          color.withValues(alpha: 0.8),
-                          color,
+                          color.withValues(alpha: 0.4),
+                          color.withValues(alpha: 0.5),
                         ],
                       ),
                       borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: color.withValues(alpha: 0.6),
+                        width: 1.5,
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: color.withValues(alpha: 0.3),
+                          color: color.withValues(alpha: 0.2),
                           blurRadius: 8,
                           spreadRadius: 1,
                         ),
                       ],
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.remove_rounded,
-                      color: Colors.white,
+                      color: color,
                       size: 32,
                     ),
                   ),
@@ -397,22 +401,26 @@ class _TimingControl extends StatelessWidget {
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          color.withValues(alpha: 0.8),
-                          color,
+                          color.withValues(alpha: 0.4),
+                          color.withValues(alpha: 0.5),
                         ],
                       ),
                       borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: color.withValues(alpha: 0.6),
+                        width: 1.5,
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: color.withValues(alpha: 0.3),
+                          color: color.withValues(alpha: 0.2),
                           blurRadius: 8,
                           spreadRadius: 1,
                         ),
                       ],
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.add_rounded,
-                      color: Colors.white,
+                      color: color,
                       size: 32,
                     ),
                   ),
