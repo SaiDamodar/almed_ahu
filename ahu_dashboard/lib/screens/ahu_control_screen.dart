@@ -565,8 +565,8 @@ class _StatusIndicator extends StatelessWidget {
               color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
             ),
           ),
-          if (isClickable)
-            const SizedBox(height: 2),
+          // Spacer to match clickable cards height (2px spacing + ~13px text line height = 15px)
+          SizedBox(height: isClickable ? 2 : 15),
           if (isClickable)
             Text(
               'Tap to configure',
