@@ -246,6 +246,28 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  /// Provision motor timings (admin only)
+  void provisionMotorTimings(String ahuId, {
+    int? m1Start,
+    int? m1Post,
+    int? m2Interval,
+    int? m2Run,
+    int? m2Delay,
+  }) {
+    if (_currentRole != UserRole.admin) return;
+    final ahu = _ahuUnits[ahuId];
+    if (ahu != null) {
+      _mqttService?.provisionMotorTimings(
+        ahu,
+        m1Start: m1Start,
+        m1Post: m1Post,
+        m2Interval: m2Interval,
+        m2Run: m2Run,
+        m2Delay: m2Delay,
+      );
+    }
+  }
+
   @override
   void dispose() {
     _debounceTimer?.cancel();

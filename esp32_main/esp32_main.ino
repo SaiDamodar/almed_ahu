@@ -6,17 +6,13 @@
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 
-// ========================= USER TIMINGS (CHANGE HERE) =========================
-// Motor-1 (drain) run time right after START pressed
-const unsigned long M1_START_RUN = 10UL * 1000UL;   // 10 s
-// Motor-1 (drain) run time during SHUTDOWN (post-drain)
-const unsigned long M1_POST_RUN  = 10UL * 1000UL;   // 10 s
-// Motor-2 (filter clean) run every M2_INTERVAL while running
-const unsigned long M2_INTERVAL  = 30UL * 1000UL;   // 30 s
-// How long Motor-2 runs each time
-const unsigned long M2_RUN_TIME  = 10UL * 1000UL;   // 10 s
-// Delay before Motor-2 starts AFTER Motor-1 stops (boot & shutdown)
-const unsigned long M2_DELAY_AFTER_M1_STOP = 5UL * 1000UL; // 5 s
+// ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
+// These are DEFAULT values - can be changed via MQTT provisioning from Admin UI
+unsigned long M1_START_RUN = 10UL * 1000UL;   // Motor-1 boot run time (default 10s)
+unsigned long M1_POST_RUN  = 10UL * 1000UL;   // Motor-1 shutdown run time (default 10s)
+unsigned long M2_INTERVAL  = 30UL * 1000UL;   // Motor-2 interval (default 30s)
+unsigned long M2_RUN_TIME  = 10UL * 1000UL;   // Motor-2 run time (default 10s)
+unsigned long M2_DELAY_AFTER_M1_STOP = 5UL * 1000UL; // Delay after M1 stops (default 5s)
 // ============================================================================
 
 // ========================= WATCHDOG CONFIGURATION =========================
@@ -111,6 +107,7 @@ String tStatus()          { return baseTopic()+"/status"; }
 // Provisioning topics (from kiosk Admin on Pi hotspot)
 String tProvWifi()        { return baseTopic()+"/provision/wifi"; }
 String tProvBroker()      { return baseTopic()+"/provision/broker"; }
+String tProvMotorTimings(){ return baseTopic()+"/provision/motor_timings"; }
 String tProvAck()         { return baseTopic()+"/provision/ack"; }
 
 unsigned long lastMqttAttempt = 0;
@@ -192,6 +189,14 @@ void m1_start(){ digitalWrite(IN1,HIGH); digitalWrite(IN2,LOW); digitalWrite(ENA
 void m1_stop (){ digitalWrite(ENA,LOW);  digitalWrite(IN1,LOW);  digitalWrite(IN2,LOW);  m1Active=false; motorLogMsg("Motor-1 OFF"); }
 void m2_start(){ digitalWrite(IN3,HIGH); digitalWrite(IN4,LOW); digitalWrite(ENB,HIGH); m2Active=true;  motorLogMsg("Motor-2 ON (Filter Clean)"); }
 void m2_stop (){ digitalWrite(ENB,LOW);  digitalWrite(IN3,LOW);  digitalWrite(IN4,LOW);  m2Active=false; motorLogMsg("Motor-2 OFF"); }
+
+// Emergency stop ALL motors (called on WiFi/system failure)
+void emergencyStopMotors(){
+  if (m1Active) { m1_stop(); Serial.println("⚠️ EMERGENCY: Motor-1 stopped (WiFi/system failure)"); }
+  if (m2Active) { m2_stop(); Serial.println("⚠️ EMERGENCY: Motor-2 stopped (WiFi/system failure)"); }
+  if (cpOn) { cpWrite(false); cpOn=false; Serial.println("⚠️ EMERGENCY: CP stopped"); }
+  if (heatOn) { heatWrite(false); heatOn=false; Serial.println("⚠️ EMERGENCY: Heater stopped"); }
+}
 
 // ---------- Relay writers (open-drain: LOW=ON, HIGH=OFF) ----------
 inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? LOW : HIGH); }
@@ -409,6 +414,7 @@ void rotateWifiIfNeeded(){
   if (wifiAssociationRefused) {
     Serial.println("⚠️ WiFi Association Error - IMMEDIATE RESET");
     motorLogMsg("ERROR: WiFi association refused - resetting ESP32");
+    emergencyStopMotors(); // STOP ALL MOTORS before reset
     saveSystemState(); // Save state before reset
     delay(100);
     ESP.restart(); // Immediate restart
@@ -425,6 +431,7 @@ void rotateWifiIfNeeded(){
   if (wifiWasFailing && (now - wifiFailStartTime > WIFI_FAIL_RESET_MS)) {
     Serial.println("⚠️ WiFi failed for 15s - triggering watchdog reset");
     motorLogMsg("ERROR: WiFi failure timeout - resetting ESP32");
+    emergencyStopMotors(); // STOP ALL MOTORS before reset
     saveSystemState(); // Save state before reset
     delay(100);
     esp_task_wdt_config_t quick_reset = {
@@ -498,11 +505,24 @@ void handleProvisioning(const char* topic, const byte* payload, unsigned int len
     char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
     mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
   }
+  else if (t == tProvMotorTimings()){
+    // Motor timing provisioning (Admin only)
+    if (doc.containsKey("m1_start")) { M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL; prefs.putULong("m1_start", M1_START_RUN); }
+    if (doc.containsKey("m1_post")) { M1_POST_RUN = doc["m1_post"].as<unsigned long>() * 1000UL; prefs.putULong("m1_post", M1_POST_RUN); }
+    if (doc.containsKey("m2_interval")) { M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL; prefs.putULong("m2_interval", M2_INTERVAL); }
+    if (doc.containsKey("m2_run")) { M2_RUN_TIME = doc["m2_run"].as<unsigned long>() * 1000UL; prefs.putULong("m2_run", M2_RUN_TIME); }
+    if (doc.containsKey("m2_delay")) { M2_DELAY_AFTER_M1_STOP = doc["m2_delay"].as<unsigned long>() * 1000UL; prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); }
+    
+    motorLogMsg("Provision: Motor timings saved - M1:" + String(M1_START_RUN/1000) + "s M2:" + String(M2_RUN_TIME/1000) + "s Interval:" + String(M2_INTERVAL/1000) + "s");
+    StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="motor timings saved";
+    char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
+    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+  }
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int len){
   String tStr(topic);
-  if (tStr == tProvWifi() || tStr == tProvBroker()){
+  if (tStr == tProvWifi() || tStr == tProvBroker() || tStr == tProvMotorTimings()){
     handleProvisioning(topic, payload, len);
     return;
   }
@@ -554,6 +574,7 @@ void ensureMqtt(){
     mqtt.subscribe(tCmd().c_str(), 1);
     mqtt.subscribe(tProvWifi().c_str(), 1);
     mqtt.subscribe(tProvBroker().c_str(), 1);
+    mqtt.subscribe(tProvMotorTimings().c_str(), 1);
     motorLogMsg("MQTT connected to " + mqttHost + ":" + String(MQTT_PORT));
     publishState();
   }else{
@@ -661,6 +682,20 @@ void setup(){
   mqttHost = prefs.getString("mqtt_host", String("10.42.0.1")); // you can later provision "mqtt-broker.local"
   MQTT_PORT = prefs.getUShort("mqtt_port", 1883);
   
+  // Load motor timings (if previously provisioned)
+  M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
+  M1_POST_RUN = prefs.getULong("m1_post", M1_POST_RUN);
+  M2_INTERVAL = prefs.getULong("m2_interval", M2_INTERVAL);
+  M2_RUN_TIME = prefs.getULong("m2_run", M2_RUN_TIME);
+  M2_DELAY_AFTER_M1_STOP = prefs.getULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
+  
+  Serial.println("✓ Motor timings loaded:");
+  Serial.print("  M1 Start: "); Serial.print(M1_START_RUN/1000); Serial.println("s");
+  Serial.print("  M1 Post: "); Serial.print(M1_POST_RUN/1000); Serial.println("s");
+  Serial.print("  M2 Interval: "); Serial.print(M2_INTERVAL/1000); Serial.println("s");
+  Serial.print("  M2 Run: "); Serial.print(M2_RUN_TIME/1000); Serial.println("s");
+  Serial.print("  M2 Delay: "); Serial.print(M2_DELAY_AFTER_M1_STOP/1000); Serial.println("s");
+  
   esp_task_wdt_reset(); // Feed watchdog
   
   // Register WiFi event handler for immediate association error detection
@@ -696,6 +731,7 @@ void loop(){
   if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
     Serial.println("⚠️ CRITICAL: Loop timeout detected (>5s)!");
     motorLogMsg("ERROR: Loop hang detected - forcing reset");
+    emergencyStopMotors(); // STOP ALL MOTORS before reset
     saveSystemState(); // Save state before reset
     delay(100);
     while(1); // Trigger watchdog reset

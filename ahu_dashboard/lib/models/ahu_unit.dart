@@ -38,6 +38,9 @@ class AhuUnit {
   /// Get broker provisioning topic
   String get provBrokerTopic => '$baseTopic/provision/broker';
 
+  /// Get motor timings provisioning topic
+  String get provMotorTimingsTopic => '$baseTopic/provision/motor_timings';
+
   /// Get provisioning acknowledgment topic
   String get provAckTopic => '$baseTopic/provision/ack';
 

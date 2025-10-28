@@ -200,6 +200,34 @@ class MqttService {
     );
   }
 
+  /// Provision motor timings (Admin only)
+  void provisionMotorTimings(AhuUnit ahu, {
+    int? m1Start,
+    int? m1Post,
+    int? m2Interval,
+    int? m2Run,
+    int? m2Delay,
+  }) {
+    if (_client == null || !_isConnected) return;
+
+    final Map<String, dynamic> payload = {};
+    if (m1Start != null) payload['m1_start'] = m1Start;
+    if (m1Post != null) payload['m1_post'] = m1Post;
+    if (m2Interval != null) payload['m2_interval'] = m2Interval;
+    if (m2Run != null) payload['m2_run'] = m2Run;
+    if (m2Delay != null) payload['m2_delay'] = m2Delay;
+
+    final json = jsonEncode(payload);
+    final builder = MqttClientPayloadBuilder();
+    builder.addString(json);
+
+    _client!.publishMessage(
+      ahu.provMotorTimingsTopic,
+      MqttQos.atLeastOnce,
+      builder.payload!,
+    );
+  }
+
   // Callbacks
   void _onConnected() {
     print('MQTT: Connected');
