@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
+import '../services/motor_timing_storage.dart';
 
 /// Motor timing adjustment dialog - similar to temperature/humidity controls
 class MotorTimingDialog extends StatefulWidget {
@@ -28,21 +29,46 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
   @override
   void initState() {
     super.initState();
-    // Load current values from ESP32 state
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _loadTimings();
+  }
+  
+  /// Load motor timings - priority: Local Storage > ESP32 State > Defaults
+  Future<void> _loadTimings() async {
+    // 1. Try to load from local storage (Raspberry Pi memory)
+    final savedTimings = await MotorTimingStorage.loadTimings(widget.ahuId);
+    
+    if (savedTimings != null) {
+      // Use locally saved timings (what user last configured)
+      setState(() {
+        _m1Start = savedTimings['m1_start']!;
+        _m1Post = savedTimings['m1_post']!;
+        _m2Interval = savedTimings['m2_wait']!;
+        _m2Run = savedTimings['m2_run']!;
+        _m2Delay = savedTimings['m2_delay']!;
+      });
+      print('MotorTimingDialog: Loaded from local storage');
+      return;
+    }
+    
+    // 2. Fall back to ESP32 state if no local storage
+    if (mounted) {
       final provider = Provider.of<AppProvider>(context, listen: false);
       final state = provider.getState(widget.ahuId);
-      if (state != null) {
+      if (state != null && state.m1Start != null) {
         setState(() {
           _m1Start = state.m1Start ?? 10;
           _m1Post = state.m1Post ?? 10;
-          // Use wait time (actual interval - run time) for display
           _m2Interval = state.m2WaitTime;
           _m2Run = state.m2Run ?? 10;
           _m2Delay = state.m2Delay ?? 5;
         });
+        print('MotorTimingDialog: Loaded from ESP32 state');
+        return;
       }
-    });
+    }
+    
+    // 3. Use defaults if nothing available
+    print('MotorTimingDialog: Using default values');
   }
 
   @override
@@ -259,9 +285,20 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
     );
   }
   
-  void _saveTimings(BuildContext context) {
+  Future<void> _saveTimings(BuildContext context) async {
     final provider = Provider.of<AppProvider>(context, listen: false);
     
+    // 1. Save to local storage (Raspberry Pi memory) FIRST
+    await MotorTimingStorage.saveTimings(
+      widget.ahuId,
+      m1Start: _m1Start,
+      m1Post: _m1Post,
+      m2WaitTime: _m2Interval,  // Save wait time
+      m2Run: _m2Run,
+      m2Delay: _m2Delay,
+    );
+    
+    // 2. Send to ESP32 via MQTT
     // Note: _m2Interval is the WAIT TIME between cycles
     // AppProvider will add run time to calculate actual interval for ESP32
     provider.provisionMotorTimings(
@@ -273,24 +310,26 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
       m2Delay: _m2Delay,
     );
     
-    Navigator.of(context).pop();
-    
-    // Show simple success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Text('Motor timings saved! Wait: ${_m2Interval}s, Run: ${_m2Run}s'),
-          ],
+    if (context.mounted) {
+      Navigator.of(context).pop();
+      
+      // Show simple success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 12),
+              Text('Motor timings saved! Wait: ${_m2Interval}s, Run: ${_m2Run}s'),
+            ],
+          ),
+          backgroundColor: AppTheme.success,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
         ),
-        backgroundColor: AppTheme.success,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 3),
-      ),
-    );
+      );
+    }
   }
 }
 
