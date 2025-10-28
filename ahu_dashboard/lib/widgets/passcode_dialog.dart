@@ -87,6 +87,10 @@ class _PasscodeDialogState extends State<PasscodeDialog> with SingleTickerProvid
       backgroundColor: Colors.transparent,
       child: Container(
         width: 400,
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.9,
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
+        ),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -111,115 +115,117 @@ class _PasscodeDialogState extends State<PasscodeDialog> with SingleTickerProvid
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Lock Icon
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.lightPrimary,
-                      AppTheme.lightPrimary.withValues(alpha: 0.7),
+          padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Lock Icon
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.lightPrimary,
+                        AppTheme.lightPrimary.withValues(alpha: 0.7),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.lightPrimary.withValues(alpha: 0.3),
+                        blurRadius: 15,
+                        spreadRadius: 2,
+                      ),
                     ],
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.lightPrimary.withValues(alpha: 0.3),
-                      blurRadius: 15,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.lock_rounded,
-                  size: 40,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 24),
-              
-              // Title
-              Text(
-                'Admin Access',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Enter 4-digit passcode',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.6),
-                ),
-              ),
-              const SizedBox(height: 32),
-              
-              // Passcode dots display with shake animation
-              AnimatedBuilder(
-                animation: _shakeAnimation,
-                builder: (context, child) {
-                  return Transform.translate(
-                    offset: Offset(_shakeAnimation.value * (_shakeController.status == AnimationStatus.forward ? 1 : -1), 0),
-                    child: child,
-                  );
-                },
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(4, (index) {
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      width: 20,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _isError
-                            ? AppTheme.error
-                            : index < _enteredPasscode.length
-                                ? AppTheme.lightPrimary
-                                : (isDark ? Colors.white : Colors.black).withValues(alpha: 0.2),
-                        border: Border.all(
-                          color: _isError
-                              ? AppTheme.error
-                              : AppTheme.lightPrimary.withValues(alpha: 0.5),
-                          width: 2,
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-              ),
-              const SizedBox(height: 32),
-              
-              // Numeric keypad
-              _NumericKeypad(
-                onNumberPressed: _onNumberPressed,
-                onBackspace: _onBackspace,
-                isDark: isDark,
-              ),
-              
-              const SizedBox(height: 16),
-              
-              // Cancel button
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                ),
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(
-                    color: isDark ? Colors.white70 : Colors.black54,
-                    fontSize: 16,
+                  child: const Icon(
+                    Icons.lock_rounded,
+                    size: 32,
+                    color: Colors.white,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 20),
+                
+                // Title
+                Text(
+                  'Admin Access',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Enter 4-digit passcode',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.6),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                
+                // Passcode dots display with shake animation
+                AnimatedBuilder(
+                  animation: _shakeAnimation,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: Offset(_shakeAnimation.value * (_shakeController.status == AnimationStatus.forward ? 1 : -1), 0),
+                      child: child,
+                    );
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(4, (index) {
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isError
+                              ? AppTheme.error
+                              : index < _enteredPasscode.length
+                                  ? AppTheme.lightPrimary
+                                  : (isDark ? Colors.white : Colors.black).withValues(alpha: 0.2),
+                          border: Border.all(
+                            color: _isError
+                                ? AppTheme.error
+                                : AppTheme.lightPrimary.withValues(alpha: 0.5),
+                            width: 2,
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                
+                // Numeric keypad
+                _NumericKeypad(
+                  onNumberPressed: _onNumberPressed,
+                  onBackspace: _onBackspace,
+                  isDark: isDark,
+                ),
+                
+                const SizedBox(height: 12),
+                
+                // Cancel button
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.black54,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -248,39 +254,39 @@ class _NumericKeypad extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _KeypadButton('1', onNumberPressed, isDark),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _KeypadButton('2', onNumberPressed, isDark),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _KeypadButton('3', onNumberPressed, isDark),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         
         // Row 2: 4 5 6
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _KeypadButton('4', onNumberPressed, isDark),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _KeypadButton('5', onNumberPressed, isDark),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _KeypadButton('6', onNumberPressed, isDark),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         
         // Row 3: 7 8 9
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _KeypadButton('7', onNumberPressed, isDark),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _KeypadButton('8', onNumberPressed, isDark),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _KeypadButton('9', onNumberPressed, isDark),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         
         // Row 4: - 0 backspace
         Row(
@@ -288,9 +294,9 @@ class _NumericKeypad extends StatelessWidget {
           children: [
             // Empty space
             const SizedBox(width: 80, height: 80),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _KeypadButton('0', onNumberPressed, isDark),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             // Backspace button
             Material(
               color: Colors.transparent,
