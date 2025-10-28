@@ -56,8 +56,14 @@ sudo nano /etc/hostapd/hostapd.conf
 sudo nano /etc/default/hostapd
 # Add line: DAEMON_CONF="/etc/hostapd/hostapd.conf"
 
+# If service is masked (disabled), unmask it first
+sudo systemctl unmask hostapd
+
 # Enable service
 sudo systemctl enable hostapd
+
+# Start service
+sudo systemctl start hostapd
 ```
 
 **Apply these settings:**
@@ -105,7 +111,14 @@ disassoc_low_ack=0
 
 **Restart hostapd:**
 ```bash
+# If you get "masked" error, unmask first
+sudo systemctl unmask hostapd
+
+# Then restart
 sudo systemctl restart hostapd
+
+# Check status
+sudo systemctl status hostapd
 ```
 
 ---
