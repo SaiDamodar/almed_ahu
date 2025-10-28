@@ -79,12 +79,6 @@ ap_isolate=0
 macaddr_acl=0
 dtim_period=2
 
-# Rate limiting
-tx_queue_data0_prio=3
-tx_queue_data1_prio=2
-tx_queue_data2_prio=1
-tx_queue_data3_prio=0
-
 # No disconnect on association errors
 disassoc_low_ack=0
 EOF
@@ -101,19 +95,15 @@ echo -e "${YELLOW}[5/7]${NC} Detecting WiFi interface and driver..."
 INTERFACE=$(ip link show | grep -oP '^[0-9]+: wlan\d+' | head -1 | awk '{print $2}' || echo "wlan0")
 echo "  Detected interface: $INTERFACE"
 
-# Check if it's Broadcom (Raspberry Pi built-in WiFi)
+# Always use nl80211 driver (works for Broadcom and most other chipsets)
+# Broadcom on Raspberry Pi uses nl80211, not a "broadcom" driver
+DRIVER="nl80211"
 if dmesg | grep -qi "brcmfmac\|brcm80211"; then
-    echo "  Detected: Broadcom WiFi"
-    DRIVER="broadcom"
+    echo "  Detected: Broadcom WiFi (using nl80211 driver)"
 else
-    # Try to detect driver
-    if iw list > /dev/null 2>&1; then
-        DRIVER="nl80211"
-    else
-        DRIVER="broadcom"
-    fi
+    echo "  Using nl80211 driver"
 fi
-echo "  Using driver: $DRIVER"
+echo "  Driver: $DRIVER"
 
 # Update config with detected interface and driver
 sed -i "s/^interface=.*/interface=$INTERFACE/" "$CONFIG_FILE"
@@ -148,19 +138,16 @@ fi
 # Step 8: Test config syntax
 echo ""
 echo -e "${YELLOW}[Testing]${NC} Testing config file syntax..."
+# Remove invalid config options if they exist
+sed -i '/^tx_queue_data.*prio=/d' "$CONFIG_FILE"
+
 if timeout 3 hostapd -d "$CONFIG_FILE" > /tmp/hostapd-test.log 2>&1; then
     echo -e "${GREEN}✓ Config syntax OK${NC}"
 else
-    ERRORS=$(grep -i "error\|fail\|not" /tmp/hostapd-test.log | head -5 || true)
+    ERRORS=$(grep -i "error\|fail\|invalid" /tmp/hostapd-test.log | head -10 || true)
     if [ -n "$ERRORS" ]; then
-        echo -e "${RED}⚠ Config has issues:${NC}"
-        echo "$ERRORS"
-        
-        # Try switching driver
-        if grep -q "nl80211" "$CONFIG_FILE"; then
-            echo -e "${YELLOW}Trying broadcom driver...${NC}"
-            sed -i 's/driver=nl80211/driver=broadcom/' "$CONFIG_FILE"
-        fi
+        echo -e "${YELLOW}⚠ Config test output (errors may be normal):${NC}"
+        echo "$ERRORS" | head -5
     else
         echo -e "${GREEN}✓ Config syntax OK (timeout is normal)${NC}"
     fi
