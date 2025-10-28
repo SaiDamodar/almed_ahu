@@ -299,10 +299,17 @@ void publishTelemetry(){
 
 void publishState(){
   if(!mqtt.connected()) return;
-  StaticJsonDocument<320> doc;
+  StaticJsonDocument<512> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["heater"]=heatOn;
   doc["tempSet"]=tempSet; doc["humSet"]=humSet;
+  
+  // Publish current motor timings (in seconds)
+  doc["m1_start"] = M1_START_RUN / 1000UL;
+  doc["m1_post"] = M1_POST_RUN / 1000UL;
+  doc["m2_interval"] = M2_INTERVAL / 1000UL;
+  doc["m2_run"] = M2_RUN_TIME / 1000UL;
+  doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
   doc["ip"]=WiFi.localIP().toString();
   char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));

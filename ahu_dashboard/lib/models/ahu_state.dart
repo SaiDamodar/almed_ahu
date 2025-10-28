@@ -13,6 +13,13 @@ class AhuState {
   final double tempSet;      // Temperature setpoint
   final double humSet;       // Humidity setpoint
   final String ip;           // ESP32 IP address
+  
+  // Motor timings (in seconds)
+  @JsonKey(name: 'm1_start') final int? m1Start;
+  @JsonKey(name: 'm1_post') final int? m1Post;
+  @JsonKey(name: 'm2_interval') final int? m2Interval;
+  @JsonKey(name: 'm2_run') final int? m2Run;
+  @JsonKey(name: 'm2_delay') final int? m2Delay;
 
   AhuState({
     required this.run,
@@ -23,6 +30,11 @@ class AhuState {
     required this.tempSet,
     required this.humSet,
     required this.ip,
+    this.m1Start,
+    this.m1Post,
+    this.m2Interval,
+    this.m2Run,
+    this.m2Delay,
   });
 
   factory AhuState.fromJson(Map<String, dynamic> json) =>

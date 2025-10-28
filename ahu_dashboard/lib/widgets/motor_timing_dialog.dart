@@ -26,6 +26,25 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
   int _m2Delay = 5;
 
   @override
+  void initState() {
+    super.initState();
+    // Load current values from ESP32 state
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = Provider.of<AppProvider>(context, listen: false);
+      final state = provider.getState(widget.ahuId);
+      if (state != null) {
+        setState(() {
+          _m1Start = state.m1Start ?? 10;
+          _m1Post = state.m1Post ?? 10;
+          _m2Interval = state.m2Interval ?? 30;
+          _m2Run = state.m2Run ?? 10;
+          _m2Delay = state.m2Delay ?? 5;
+        });
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
