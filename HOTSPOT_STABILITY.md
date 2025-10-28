@@ -7,10 +7,57 @@ The Broadcom WiFi hotspot "snorlax" keeps disconnecting when multiple ESP32 devi
 
 ### Solution 1: Optimize hostapd Configuration (Recommended First Try)
 
-Edit `/etc/hostapd/hostapd.conf`:
+**First, check if hostapd is installed and find config location:**
 
 ```bash
+# Check if hostapd is installed
+which hostapd
+
+# Find config file location
+sudo find /etc -name "*hostapd*.conf" 2>/dev/null
+sudo find / -name "hostapd.conf" 2>/dev/null | grep -v proc
+
+# Check if using systemd-networkd instead
+cat /etc/systemd/network/*.conf | grep -i hotspot
+
+# Check running hotspot process
+ps aux | grep -i hostapd
+ps aux | grep -i create_ap
+```
+
+**If hostapd is NOT installed:**
+
+```bash
+# Install hostapd
+sudo apt update
+sudo apt install hostapd dnsmasq
+
+# Create config directory
+sudo mkdir -p /etc/hostapd
+
+# Create config file
 sudo nano /etc/hostapd/hostapd.conf
+```
+
+**If file doesn't exist, create it:**
+```bash
+sudo nano /etc/hostapd/hostapd.conf
+```
+
+**Note:** If your hotspot was set up via `raspi-config` or another method, the config might be in:
+- `/boot/config.txt` (for built-in WiFi)
+- `/etc/network/interfaces`
+- `/etc/wpa_supplicant/wpa_supplicant.conf`
+- Or use `create_ap` script
+
+**After creating/editing config, enable hostapd:**
+```bash
+# Tell systemd where config is
+sudo nano /etc/default/hostapd
+# Add line: DAEMON_CONF="/etc/hostapd/hostapd.conf"
+
+# Enable service
+sudo systemctl enable hostapd
 ```
 
 **Apply these settings:**
