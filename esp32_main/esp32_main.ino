@@ -22,7 +22,7 @@ const unsigned long WIFI_FAIL_RESET_MS = 15000; // Auto-reset if WiFi fails for 
 // ============================================================================
 
 // ============ DEFAULT / FIRST-BOOT PRIMARY WIFI (Pi hotspot or your lab) ============
-#define DEFAULT_W1_SSID "PiSpot
+#define DEFAULT_W1_SSID "PiSpot"
 #define DEFAULT_W1_PASS "12345678"
 // Secondary Wi-Fi (hospital) will be provisioned over MQTT; empty by default
 // ============================================================================
