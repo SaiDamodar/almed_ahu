@@ -22,7 +22,7 @@ const unsigned long WIFI_FAIL_RESET_MS = 15000; // Auto-reset if WiFi fails for 
 // ============================================================================
 
 // ============ DEFAULT / FIRST-BOOT PRIMARY WIFI (Pi hotspot or your lab) ============
-#define DEFAULT_W1_SSID "snorlax"
+#define DEFAULT_W1_SSID "PiSpot
 #define DEFAULT_W1_PASS "12345678"
 // Secondary Wi-Fi (hospital) will be provisioned over MQTT; empty by default
 // ============================================================================
@@ -36,6 +36,10 @@ const unsigned long SENSOR_PERIOD = 2000; // 2 s
 // Glitch filter thresholds
 const float TEMP_JUMP_MAX = 12.0; // ignore temp jumps > 12 °C
 const float HUM_JUMP_MAX  = 18.0; // ignore RH jumps   > 18 %
+
+// Sensor failure detection thresholds (accept any upward jump from these values)
+const float TEMP_FAIL_THRESHOLD = 5.0;  // < 5°C indicates sensor failure
+const float HUM_FAIL_THRESHOLD = 10.0;  // < 10% indicates sensor failure
 
 // ---------- L298N / Motors ----------
 #define IN1 25
@@ -333,18 +337,47 @@ void readSensorIfDue(){
 
     bool acceptT = true, acceptH = true;
 
+    // ========== SMART GLITCH FILTER FOR TEMPERATURE ==========
     if (!isnan(filtTempC)){
-      if (fabs(newT - filtTempC) > TEMP_JUMP_MAX) acceptT = false;
+      // If new reading is abnormally low (sensor failure), reject it
+      if (newT < TEMP_FAIL_THRESHOLD) {
+        acceptT = false;
+        motorLogMsg("Temp failure rejected: " + String(newT,1) + "C (sensor fail, kept " + String(filtTempC,1) + "C)");
+      }
+      // If current value is abnormally low (sensor was failed), accept ANY higher reading (recovery)
+      else if (filtTempC < TEMP_FAIL_THRESHOLD && newT > filtTempC) {
+        acceptT = true; // Always accept upward jump from failure
+        motorLogMsg("Temp recovery: " + String(newT,1) + "C (recovered from failure " + String(filtTempC,1) + "C)");
+      }
+      // Normal jump detection (reject large jumps in either direction)
+      else if (fabs(newT - filtTempC) > TEMP_JUMP_MAX) {
+        acceptT = false;
+      }
     }
+    
+    // ========== SMART GLITCH FILTER FOR HUMIDITY ==========
     if (!isnan(filtHum)){
-      if (fabs(newH - filtHum) > HUM_JUMP_MAX) acceptH = false;
+      // If new reading is abnormally low (sensor failure), reject it
+      if (newH < HUM_FAIL_THRESHOLD) {
+        acceptH = false;
+        motorLogMsg("Humidity failure rejected: " + String(newH,1) + "% (sensor fail, kept " + String(filtHum,1) + "%)");
+      }
+      // If current value is abnormally low (sensor was failed), accept ANY higher reading (recovery)
+      else if (filtHum < HUM_FAIL_THRESHOLD && newH > filtHum) {
+        acceptH = true; // Always accept upward jump from failure
+        motorLogMsg("Humidity recovery: " + String(newH,1) + "% (recovered from failure " + String(filtHum,1) + "%)");
+      }
+      // Normal jump detection (reject large jumps in either direction)
+      else if (fabs(newH - filtHum) > HUM_JUMP_MAX) {
+        acceptH = false;
+      }
     }
 
     if (acceptT) { filtTempC = newT; }
-    else { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C (kept " + String(filtTempC,1) + "C)"); }
+    else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C (kept " + String(filtTempC,1) + "C)"); }
 
     if (acceptH) { filtHum = newH; }
-    else { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "% (kept " + String(filtHum,1) + "%)"); }
+    else if (!isnan(filtHum)) { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "% (kept " + String(filtHum,1) + "%)"); }
 
     String line = "Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + " °C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%";
     Serial.println(line);
