@@ -1,5 +1,4 @@
 #include <WiFi.h>
-#include <WiFiClientSecure.h>  // ADD: For HiveMQ Cloud TLS connection
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 #include <PubSubClient.h>
@@ -90,22 +89,13 @@ String renderNewestFirst(String buf[], int head, int cnt){
   String out; for (int i=0;i<cnt;i++){ int idx=head-i; if(idx<0) idx+=LOG_MAX; out += buf[idx] + "<br>"; } return out;
 }
 
-// ========== MQTT LOCAL (Priority 1: Raspberry Pi) ==========
-WiFiClient espNetLocal;
-PubSubClient mqttLocal(espNetLocal);
+// ---------- MQTT ----------
+WiFiClient espNet;
+PubSubClient mqtt(espNet);
 
-const char* MQTT_USER_LOCAL = "almed";
-const char* MQTT_PASS_LOCAL = "Almed1234$";
-const uint16_t MQTT_PORT_LOCAL = 1883;
-
-// ========== MQTT CLOUD (Priority 2: HiveMQ Cloud) ==========
-WiFiClientSecure espNetCloud;
-PubSubClient mqttCloud(espNetCloud);
-
-const char* MQTT_USER_CLOUD = "almed";
-const char* MQTT_PASS_CLOUD = "AlMed123456";  // CHANGE THIS to your HiveMQ password
-const uint16_t MQTT_PORT_CLOUD = 8883;
-String mqttHostCloud = "ec1158fe4e0941df85f0a7bf133bf117.s1.eu.hivemq.cloud";  // CHANGE THIS to your HiveMQ cluster URL
+const char* MQTT_USER = "almed";
+const char* MQTT_PASS = "Almed1234$";
+uint16_t MQTT_PORT = 1883;
 
 const char* ORG  = "almed";
 const char* SITE = "hospitalA";
@@ -130,7 +120,7 @@ unsigned long lastMqttAttempt = 0;
 Preferences prefs;
 // Wi-Fi creds + broker host (in prefs)
 String w1_ssid, w1_pass, w2_ssid, w2_pass;
-String mqttHostLocal = "10.42.0.1";  // default is Pi hotspot IP (can be changed to "mqtt-broker.local")
+String mqttHost = "10.42.0.1";  // default is Pi hotspot IP (can be changed to "mqtt-broker.local")
 
 // ---------- Watchdog & State Recovery ----------
 unsigned long lastLoopTime = 0;
@@ -188,21 +178,14 @@ void clearSystemState(){
 
 // ---------- Logging ----------
 void mqttPublishLog(const char* level, const String& msg){
+  if(!mqtt.connected()) return;
   StaticJsonDocument<240> doc;
   doc["ts"]  = millis();
   doc["lvl"] = level;
   doc["msg"] = msg;
   char buf[280];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
-  // Publish to LOCAL broker
-  if(mqttLocal.connected()) {
-    mqttLocal.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
-  }
-  // Publish to CLOUD broker
-  if(mqttCloud.connected()) {
-    mqttCloud.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
-  }
+  mqtt.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
 }
 void motorLogMsg(const String& s){ Serial.println(s); pushMotorHTML(s); mqttPublishLog("INFO", s); }
 
@@ -302,6 +285,7 @@ void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
 
 // ---------- Telemetry / State ----------
 void publishTelemetry(){
+  if(!mqtt.connected()) return;
   StaticJsonDocument<384> doc;
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
@@ -315,18 +299,11 @@ void publishTelemetry(){
   doc["ts"]  = millis();
   char buf[448];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
-  // Publish to LOCAL broker
-  if(mqttLocal.connected()) {
-    mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
-  }
-  // Publish to CLOUD broker
-  if(mqttCloud.connected()) {
-    mqttCloud.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
-  }
+  mqtt.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
 }
 
 void publishState(){
+  if(!mqtt.connected()) return;
   StaticJsonDocument<512> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["heater"]=heatOn;
@@ -341,15 +318,7 @@ void publishState(){
   doc["ip"]=WiFi.localIP().toString();
   char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
-  // Publish to LOCAL broker (retained)
-  if(mqttLocal.connected()) {
-    mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
-  }
-  // Publish to CLOUD broker (retained)
-  if(mqttCloud.connected()) {
-    mqttCloud.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
-  }
+  mqtt.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true); // retained
 }
 
 // ---------- Sensor read (with glitch filter) ----------
@@ -542,14 +511,8 @@ void rotateWifiIfNeeded(){
 
 // ================================ MQTT ======================================
 void publishStatusOnline(){
-  // Publish to LOCAL broker
-  if(mqttLocal.connected()) {
-    mqttLocal.publish(tStatus().c_str(), "online", true);
-  }
-  // Publish to CLOUD broker
-  if(mqttCloud.connected()) {
-    mqttCloud.publish(tStatus().c_str(), "online", true);
-  }
+  if(!mqtt.connected()) return;
+  mqtt.publish(tStatus().c_str(), "online", true); // retained
 }
 
 void handleProvisioning(const char* topic, const byte* payload, unsigned int len){
@@ -573,15 +536,15 @@ void handleProvisioning(const char* topic, const byte* payload, unsigned int len
     motorLogMsg("Provision: Wi-Fi credentials saved");
     StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="wifi saved";
     char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    if(mqttLocal.connected()) mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
   }
   else if (t == tProvBroker()){
-    if (doc.containsKey("host")) { mqttHostLocal = String((const char*)doc["host"]); prefs.putString("mqtt_host", mqttHostLocal); }
-    if (doc.containsKey("port")) { uint16_t port = (uint16_t)doc["port"].as<uint16_t>(); prefs.putUShort("mqtt_port", port); }
-    motorLogMsg("Provision: Broker saved: " + mqttHostLocal);
+    if (doc.containsKey("host")) { mqttHost = String((const char*)doc["host"]); prefs.putString("mqtt_host", mqttHost); }
+    if (doc.containsKey("port")) { MQTT_PORT = (uint16_t)doc["port"].as<uint16_t>(); prefs.putUShort("mqtt_port", MQTT_PORT); }
+    motorLogMsg("Provision: Broker saved: " + mqttHost + ":" + String(MQTT_PORT));
     StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="broker saved";
     char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    if(mqttLocal.connected()) mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
   }
   else if (t == tProvMotorTimings()){
     // Motor timing provisioning (Admin only)
@@ -594,7 +557,7 @@ void handleProvisioning(const char* topic, const byte* payload, unsigned int len
     motorLogMsg("Provision: Motor timings saved - M1:" + String(M1_START_RUN/1000) + "s M2:" + String(M2_RUN_TIME/1000) + "s Interval:" + String(M2_INTERVAL/1000) + "s");
     StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="motor timings saved";
     char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    if(mqttLocal.connected()) mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
   }
 }
 
@@ -632,63 +595,31 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
   }
 }
 
-// ========== LOCAL MQTT CONNECTION (Priority 1) ==========
-void ensureMqttLocal(){
-  if(mqttLocal.connected()) return;
+void ensureMqtt(){
+  if(mqtt.connected()) return;
   if (WiFi.status()!=WL_CONNECTED) return;
 
   unsigned long now = millis();
-  static unsigned long lastLocalAttempt = 0;
-  if(now - lastLocalAttempt < 2000) return;
-  lastLocalAttempt = now;
+  if(now - lastMqttAttempt < 2000) return;
+  lastMqttAttempt = now;
 
-  mqttLocal.setServer(mqttHostLocal.c_str(), MQTT_PORT_LOCAL);
-  mqttLocal.setCallback(onMqttMessage);
+  mqtt.setServer(mqttHost.c_str(), MQTT_PORT);
+  mqtt.setCallback(onMqttMessage);
 
-  String clientId = String(AHU)+"_local_"+String((uint32_t)ESP.getEfuseMac(), HEX);
-  bool ok = mqttLocal.connect(clientId.c_str(),
-                         MQTT_USER_LOCAL, MQTT_PASS_LOCAL,
+  String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
+  bool ok = mqtt.connect(clientId.c_str(),
+                         MQTT_USER, MQTT_PASS,
                          tStatus().c_str(), 1, true, "offline");
   if(ok){
-    mqttLocal.subscribe(tCmd().c_str(), 1);
-    mqttLocal.subscribe(tProvWifi().c_str(), 1);
-    mqttLocal.subscribe(tProvBroker().c_str(), 1);
-    mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
-    motorLogMsg("✓ LOCAL MQTT connected (" + mqttHostLocal + ":" + String(MQTT_PORT_LOCAL) + ")");
     publishStatusOnline();
+    mqtt.subscribe(tCmd().c_str(), 1);
+    mqtt.subscribe(tProvWifi().c_str(), 1);
+    mqtt.subscribe(tProvBroker().c_str(), 1);
+    mqtt.subscribe(tProvMotorTimings().c_str(), 1);
+    motorLogMsg("MQTT connected to " + mqttHost + ":" + String(MQTT_PORT));
     publishState();
   }else{
-    Serial.print("✗ LOCAL MQTT connect failed, rc=");
-    Serial.println(mqttLocal.state());
-  }
-}
-
-// ========== CLOUD MQTT CONNECTION (Priority 2) ==========
-void ensureMqttCloud(){
-  if(mqttCloud.connected()) return;
-  if (WiFi.status()!=WL_CONNECTED) return;
-
-  // Only try cloud connection every 30 seconds (lower priority)
-  unsigned long now = millis();
-  static unsigned long lastCloudAttempt = 0;
-  if(now - lastCloudAttempt < 30000) return;
-  lastCloudAttempt = now;
-
-  mqttCloud.setServer(mqttHostCloud.c_str(), MQTT_PORT_CLOUD);
-  mqttCloud.setCallback(onMqttMessage);
-
-  String clientId = String(AHU)+"_cloud_"+String((uint32_t)ESP.getEfuseMac(), HEX);
-  bool ok = mqttCloud.connect(clientId.c_str(),
-                         MQTT_USER_CLOUD, MQTT_PASS_CLOUD,
-                         tStatus().c_str(), 1, true, "offline");
-  if(ok){
-    mqttCloud.subscribe(tCmd().c_str(), 1);
-    motorLogMsg("✓ CLOUD MQTT connected (" + mqttHostCloud + ":" + String(MQTT_PORT_CLOUD) + ")");
-    publishStatusOnline();
-    publishState();
-  }else{
-    Serial.print("✗ CLOUD MQTT connect failed, rc=");
-    Serial.println(mqttCloud.state());
+    motorLogMsg("MQTT connect failed");
   }
 }
 
@@ -788,8 +719,9 @@ void setup(){
   w2_ssid = prefs.getString("w2_ssid", String(""));   // empty until provisioned
   w2_pass = prefs.getString("w2_pass", String(""));
 
-  // Load broker host for LOCAL broker
-  mqttHostLocal = prefs.getString("mqtt_host", String("10.42.0.1")); // you can later provision "mqtt-broker.local"
+  // Load broker host/port
+  mqttHost = prefs.getString("mqtt_host", String("10.42.0.1")); // you can later provision "mqtt-broker.local"
+  MQTT_PORT = prefs.getUShort("mqtt_port", 1883);
   
   // Load motor timings (if previously provisioned)
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
@@ -810,12 +742,6 @@ void setup(){
   // Register WiFi event handler for immediate association error detection
   WiFi.onEvent(WiFiEvent);
   Serial.println("✓ WiFi event handler registered");
-  
-  // ========== MQTT BROKER CONFIGURATION ==========
-  // Configure TLS for CLOUD broker (HiveMQ)
-  espNetCloud.setInsecure();  // Skip certificate validation (for simplicity)
-  Serial.println("✓ Local MQTT configured (Raspberry Pi:" + String(MQTT_PORT_LOCAL) + ")");
-  Serial.println("✓ Cloud MQTT configured (HiveMQ:" + String(MQTT_PORT_CLOUD) + " TLS)");
   
   // ========== STATE RECOVERY (after watchdog reset) ==========
   Serial.println("\n--- Checking for previous state ---");
@@ -865,7 +791,7 @@ void loop(){
 
   // ========== PENDING RECOVERY START (after WiFi connected) ==========
   // If we're waiting to start motors after watchdog recovery, do it now that WiFi is stable
-  if (pendingRecoveryStart && WiFi.status() == WL_CONNECTED && mqttLocal.connected()) {
+  if (pendingRecoveryStart && WiFi.status() == WL_CONNECTED && mqtt.connected()) {
     pendingRecoveryStart = false;
     runState = true;
     // Start motor sequence (M1 will start in the running sequence below)
@@ -873,16 +799,8 @@ void loop(){
     Serial.println("  System recovered and running safely");
   }
 
-  // ========== MQTT MAINTENANCE (Priority 1: Local, Priority 2: Cloud) ==========
-  if (WiFi.status()==WL_CONNECTED){ 
-    // LOCAL MQTT (Priority 1)
-    ensureMqttLocal();
-    if(mqttLocal.connected()) mqttLocal.loop();
-    
-    // CLOUD MQTT (Priority 2) 
-    ensureMqttCloud();
-    if(mqttCloud.connected()) mqttCloud.loop();
-  }
+  // MQTT maintenance
+  if (WiFi.status()==WL_CONNECTED){ ensureMqtt(); if(mqtt.connected()) mqtt.loop(); }
 
   // Sensors + telemetry
   handleSerial();

@@ -53,7 +53,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 # Basic settings
 interface=wlan0
 driver=nl80211
-ssid=snorlax
+ssid=PiSpot
 hw_mode=g
 channel=6
 wmm_enabled=1
