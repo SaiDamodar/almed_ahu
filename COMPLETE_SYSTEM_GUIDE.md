@@ -15,6 +15,8 @@
 7. [Mobile App](#mobile-app)
 8. [Complete Data Flow](#data-flow)
 9. [Implementation Checklist](#checklist)
+10. [Cloud Infrastructure](#cloud-infrastructure)
+11. [Database & Analytics](#database--analytics)
 
 ---
 
@@ -1052,10 +1054,234 @@ npm run build
 
 ---
 
+## ☁️ Cloud Infrastructure
+
+### HiveMQ Cloud Setup
+
+**Free Tier**: 10M messages/month, unlimited devices, TLS encrypted
+
+**Connection Details:**
+- Protocol: MQTT over TLS
+- Port: 8883
+- Broker: `your-cluster.hivemq.cloud:8883`
+- Authentication: Username/password
+
+**What It Provides:**
+- Real-time message broker
+- MQTT bridge between RPI and cloud
+- Connectivity for mobile apps
+- Scalable infrastructure
+
+**Limitation**: No database storage (messages are transient)
+
+---
+
+## 🗄️ Database & Analytics
+
+### Current Architecture: MQTT-Only
+
+**What you have NOW:**
+```
+ESP32 → MQTT → App displays real-time data → Data discarded
+```
+
+**Limitations:**
+- ❌ No historical data
+- ❌ No trends or analytics
+- ❌ Can't generate reports
+
+**Suitable for**: Basic real-time monitoring
+
+---
+
+### Recommended: Add Time-Series Database
+
+**Phase 2: InfluxDB (Recommended)** ⭐
+
+**Best for**: Time-series sensor data
+
+```
+ESP32 → MQTT → InfluxDB → Flutter App queries history
+```
+
+**Why InfluxDB:**
+- ✅ Perfect for sensor readings
+- ✅ No backend API needed
+- ✅ Fast time-range queries
+- ✅ Free tier available
+- ✅ Run on Raspberry Pi
+
+**Setup:**
+1. Install InfluxDB (cloud or RPI)
+2. Configure MQTT → InfluxDB connector
+3. Flutter queries historical data
+
+**Cost**: FREE for <1GB data
+
+**Alternative Options:**
+- **Firebase Firestore**: Easiest, no server management (FREE tier generous)
+- **PostgreSQL**: Full database for complex queries ($5-50/month)
+
+---
+
+### 📊 Graphs & Charts for Mobile App
+
+**Current State**: `fl_chart` package already installed ✅
+
+**What to Display:**
+
+1. **Real-Time Gauges** (Current values)
+   ```
+   Temperature:  ╱────────╲  
+                 │  24.5°C │
+                 ╲────────╱
+   
+   Humidity:     ╱────────╲
+                 │  62%    │
+                 ╲────────╱
+   ```
+
+2. **Line Charts** (Historical trends)
+   ```
+   30°C ┤           ╱─╲
+        │      ╱─╲╱   ╲
+   20°C ┤  ╱─╲       
+        └─────────────
+        0h   12h  24h
+   ```
+
+3. **Motor Activity Timeline**
+   ```
+   M1: ████░░░░████░░░░
+   M2: ░░░░████░░░░████
+   CP:  ████░░░░████░░░░
+   ```
+
+**Flutter Implementation:**
+
+```dart
+import 'package:fl_chart/fl_chart.dart';
+
+class TemperatureChart extends StatelessWidget {
+  final List<double> temps;
+  final double setpoint;
+  
+  @override
+  Widget build(BuildContext context) {
+    return LineChart(
+      LineChartData(
+        lineBarsData: [
+          LineChartBarData(
+            spots: temps.asMap().entries
+              .map((e) => FlSpot(e.key.toDouble(), e.value))
+              .toList(),
+            isCurved: true,
+            color: Colors.blue,
+            barWidth: 3,
+          ),
+          LineChartBarData(
+            spots: temps.asMap().entries
+              .map((e) => FlSpot(e.key.toDouble(), setpoint))
+              .toList(),
+            isCurved: false,
+            color: Colors.grey,
+            dotData: FlDotData(show: false),
+            dashArray: [5, 5],
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+**Quick Start**: Add to `ahu_control_screen.dart` → Done! ✅
+
+---
+
+### 📊 Admin Dashboard Analytics
+
+**What Admins See:**
+
+1. **System Overview Dashboard**
+   ```
+   ┌──────────────────────────────────────────┐
+   │ System Health                            │
+   ├──────────────────────────────────────────┤
+   │ Total Devices: 20                        │
+   │ Online Now: 18 (90%)                     │
+   │ Active Users: 12                         │
+   │ Last 24h Alerts: 3                       │
+   └──────────────────────────────────────────┘
+   ```
+
+2. **Multi-Device Comparison Chart**
+   ```
+   Average Temperature by Device (Last 7 Days)
+   
+   30°C ┤
+   25°C ┤  ████ ICU-1
+        ┤  ████████ ICU-2
+   20°C ┤  ███ ICU-3
+        └─────────────────
+         Mon Tue Wed Thu Fri
+   ```
+
+3. **Statistical Reports**
+   ```
+   📈 Device Statistics - ICU-1 AHU
+   ├─ Average Temp: 24.2°C
+   ├─ Min/Max: 20.1°C / 27.8°C
+   ├─ Time in Range: 94%
+   ├─ Motor Starts: 128/day
+   └─ System Availability: 99.8%
+   ```
+
+4. **Alerts & Warnings**
+   ```
+   ⚠️ Recent Alerts
+   ├─ Over-temperature (ICU-2): 3 occurrences
+   ├─ Motor failures: 0
+   └─ Network disconnects: 2
+   ```
+
+---
+
+## 🎯 Analytics Implementation Priority
+
+### Phase 1: Now (Week 1)
+**Storage**: None  
+**Graphs**: In-memory only (last 100 readings)  
+**Cost**: $0
+
+**Quick Win**: Add basic line charts using `fl_chart` (already installed!)
+
+---
+
+### Phase 2: Month 1 (Week 2-4)
+**Storage**: InfluxDB on Raspberry Pi  
+**Graphs**: Full historical charts (24h, 7d, 30d views)  
+**Cost**: $0
+
+**Benefit**: Historical data analysis, trend identification
+
+---
+
+### Phase 3: Later (Month 2+)
+**Storage**: Firebase Firestore (if scaling)  
+**Graphs**: Advanced analytics, predictive insights  
+**Cost**: $0-50/month
+
+**Benefit**: Cloud backup, unlimited history, multi-location aggregation
+
+---
+
 ## 📚 Reference Documents
 
 - **Detailed HiveMQ Setup**: `HIVEMQ_SETUP_QUICK_START.md`
 - **Network Architecture**: `NETWORK_ARCHITECTURE_GUIDE.md`
+- **Database & Analytics**: `DATABASE_AND_ANALYTICS_GUIDE.md`
+- **Quick DB Summary**: `CLOUD_DB_GRAPHS_SUMMARY.md`
 - **Authentication Guide**: `USER_AUTHENTICATION_GUIDE.md`
 - **HiveMQ vs AWS**: `HIVE_VS_AWS_COMPARISON.md`
 - **Quick Answers**: `ANSWERS_SUMMARY.md`
@@ -1073,6 +1299,8 @@ npm run build
 ✅ **Enable** centralized management via admin dashboard  
 ✅ **Work** with smart failover (PiSpot → Hospital WiFi)  
 ✅ **Cost** zero dollars to start (HiveMQ free tier)  
+✅ **Display** graphs and analytics for insights  
+✅ **Store** historical data when needed  
 
 **Everything is documented, architecture is ready, and implementation is straightforward!** 🚀
 
