@@ -188,6 +188,8 @@ Mobile app receives confirmation and updates UI
 - `start` / `stop` - Control system on/off
 - `setpoint` - Change temperature setpoint (e.g., `{"setpoint": 23.5}`)
 - `humiditySetpoint` - Change humidity setpoint (e.g., `{"humiditySetpoint": 55}`)
+- `fanToggle` - Toggle fan speed (LOW → MID → HIGH → LOW)
+- `fanSpeed` - Set specific fan speed (0=OFF, 1=LOW, 2=MID, 3=HIGH)
 - `motorTimings` - Adjust motor timings (admin only)
 - `provision` - WiFi/network provisioning (admin only)
 
@@ -223,9 +225,10 @@ Mobile App
 **Graph Types:**
 1. **Temperature Timeline**: Last 24h / 7d / 30d
 2. **Humidity Timeline**: Last 24h / 7d / 30d
-3. **Motor Runtime**: Daily/weekly usage
-4. **Compressor Cycles**: On/off cycles over time
-5. **Energy Consumption**: Estimated based on runtime
+3. **Fan Speed Timeline**: Speed changes over time
+4. **Motor Runtime**: Daily/weekly usage
+5. **Compressor Cycles**: On/off cycles over time
+6. **Energy Consumption**: Estimated based on runtime
 
 **Flutter Chart Implementation:**
 ```dart

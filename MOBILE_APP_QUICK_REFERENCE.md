@@ -36,6 +36,8 @@ ESP32 → RPI MQTT → Bridge → HiveMQ Cloud → Mobile App
 {"stop": true}            // Stop system
 {"setpoint": 23.5}        // Change temp setpoint
 {"humiditySetpoint": 55}  // Change humidity setpoint
+{"fanToggle": true}       // Toggle fan speed (LOW→MID→HIGH→LOW)
+{"fanSpeed": 1}           // Set fan speed (0=OFF, 1=LOW, 2=MID, 3=HIGH)
 ```
 
 **Flow:** Mobile → Cloud → Bridge → RPI → ESP32 → Execute → Reply
@@ -44,7 +46,7 @@ ESP32 → RPI MQTT → Bridge → HiveMQ Cloud → Mobile App
 
 ## 📈 Graphs (InfluxDB)
 
-**Queries:** Temperature, Humidity, Motor runtime, Energy usage
+**Queries:** Temperature, Humidity, Fan speed, Motor runtime, Energy usage
 
 **Time ranges:** 24h / 7d / 30d
 
