@@ -1,5 +1,7 @@
 # Day Testing & Development Checklist
 
+**🔥 IMPORTANT: Read `CURSOR_CONTEXT_FOR_RPI.md` FIRST!** This file gives complete context to Cursor.
+
 ## Quick Start
 
 Copy these files to your Raspberry Pi:
@@ -209,6 +211,37 @@ cat ~/Documents/almed_ahu/mqtt_bridge.py | grep -A 5 "CLOUD_BROKER"
 mosquitto_pub -h 127.0.0.1 -u almed -P 'Almed1234$' \
   -t "test" -m "hello"
 ```
+
+---
+
+## 💻 Essential Cursor Commands
+
+### For MQTT Debugging
+```
+"trace the complete MQTT command flow from HiveMQ to ESP32 and show me why fan speed commands aren't reaching the device"
+```
+
+### For InfluxDB Integration
+```
+"integrate InfluxDB into mqtt_bridge.py to write telemetry data to cloud storage with proper tags and fields"
+```
+
+### For Flutter MQTT Service
+```
+"create a complete Flutter MQTT service class that connects to HiveMQ Cloud, subscribes to telemetry topics, publishes commands, and handles reconnection"
+```
+
+### For Flutter UI
+```
+"build Flutter device detail screen with temperature/humidity displays, fan speed control dropdown, and setpoint sliders"
+```
+
+### For Firebase Auth
+```
+"implement Firebase authentication in my Flutter app with login screen, token storage, and automatic token refresh"
+```
+
+**Pro Tip:** Be specific! Cursor is FAST when you clearly state what you want.
 
 ---
 
