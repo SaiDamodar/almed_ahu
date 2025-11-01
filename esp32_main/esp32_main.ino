@@ -55,6 +55,12 @@ unsigned long m1StopAt = 0, m2StopAt = 0, m2NextAt = 0;
 bool m2ScheduledAfterM1 = false;         // during RUN sequence
 unsigned long m2StartAt = 0;
 
+// ========== MQTT COMMAND DEBOUNCING ==========
+// Prevent duplicate commands from triggering multiple times
+unsigned long lastCmdTime = 0;
+String lastCmdHash = "";
+const unsigned long CMD_DEBOUNCE_MS = 500;  // Ignore duplicate commands within 500ms
+
 // Shutdown sequencing
 bool shutdownM2Pending = false;
 bool shutdownStarted = false;             // NEW: prevents re-starting M1 during shutdown
@@ -790,6 +796,19 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
   }
 
   if (tStr != tCmd()) return;
+
+  // ========== DEBOUNCING: Ignore duplicate commands within 500ms ==========
+  unsigned long now = millis();
+  String cmdHash = String(topic) + String((char*)payload, len);  // Topic + payload hash
+  
+  // Check if this is the exact same command within debounce window
+  if (cmdHash == lastCmdHash && (now - lastCmdTime) < CMD_DEBOUNCE_MS) {
+    Serial.println("⚠️ Duplicate command ignored (debounce protection)");
+    return;  // Ignore duplicate command
+  }
+  
+  lastCmdTime = now;
+  lastCmdHash = cmdHash;
 
   StaticJsonDocument<256> doc;
   if (deserializeJson(doc, payload, len)) return;
