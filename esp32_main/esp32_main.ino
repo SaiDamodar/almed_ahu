@@ -81,8 +81,11 @@ unsigned long heatLastOnAt  = 0, heatLastOffAt = 0;
 // ========== FAN CONTROL (3 LM2596 + 3 Relay Method) ==========
 // Each relay connects one LM2596 output to the fan
 #define PIN_FAN_RELAY_LOW  18  // Relay #1: Connects LM2596 #1 (5V) to fan
-#define PIN_FAN_RELAY_MID  5   // Relay #2: Connects LM2596 #2 (9V) to fan
+#define PIN_FAN_RELAY_MID  13  // Relay #2: Connects LM2596 #2 (9V) to fan (changed from GPIO 5 to 13 for stability)
 #define PIN_FAN_RELAY_HIGH 4   // Relay #3: Connects LM2596 #3 (12V) to fan
+
+// NOTE: Fan relays are ACTIVE LOW (LOW = relay ON, HIGH = relay OFF)
+// This matches CP/HEAT relay behavior: LOW = ON, HIGH = OFF
 
 // Fan speed modes
 enum FanSpeed {
@@ -245,11 +248,11 @@ void emergencyStopMotors(){
   emergencyStopFan();
 }
 
-// Emergency stop fan (turn OFF all relays)
+// Emergency stop fan (turn OFF all relays - HIGH = OFF for ACTIVE LOW relays)
 void emergencyStopFan() {
-  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
-  digitalWrite(PIN_FAN_RELAY_MID, LOW);
-  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
+  digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
+  digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
   fanSpeed = FAN_OFF;
   fanOn = false;
   Serial.println("⚠️ EMERGENCY: All fan relays OFF");
@@ -311,65 +314,64 @@ void controlHeater(float h){
 // ========== FAN CONTROL FUNCTIONS (3 LM2596 + 3 Relay) ==========
 // Set fan speed - only ONE relay ON at a time
 // Each relay connects one LM2596 output (5V, 9V, or 12V) to the fan
-// NOTE: Assumes relay modules are ACTIVE HIGH (HIGH = relay ON, LOW = relay OFF)
-// If your relays are ACTIVE LOW, invert the HIGH/LOW values below
+// NOTE: Relays are ACTIVE LOW (LOW = relay ON, HIGH = relay OFF) - matches CP/HEAT behavior
 void setFanSpeed(FanSpeed speed) {
   if (speed == fanSpeed) return;  // No change needed
   
-  // CRITICAL: Turn OFF all relays first (safety - prevents short circuits)
-  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
-  digitalWrite(PIN_FAN_RELAY_MID, LOW);
-  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  // CRITICAL: Turn OFF all relays first (HIGH = relay OFF for ACTIVE LOW relays)
+  digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
+  digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
+  digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
   delay(100);  // Allow relays to settle before switching (increased delay for safety)
   
   fanSpeed = speed;
   
   switch (speed) {
     case FAN_OFF:
-      // All relays already OFF - double check to ensure all are OFF
-      digitalWrite(PIN_FAN_RELAY_LOW, LOW);
-      digitalWrite(PIN_FAN_RELAY_MID, LOW);
-      digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+      // All relays OFF - HIGH = relay OFF for ACTIVE LOW
+      digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
+      digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
+      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
       fanOn = false;
       motorLogMsg("Fan: OFF (all relays OFF)");
       Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
-      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
       Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
       
     case FAN_LOW:
-      // Connect LM2596 #1 (5V) to fan - ensure only this one is ON
-      digitalWrite(PIN_FAN_RELAY_LOW, HIGH);  // Relay #1 ON
-      digitalWrite(PIN_FAN_RELAY_MID, LOW);   // Relay #2 OFF (safety)
-      digitalWrite(PIN_FAN_RELAY_HIGH, LOW);  // Relay #3 OFF (safety)
+      // Connect LM2596 #1 (5V) to fan - LOW = relay ON for ACTIVE LOW
+      digitalWrite(PIN_FAN_RELAY_LOW, LOW);    // Relay #1 ON (ACTIVE LOW)
+      digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay #2 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay #3 OFF (safety)
       fanOn = true;
       motorLogMsg("Fan: LOW speed (5V)");
       Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
-      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
       Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
       
     case FAN_MID:
-      // Connect LM2596 #2 (9V) to fan - ensure only this one is ON
-      digitalWrite(PIN_FAN_RELAY_LOW, LOW);   // Relay #1 OFF (safety)
-      digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay #2 ON
-      digitalWrite(PIN_FAN_RELAY_HIGH, LOW);  // Relay #3 OFF (safety)
+      // Connect LM2596 #2 (9V) to fan - LOW = relay ON for ACTIVE LOW
+      digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay #1 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_MID, LOW);    // Relay #2 ON (ACTIVE LOW)
+      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay #3 OFF (safety)
       fanOn = true;
       motorLogMsg("Fan: MID speed (9V)");
       Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
-      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
       Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
       
     case FAN_HIGH:
-      // Connect LM2596 #3 (12V) to fan - ensure only this one is ON
-      digitalWrite(PIN_FAN_RELAY_LOW, LOW);   // Relay #1 OFF (safety)
-      digitalWrite(PIN_FAN_RELAY_MID, LOW);   // Relay #2 OFF (safety)
-      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay #3 ON
+      // Connect LM2596 #3 (12V) to fan - LOW = relay ON for ACTIVE LOW
+      digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay #1 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay #2 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_HIGH, LOW);   // Relay #3 ON (ACTIVE LOW)
       fanOn = true;
       motorLogMsg("Fan: HIGH speed (12V)");
       Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
-      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
       Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
   }
@@ -919,24 +921,26 @@ void setup(){
   heatLastOffAt = millis();
   
   // ========== FAN CONTROL PIN SETUP (3 LM2596 + 3 Relay) ==========
+  // NOTE: Relays are ACTIVE LOW (LOW = relay ON, HIGH = relay OFF)
   pinMode(PIN_FAN_RELAY_LOW, OUTPUT);
   pinMode(PIN_FAN_RELAY_MID, OUTPUT);
   pinMode(PIN_FAN_RELAY_HIGH, OUTPUT);
   
-  // All relays OFF at boot (fan OFF) - ensure all are explicitly LOW
-  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
-  digitalWrite(PIN_FAN_RELAY_MID, LOW);
-  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  // All relays OFF at boot (HIGH = relay OFF for ACTIVE LOW relays)
+  digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
+  digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
+  digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
   delay(100);  // Allow relays to settle
-  // Double-check all are OFF
-  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
-  digitalWrite(PIN_FAN_RELAY_MID, LOW);
-  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  // Double-check all are OFF (HIGH = OFF for ACTIVE LOW)
+  digitalWrite(PIN_FAN_RELAY_LOW, HIGH);
+  digitalWrite(PIN_FAN_RELAY_MID, HIGH);
+  digitalWrite(PIN_FAN_RELAY_HIGH, HIGH);
   
-  Serial.println("✓ Fan control initialized (3 LM2596 + 3 relay)");
+  Serial.println("✓ Fan control initialized (3 LM2596 + 3 relay, ACTIVE LOW)");
   Serial.println("  Fan Relay LOW:  GPIO 18 (LM2596 #1: 5V)");
-  Serial.println("  Fan Relay MID:  GPIO 5  (LM2596 #2: 9V)");
+  Serial.println("  Fan Relay MID:  GPIO 13 (LM2596 #2: 9V)");
   Serial.println("  Fan Relay HIGH: GPIO 4  (LM2596 #3: 12V)");
+  Serial.println("  Relay Logic: LOW = ON, HIGH = OFF (ACTIVE LOW)");
   
   esp_task_wdt_reset(); // Feed watchdog
 
