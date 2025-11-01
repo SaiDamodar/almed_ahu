@@ -16,6 +16,7 @@
 **Ready:**
 - ✅ Cloud code (ESP32 dual-broker)
 - ✅ MQTT bridge script
+- ✅ **Automated Raspberry Pi setup script** 🆕
 - ✅ All documentation
 
 **Next:**
@@ -28,6 +29,11 @@
 ## 📚 Documentation Overview
 
 ### 🚀 Quick Start (Read These First)
+
+0. **SETUP_SCRIPT_README.md** ⭐ **NEW: One-Click Raspberry Pi Setup**
+   - Automated setup script for new Raspberry Pi
+   - Install Flutter, MQTT, hotspot, and all drivers
+   - One command, 15-30 minutes, fully configured!
 
 1. **COMPLETE_SYSTEM_GUIDE.md** ⭐ **START HERE**
    - Complete system architecture
@@ -130,10 +136,14 @@
 
 ### This Week (Day 1-7)
 
+**Raspberry Pi Setup:**
+1. Run automated setup script on new Raspberry Pi
+2. Deploy Flutter app to `/opt/ahu_dashboard/`
+
 **Cloud Setup:**
-1. Create HiveMQ Cloud account
-2. Test ESP32 → cloud connection
-3. Deploy bridge script on Raspberry Pi
+3. Create HiveMQ Cloud account
+4. Test ESP32 → cloud connection
+5. Enable MQTT bridge service on Raspberry Pi
 
 **Result**: ESP32 → RPI → Cloud working! ✅
 
