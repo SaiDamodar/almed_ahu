@@ -78,6 +78,29 @@ const unsigned long HEAT_MIN_OFF_MS = 5000; // test timings
 const unsigned long HEAT_MIN_ON_MS  = 3000;
 unsigned long heatLastOnAt  = 0, heatLastOffAt = 0;
 
+// ========== FAN CONTROL (3 LM2596 + 3 Relay Method) ==========
+// Each relay connects one LM2596 output to the fan
+#define PIN_FAN_RELAY_LOW  18  // Relay #1: Connects LM2596 #1 (5V) to fan
+#define PIN_FAN_RELAY_MID  5   // Relay #2: Connects LM2596 #2 (9V) to fan
+#define PIN_FAN_RELAY_HIGH 4   // Relay #3: Connects LM2596 #3 (12V) to fan
+
+// Fan speed modes
+enum FanSpeed {
+  FAN_OFF = 0,
+  FAN_LOW = 1,    // 5V (low speed) - LM2596 #1
+  FAN_MID = 2,    // 9V (medium speed) - LM2596 #2
+  FAN_HIGH = 3    // 12V (high speed) - LM2596 #3
+};
+
+FanSpeed fanSpeed = FAN_OFF;
+bool fanOn = false;
+
+// Fan control parameters
+const float TEMP_FAN_LOW = 24.0;   // °C - Switch to LOW at this temp
+const float TEMP_FAN_MID = 26.0;   // °C - Switch to MID at this temp
+const float TEMP_FAN_HIGH = 28.0;  // °C - Switch to HIGH at this temp
+const float HUM_FAN_THRESHOLD = 65.0;  // %RH - Turn on fan if humidity high
+
 // ---------- Ring buffers for logs (last 10) ----------
 const int LOG_MAX = 10;
 String tempBuf[LOG_MAX]; int tempHead = -1; int tempCount = 0;
@@ -273,6 +296,80 @@ void controlHeater(float h){
   }
 }
 
+// ========== FAN CONTROL FUNCTIONS (3 LM2596 + 3 Relay) ==========
+// Set fan speed - only ONE relay ON at a time
+// Each relay connects one LM2596 output (5V, 9V, or 12V) to the fan
+void setFanSpeed(FanSpeed speed) {
+  if (speed == fanSpeed) return;  // No change needed
+  
+  // IMPORTANT: Turn OFF all relays first (safety - prevents short circuits)
+  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
+  digitalWrite(PIN_FAN_RELAY_MID, LOW);
+  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  delay(50);  // Allow relays to settle before switching
+  
+  fanSpeed = speed;
+  
+  switch (speed) {
+    case FAN_OFF:
+      // All relays already OFF
+      fanOn = false;
+      motorLogMsg("Fan: OFF");
+      break;
+      
+    case FAN_LOW:
+      // Connect LM2596 #1 (5V) to fan
+      digitalWrite(PIN_FAN_RELAY_LOW, HIGH);  // Relay #1 ON
+      fanOn = true;
+      motorLogMsg("Fan: LOW speed (5V)");
+      break;
+      
+    case FAN_MID:
+      // Connect LM2596 #2 (9V) to fan
+      digitalWrite(PIN_FAN_RELAY_MID, HIGH);  // Relay #2 ON
+      fanOn = true;
+      motorLogMsg("Fan: MID speed (9V)");
+      break;
+      
+    case FAN_HIGH:
+      // Connect LM2596 #3 (12V) to fan
+      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH);  // Relay #3 ON
+      fanOn = true;
+      motorLogMsg("Fan: HIGH speed (12V)");
+      break;
+  }
+  
+  publishState();  // Update state
+}
+
+// Automatic fan control based on temperature/humidity
+void controlFan(float temp, float hum) {
+  if (!runState) {
+    // System not running -> turn off fan
+    if (fanOn) {
+      setFanSpeed(FAN_OFF);
+    }
+    return;
+  }
+  
+  if (isnan(temp)) return;  // Need valid temperature reading
+  
+  // Temperature-based speed control
+  if (temp >= TEMP_FAN_HIGH) {
+    setFanSpeed(FAN_HIGH);
+  } else if (temp >= TEMP_FAN_MID) {
+    setFanSpeed(FAN_MID);
+  } else if (temp >= TEMP_FAN_LOW) {
+    setFanSpeed(FAN_LOW);
+  } else if (hum >= HUM_FAN_THRESHOLD) {
+    // High humidity -> run at low speed
+    setFanSpeed(FAN_LOW);
+  } else {
+    // Normal conditions -> fan off
+    setFanSpeed(FAN_OFF);
+  }
+}
+
 // ---------- System control ----------
 void startSystem(){
   if (shuttingDown) return;
@@ -302,7 +399,7 @@ void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
 
 // ---------- Telemetry / State ----------
 void publishTelemetry(){
-  StaticJsonDocument<384> doc;
+  StaticJsonDocument<512> doc;
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
   doc["m1"]  = m1Active;
@@ -310,10 +407,12 @@ void publishTelemetry(){
   doc["run"] = runState;
   doc["cp"]  = cpOn;
   doc["heater"] = heatOn;
+  doc["fan"] = fanOn;
+  doc["fanSpeed"] = (int)fanSpeed;  // 0=OFF, 1=LOW, 2=MID, 3=HIGH
   doc["tempSet"] = tempSet;
   doc["humSet"]  = humSet;
   doc["ts"]  = millis();
-  char buf[448];
+  char buf[576];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   
   // Publish to LOCAL broker
@@ -327,9 +426,10 @@ void publishTelemetry(){
 }
 
 void publishState(){
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<640> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["heater"]=heatOn;
+  doc["fan"]=fanOn; doc["fanSpeed"]=(int)fanSpeed;
   doc["tempSet"]=tempSet; doc["humSet"]=humSet;
   
   // Publish current motor timings (in seconds)
@@ -339,7 +439,7 @@ void publishState(){
   doc["m2_run"] = M2_RUN_TIME / 1000UL;
   doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
   doc["ip"]=WiFi.localIP().toString();
-  char buf[384];
+  char buf[640];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   
   // Publish to LOCAL broker (retained)
@@ -630,6 +730,15 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
       publishState();
     }
   }
+  
+  // ========== FAN CONTROL COMMANDS ==========
+  if (doc.containsKey("fan")){
+    int speed = doc["fan"].as<int>();
+    if (speed >= 0 && speed <= 3){
+      setFanSpeed((FanSpeed)speed);
+      motorLogMsg("Fan speed set via MQTT: " + String(speed));
+    }
+  }
 }
 
 // ========== LOCAL MQTT CONNECTION (Priority 1) ==========
@@ -761,6 +870,21 @@ void setup(){
   cpLastOffAt = millis();
   heatLastOffAt = millis();
   
+  // ========== FAN CONTROL PIN SETUP (3 LM2596 + 3 Relay) ==========
+  pinMode(PIN_FAN_RELAY_LOW, OUTPUT);
+  pinMode(PIN_FAN_RELAY_MID, OUTPUT);
+  pinMode(PIN_FAN_RELAY_HIGH, OUTPUT);
+  
+  // All relays OFF at boot (fan OFF)
+  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
+  digitalWrite(PIN_FAN_RELAY_MID, LOW);
+  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  
+  Serial.println("✓ Fan control initialized (3 LM2596 + 3 relay)");
+  Serial.println("  Fan Relay LOW:  GPIO 18 (LM2596 #1: 5V)");
+  Serial.println("  Fan Relay MID:  GPIO 5  (LM2596 #2: 9V)");
+  Serial.println("  Fan Relay HIGH: GPIO 4  (LM2596 #3: 12V)");
+  
   esp_task_wdt_reset(); // Feed watchdog
 
   Wire.begin(21,22);
@@ -891,6 +1015,7 @@ void loop(){
   // Always evaluate controls using filtered readings (but gated by runState)
   controlCP(filtTempC);
   controlHeater(filtHum);
+  controlFan(filtTempC, filtHum);
 
   // =================== SHUTDOWN SEQUENCE ===================
   if (shuttingDown){
