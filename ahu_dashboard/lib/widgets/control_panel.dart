@@ -114,10 +114,144 @@ class ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 24),
+
+            // Fan control
+            _buildFanControl(context),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildFanControl(BuildContext context) {
+    final currentSpeed = state?.fanSpeed ?? 0;
+    final isFanOn = state?.fan ?? false;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.air, color: Colors.green, size: 32),
+              const SizedBox(width: 12),
+              const Text(
+                'Fan Control',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Current: ${_getFanSpeedLabel(currentSpeed)}',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey.shade700,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFanSpeedButton(
+                  context,
+                  label: 'OFF',
+                  speed: 0,
+                  isSelected: currentSpeed == 0,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildFanSpeedButton(
+                  context,
+                  label: 'LOW',
+                  speed: 1,
+                  isSelected: currentSpeed == 1,
+                  color: Colors.green.shade300,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildFanSpeedButton(
+                  context,
+                  label: 'MID',
+                  speed: 2,
+                  isSelected: currentSpeed == 2,
+                  color: Colors.green.shade600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildFanSpeedButton(
+                  context,
+                  label: 'HIGH',
+                  speed: 3,
+                  isSelected: currentSpeed == 3,
+                  color: Colors.green.shade900,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFanSpeedButton(
+    BuildContext context, {
+    required String label,
+    required int speed,
+    required bool isSelected,
+    required Color color,
+  }) {
+    return ElevatedButton(
+      onPressed: isOnline && !isSelected
+          ? () {
+              final provider = Provider.of<AppProvider>(context, listen: false);
+              provider.setFanSpeed(ahuId, speed);
+            }
+          : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? color : Colors.grey.shade200,
+        foregroundColor: isSelected ? Colors.white : Colors.grey.shade700,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  String _getFanSpeedLabel(int speed) {
+    switch (speed) {
+      case 0:
+        return 'OFF';
+      case 1:
+        return 'LOW (5V)';
+      case 2:
+        return 'MID (9V)';
+      case 3:
+        return 'HIGH (12V)';
+      default:
+        return 'UNKNOWN';
+    }
   }
 
   Widget _buildSetpointControl(

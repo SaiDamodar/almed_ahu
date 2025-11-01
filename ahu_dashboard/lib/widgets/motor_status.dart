@@ -55,12 +55,33 @@ class MotorStatus extends StatelessWidget {
                   isActive: state?.heater ?? false,
                   color: Colors.orange,
                 ),
+                _buildStatusIndicator(
+                  icon: Icons.air,
+                  label: _getFanLabel(state?.fanSpeed ?? 0),
+                  isActive: state?.fan ?? false,
+                  color: Colors.green,
+                ),
               ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  String _getFanLabel(int fanSpeed) {
+    switch (fanSpeed) {
+      case 0:
+        return 'Fan (OFF)';
+      case 1:
+        return 'Fan (LOW)';
+      case 2:
+        return 'Fan (MID)';
+      case 3:
+        return 'Fan (HIGH)';
+      default:
+        return 'Fan';
+    }
   }
 
   Widget _buildStatusIndicator({

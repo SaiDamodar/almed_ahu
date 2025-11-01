@@ -145,6 +145,12 @@ class MqttService {
     sendCommand(ahu, {'humset': humidity});
   }
 
+  /// Set fan speed (0=OFF, 1=LOW, 2=MID, 3=HIGH)
+  void setFanSpeed(AhuUnit ahu, int speed) {
+    if (speed < 0 || speed > 3) return;
+    sendCommand(ahu, {'fan': speed});
+  }
+
   /// Provision WiFi credentials
   void provisionWifi(AhuUnit ahu, {
     String? primarySsid,

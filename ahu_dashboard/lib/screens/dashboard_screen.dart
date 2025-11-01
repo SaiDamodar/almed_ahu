@@ -377,6 +377,11 @@ class _ModernAhuCard extends StatelessWidget {
                           isActive: data.state?.heater ?? false,
                           color: AppTheme.info,
                         ),
+                        _StatusChip(
+                          label: _getFanLabel(data.state?.fanSpeed ?? 0),
+                          isActive: data.state?.fan ?? false,
+                          color: AppTheme.success,
+                        ),
                       ],
                     ),
                   ],
@@ -440,6 +445,21 @@ class _SensorDisplay extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+String _getFanLabel(int? fanSpeed) {
+  switch (fanSpeed ?? 0) {
+    case 0:
+      return 'Fan OFF';
+    case 1:
+      return 'Fan LOW';
+    case 2:
+      return 'Fan MID';
+    case 3:
+      return 'Fan HIGH';
+    default:
+      return 'Fan';
   }
 }
 

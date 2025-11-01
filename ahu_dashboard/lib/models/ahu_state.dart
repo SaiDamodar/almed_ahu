@@ -10,6 +10,8 @@ class AhuState {
   final bool m2;             // Motor-2 status
   final bool cp;             // Compressor status
   final bool heater;         // Heater status
+  final bool fan;             // Fan status (on/off)
+  @JsonKey(name: 'fanSpeed') final int fanSpeed;  // Fan speed: 0=OFF, 1=LOW, 2=MID, 3=HIGH
   final double tempSet;      // Temperature setpoint
   final double humSet;       // Humidity setpoint
   final String ip;           // ESP32 IP address
@@ -27,6 +29,8 @@ class AhuState {
     required this.m2,
     required this.cp,
     required this.heater,
+    required this.fan,
+    required this.fanSpeed,
     required this.tempSet,
     required this.humSet,
     required this.ip,
@@ -48,6 +52,22 @@ class AhuState {
     if (m2Interval == null || m2Run == null) return 30;
     // Convert actual interval back to wait time
     return (m2Interval! - m2Run!).clamp(1, 999);
+  }
+
+  /// Get fan speed display string
+  String get fanSpeedDisplay {
+    switch (fanSpeed) {
+      case 0:
+        return 'OFF';
+      case 1:
+        return 'LOW (5V)';
+      case 2:
+        return 'MID (9V)';
+      case 3:
+        return 'HIGH (12V)';
+      default:
+        return 'UNKNOWN';
+    }
   }
 }
 

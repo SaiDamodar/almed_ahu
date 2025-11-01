@@ -216,6 +216,14 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  /// Set fan speed (0=OFF, 1=LOW, 2=MID, 3=HIGH)
+  void setFanSpeed(String ahuId, int speed) {
+    final ahu = _ahuUnits[ahuId];
+    if (ahu != null) {
+      _mqttService?.setFanSpeed(ahu, speed);
+    }
+  }
+
   /// Provision WiFi (admin only)
   void provisionWifi(
     String ahuId, {

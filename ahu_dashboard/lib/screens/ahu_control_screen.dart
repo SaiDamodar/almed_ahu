@@ -185,6 +185,10 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                     _ComponentStatus(ahuId: widget.ahuId),
                     const SizedBox(height: 20),
 
+                    // Fan Control
+                    _FanControl(ahuId: widget.ahuId),
+                    const SizedBox(height: 20),
+
                     // Logs (collapsible) - ADMIN ONLY
                     Consumer<AppProvider>(
                       builder: (context, provider, child) {
@@ -486,6 +490,12 @@ class _ComponentStatus extends StatelessWidget {
                     isActive: data.state?.heater ?? false,
                     color: const Color(0xFF1E40AF),
                   ),
+                  _StatusIndicator(
+                    icon: Icons.air_rounded,
+                    label: _getFanLabel(data.state?.fanSpeed ?? 0),
+                    isActive: data.state?.fan ?? false,
+                    color: const Color(0xFF10B981),
+                  ),
                 ],
               ),
             ],
@@ -493,6 +503,21 @@ class _ComponentStatus extends StatelessWidget {
         );
       },
     );
+  }
+
+  String _getFanLabel(int fanSpeed) {
+    switch (fanSpeed) {
+      case 0:
+        return 'Fan (OFF)';
+      case 1:
+        return 'Fan (LOW)';
+      case 2:
+        return 'Fan (MID)';
+      case 3:
+        return 'Fan (HIGH)';
+      default:
+        return 'Fan';
+    }
   }
 }
 
@@ -720,6 +745,210 @@ class _SensorData {
 
   @override
   int get hashCode => telemetry.hashCode ^ state.hashCode;
+}
+
+class _FanControl extends StatelessWidget {
+  final String ahuId;
+
+  const _FanControl({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, _FanData>(
+      selector: (_, provider) => _FanData(
+        state: provider.getState(ahuId),
+        isOnline: provider.getStatus(ahuId) == 'online',
+      ),
+      builder: (context, data, child) {
+        final currentSpeed = data.state?.fanSpeed ?? 0;
+        final isFanOn = data.state?.fan ?? false;
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.air_rounded, color: const Color(0xFF10B981), size: 28),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Fan Control',
+                    style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 18),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Current: ',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    Text(
+                      _getFanSpeedLabel(currentSpeed),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF10B981),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'OFF',
+                      speed: 0,
+                      isSelected: currentSpeed == 0,
+                      color: Colors.grey,
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 0);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'LOW',
+                      speed: 1,
+                      isSelected: currentSpeed == 1,
+                      color: const Color(0xFF6EE7B7),
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 1);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'MID',
+                      speed: 2,
+                      isSelected: currentSpeed == 2,
+                      color: const Color(0xFF34D399),
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 2);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'HIGH',
+                      speed: 3,
+                      isSelected: currentSpeed == 3,
+                      color: const Color(0xFF10B981),
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 3);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _getFanSpeedLabel(int speed) {
+    switch (speed) {
+      case 0:
+        return 'OFF';
+      case 1:
+        return 'LOW (5V)';
+      case 2:
+        return 'MID (9V)';
+      case 3:
+        return 'HIGH (12V)';
+      default:
+        return 'UNKNOWN';
+    }
+  }
+}
+
+class _FanSpeedButton extends StatelessWidget {
+  final String label;
+  final int speed;
+  final bool isSelected;
+  final Color color;
+  final bool isEnabled;
+  final VoidCallback onPressed;
+
+  const _FanSpeedButton({
+    required this.label,
+    required this.speed,
+    required this.isSelected,
+    required this.color,
+    required this.isEnabled,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: isEnabled && !isSelected ? onPressed : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? color : Colors.grey.shade200,
+        foregroundColor: isSelected ? Colors.white : Colors.grey.shade700,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 16),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class _FanData {
+  final state;
+  final bool isOnline;
+
+  _FanData({required this.state, required this.isOnline});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _FanData &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          isOnline == other.isOnline;
+
+  @override
+  int get hashCode => state.hashCode ^ isOnline.hashCode;
 }
 
 class _ComponentData {

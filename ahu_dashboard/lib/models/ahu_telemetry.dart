@@ -12,6 +12,8 @@ class AhuTelemetry {
   final bool run;            // System running state
   final bool cp;             // Compressor (cooling) status
   final bool heater;         // Heater (dehumidifier) status
+  final bool fan;             // Fan status (on/off)
+  @JsonKey(name: 'fanSpeed') final int fanSpeed;  // Fan speed: 0=OFF, 1=LOW, 2=MID, 3=HIGH
   final double tempSet;      // Temperature setpoint
   final double humSet;       // Humidity setpoint
   final int ts;              // Timestamp (millis)
@@ -24,6 +26,8 @@ class AhuTelemetry {
     required this.run,
     required this.cp,
     required this.heater,
+    required this.fan,
+    required this.fanSpeed,
     required this.tempSet,
     required this.humSet,
     required this.ts,
@@ -42,6 +46,22 @@ class AhuTelemetry {
 
   /// Check if sensor data is valid
   bool get hasSensorData => temp != null && hum != null;
+
+  /// Get fan speed display string
+  String get fanSpeedDisplay {
+    switch (fanSpeed) {
+      case 0:
+        return 'OFF';
+      case 1:
+        return 'LOW (5V)';
+      case 2:
+        return 'MID (9V)';
+      case 3:
+        return 'HIGH (12V)';
+      default:
+        return 'UNKNOWN';
+    }
+  }
 }
 
 
