@@ -97,12 +97,15 @@ enum FanSpeed {
 
 FanSpeed fanSpeed = FAN_OFF;
 bool fanOn = false;
+bool fanManualMode = false;  // When true, automatic control is disabled
+unsigned long fanManualModeUntil = 0;  // Timestamp when manual mode expires (0 = never expires)
 
 // Fan control parameters
 const float TEMP_FAN_LOW = 24.0;   // °C - Switch to LOW at this temp
 const float TEMP_FAN_MID = 26.0;   // °C - Switch to MID at this temp
 const float TEMP_FAN_HIGH = 28.0;  // °C - Switch to HIGH at this temp
 const float HUM_FAN_THRESHOLD = 65.0;  // %RH - Turn on fan if humidity high
+const unsigned long FAN_MANUAL_MODE_TIMEOUT = 300000;  // Manual mode expires after 5 minutes (0 = never expire)
 
 // ---------- Ring buffers for logs (last 10) ----------
 const int LOG_MAX = 10;
@@ -344,8 +347,9 @@ void setFanSpeed(FanSpeed speed) {
       digitalWrite(PIN_FAN_RELAY_LOW, LOW);    // Relay #1 ON (ACTIVE LOW)
       digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay #2 OFF (safety)
       digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay #3 OFF (safety)
+      delay(50);  // Allow relay to settle
       fanOn = true;
-      motorLogMsg("Fan: LOW speed (5V)");
+      motorLogMsg("Fan: LOW speed (5V) - GPIO18=LOW");
       Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
       Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
       Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
@@ -356,8 +360,9 @@ void setFanSpeed(FanSpeed speed) {
       digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay #1 OFF (safety)
       digitalWrite(PIN_FAN_RELAY_MID, LOW);    // Relay #2 ON (ACTIVE LOW)
       digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay #3 OFF (safety)
+      delay(50);  // Allow relay to settle
       fanOn = true;
-      motorLogMsg("Fan: MID speed (9V)");
+      motorLogMsg("Fan: MID speed (9V) - GPIO13=LOW");
       Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
       Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
       Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
@@ -368,8 +373,9 @@ void setFanSpeed(FanSpeed speed) {
       digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay #1 OFF (safety)
       digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay #2 OFF (safety)
       digitalWrite(PIN_FAN_RELAY_HIGH, LOW);   // Relay #3 ON (ACTIVE LOW)
+      delay(50);  // Allow relay to settle
       fanOn = true;
-      motorLogMsg("Fan: HIGH speed (12V)");
+      motorLogMsg("Fan: HIGH speed (12V) - GPIO4=LOW");
       Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
       Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
       Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
@@ -381,18 +387,32 @@ void setFanSpeed(FanSpeed speed) {
 
 // Automatic fan control based on temperature/humidity
 // Throttled to prevent rapid switching (only checks every 2 seconds)
+// DISABLED when in manual mode
 static unsigned long lastFanControlCheck = 0;
 const unsigned long FAN_CONTROL_INTERVAL = 2000;  // Check every 2 seconds
 
 void controlFan(float temp, float hum) {
-  // Throttle automatic control to prevent rapid switching
   unsigned long now = millis();
+  
+  // Check if manual mode has expired
+  if (fanManualMode && fanManualModeUntil > 0 && now >= fanManualModeUntil) {
+    fanManualMode = false;
+    fanManualModeUntil = 0;
+    motorLogMsg("Fan: Manual mode expired, resuming automatic control");
+  }
+  
+  // Skip automatic control if in manual mode
+  if (fanManualMode) {
+    return;  // Don't override manual settings
+  }
+  
+  // Throttle automatic control to prevent rapid switching
   if (now - lastFanControlCheck < FAN_CONTROL_INTERVAL) return;
   lastFanControlCheck = now;
   
   if (!runState) {
-    // System not running -> turn off fan
-    if (fanOn) {
+    // System not running -> turn off fan (unless in manual mode)
+    if (fanOn && !fanManualMode) {
       setFanSpeed(FAN_OFF);
     }
     return;
@@ -785,8 +805,29 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
   if (doc.containsKey("fan")){
     int speed = doc["fan"].as<int>();
     if (speed >= 0 && speed <= 3){
+      // Enter manual mode when manual command is received
+      fanManualMode = true;
+      if (FAN_MANUAL_MODE_TIMEOUT > 0) {
+        fanManualModeUntil = millis() + FAN_MANUAL_MODE_TIMEOUT;
+      } else {
+        fanManualModeUntil = 0;  // Never expire
+      }
       setFanSpeed((FanSpeed)speed);
-      motorLogMsg("Fan speed set via MQTT: " + String(speed));
+      motorLogMsg("Fan speed set via MQTT: " + String(speed) + " (Manual mode enabled)");
+    }
+  }
+  
+  // Allow re-enabling automatic fan control
+  if (doc.containsKey("fanAuto")){
+    bool enableAuto = doc["fanAuto"].as<bool>();
+    if (enableAuto) {
+      fanManualMode = false;
+      fanManualModeUntil = 0;
+      motorLogMsg("Fan: Automatic control enabled");
+    } else {
+      fanManualMode = true;
+      fanManualModeUntil = 0;  // Never expire
+      motorLogMsg("Fan: Manual mode enabled (automatic control disabled)");
     }
   }
 }
