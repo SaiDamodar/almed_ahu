@@ -185,10 +185,6 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                     _ComponentStatus(ahuId: widget.ahuId),
                     const SizedBox(height: 20),
 
-                    // Fan Control
-                    _FanControl(ahuId: widget.ahuId),
-                    const SizedBox(height: 20),
-
                     // Logs (collapsible) - ADMIN ONLY
                     Consumer<AppProvider>(
                       builder: (context, provider, child) {
@@ -490,11 +486,25 @@ class _ComponentStatus extends StatelessWidget {
                     isActive: data.state?.heater ?? false,
                     color: const Color(0xFF1E40AF),
                   ),
-                  _StatusIndicator(
-                    icon: Icons.air_rounded,
-                    label: _getFanLabel(data.state?.fanSpeed ?? 0),
-                    isActive: data.state?.fan ?? false,
-                    color: const Color(0xFF10B981),
+                  Consumer<AppProvider>(
+                    builder: (context, provider, child) {
+                      final isSystemRunning = data.state?.run ?? false;
+                      final isOnline = provider.getStatus(ahuId) == 'online';
+                      return GestureDetector(
+                        onTap: (isOnline && isSystemRunning)
+                            ? () {
+                                provider.toggleFanSpeed(ahuId);
+                              }
+                            : null,
+                        child: _StatusIndicator(
+                          icon: Icons.air_rounded,
+                          label: _getFanLabel(data.state?.fanSpeed ?? 0),
+                          isActive: data.state?.fan ?? false,
+                          color: const Color(0xFF10B981),
+                          isClickable: (isOnline && isSystemRunning),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -549,52 +559,54 @@ class _StatusIndicator extends StatelessWidget {
           width: 1.5,
         ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Stack(
-            alignment: Alignment.topRight,
-            children: [
-              Icon(
-                icon,
-                color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
-                size: 28,
-              ),
-              if (isClickable)
+      child: MouseRegion(
+        cursor: isClickable ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Stack(
+              alignment: Alignment.topRight,
+              children: [
                 Icon(
-                  Icons.settings_rounded,
-                  size: 14,
-                  color: AppTheme.info.withValues(alpha: 0.7),
+                  icon,
+                  color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
+                  size: 28,
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color,
+                if (isClickable)
+                  Icon(
+                    Icons.touch_app_rounded,
+                    size: 14,
+                    color: AppTheme.info.withValues(alpha: 0.7),
+                  ),
+              ],
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            isActive ? 'ACTIVE' : 'IDLE',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color,
+              ),
             ),
-          ),
+            const SizedBox(height: 4),
+            Text(
+              isActive ? 'ACTIVE' : 'IDLE',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
+              ),
+            ),
           // Spacer to match clickable cards height (2px spacing + ~13px text line height = 15px)
           SizedBox(height: isClickable ? 2 : 15),
           if (isClickable)
             Text(
-              'Tap to configure',
+              'Tap to toggle',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 9,
@@ -602,7 +614,8 @@ class _StatusIndicator extends StatelessWidget {
                 color: AppTheme.info.withValues(alpha: 0.7),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -747,266 +760,6 @@ class _SensorData {
   int get hashCode => telemetry.hashCode ^ state.hashCode;
 }
 
-class _FanControl extends StatelessWidget {
-  final String ahuId;
-
-  const _FanControl({required this.ahuId});
-
-  @override
-  Widget build(BuildContext context) {
-    return Selector<AppProvider, _FanData>(
-      selector: (_, provider) => _FanData(
-        state: provider.getState(ahuId),
-        isOnline: provider.getStatus(ahuId) == 'online',
-      ),
-      builder: (context, data, child) {
-        final currentSpeed = data.state?.fanSpeed ?? 0;
-        final isFanOn = data.state?.fan ?? false;
-        final isSystemRunning = data.state?.run ?? false;
-
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.air_rounded, color: const Color(0xFF10B981), size: 28),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Fan Control',
-                    style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 18),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Current: ',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    Text(
-                      _getFanSpeedLabel(currentSpeed),
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF10B981),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              // Single toggle button - cycles LOW → MID → HIGH → LOW
-              // Only enabled when system is running
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: (data.isOnline && isSystemRunning)
-                      ? () {
-                          final provider = Provider.of<AppProvider>(context, listen: false);
-                          provider.toggleFanSpeed(ahuId);
-                        }
-                      : null,
-                  icon: Icon(
-                    Icons.air_rounded,
-                    size: 28,
-                    color: _getFanSpeedColor(currentSpeed),
-                  ),
-                  label: Text(
-                    'Toggle Fan Speed',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _getFanSpeedColor(currentSpeed),
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _getFanSpeedColor(currentSpeed).withOpacity(0.1),
-                    foregroundColor: _getFanSpeedColor(currentSpeed),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: _getFanSpeedColor(currentSpeed),
-                        width: 2,
-                      ),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Display current speed with indicator
-              Center(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Show OFF indicator when system not running
-                    if (!isSystemRunning || currentSpeed == 0)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: Colors.grey.shade400,
-                            width: 2,
-                          ),
-                        ),
-                        child: Text(
-                          'OFF',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey.shade700,
-                          ),
-                        ),
-                      )
-                    else ...[
-                      _FanSpeedIndicator(
-                        label: 'LOW',
-                        speed: 1,
-                        isActive: currentSpeed == 1,
-                        color: const Color(0xFF6EE7B7),
-                      ),
-                      const SizedBox(width: 8),
-                      _FanSpeedIndicator(
-                        label: 'MID',
-                        speed: 2,
-                        isActive: currentSpeed == 2,
-                        color: const Color(0xFF34D399),
-                      ),
-                      const SizedBox(width: 8),
-                      _FanSpeedIndicator(
-                        label: 'HIGH',
-                        speed: 3,
-                        isActive: currentSpeed == 3,
-                        color: const Color(0xFF10B981),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              // Show message when system not running
-              if (!isSystemRunning) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Fan will turn ON when system starts',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade600,
-                    fontStyle: FontStyle.italic,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  String _getFanSpeedLabel(int speed) {
-    switch (speed) {
-      case 0:
-        return 'OFF';
-      case 1:
-        return 'LOW (5V)';
-      case 2:
-        return 'MID (9V)';
-      case 3:
-        return 'HIGH (12V)';
-      default:
-        return 'OFF';  // Default to OFF (fan off when system not running)
-    }
-  }
-
-  Color _getFanSpeedColor(int speed) {
-    switch (speed) {
-      case 0:
-        return Colors.grey;  // Grey for OFF
-      case 1:
-        return const Color(0xFF6EE7B7);  // Light green
-      case 2:
-        return const Color(0xFF34D399);  // Medium green
-      case 3:
-        return const Color(0xFF10B981);  // Dark green
-      default:
-        return Colors.grey;  // Default to grey (OFF)
-    }
-  }
-}
-
-class _FanSpeedIndicator extends StatelessWidget {
-  final String label;
-  final int speed;
-  final bool isActive;
-  final Color color;
-
-  const _FanSpeedIndicator({
-    required this.label,
-    required this.speed,
-    required this.isActive,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: isActive ? color : Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isActive ? color : Colors.grey.shade400,
-          width: 2,
-        ),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-          color: isActive ? Colors.white : Colors.grey.shade700,
-        ),
-      ),
-    );
-  }
-}
-
-class _FanData {
-  final state;
-  final bool isOnline;
-
-  _FanData({required this.state, required this.isOnline});
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is _FanData &&
-          runtimeType == other.runtimeType &&
-          state == other.state &&
-          isOnline == other.isOnline;
-
-  @override
-  int get hashCode => state.hashCode ^ isOnline.hashCode;
-}
 
 class _ComponentData {
   final state;

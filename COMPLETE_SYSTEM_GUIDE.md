@@ -45,7 +45,7 @@
 
 ## 🏗️ Architecture
 
-### Complete System Diagram
+### Complete System Diagram (Normal Operation: PiSpot)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -56,18 +56,17 @@
 │  ESP32-AHU-02 (ICU-2)  ──┤                                            │
 │  ESP32-AHU-03 (ICU-3)  ──┼─→ Raspberry Pi MQTT Broker (10.42.0.1:1883) │
 │  ESP32-AHU-04 (ER-1)   ──┤    │                                         │
-│  ESP32-AHU-05 (OR-1)   ──┤    │                                         │
-│  ...                     │    ├─→ Desktop Kiosk (on-site control)       │
-│                          │    │                                         │
-│                          │    └─→ Python Bridge Script                  │
-│                          │                                             │
-└──────────────────────────┼─────────────────────────────────────────────┘
-                           │
-                           ↓
-            [Bridge Forwards All to Cloud]
-                           │
-                           ↓
-┌────────────────────────────────────────────────────────────────────────┐
+│  ESP32-AHU-05 (OR-1)   ──┤    ├─→ Desktop Kiosk (on-site control)       │
+│  ...                     │    │                                         │
+│                          │    └─→ Python Bridge Script (mqtt_bridge.py) │
+│                          │         │                                     │
+└──────────────────────────┼─────────┼─────────────────────────────────────┘
+                           │         │
+                           │         ↓
+                           │    [Bridge Forwards All to Cloud]
+                           │         │
+                           │         ↓
+┌──────────────────────────┼─────────┼─────────────────────────────────────┐
 │                      CLOUD LAYER (HiveMQ Cloud)                        │
 ├────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
@@ -82,15 +81,25 @@
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Fallback Architecture (Hospital WiFi)
+**Key Points:**
+- ESP32 only connects to **local Pi MQTT broker** when on PiSpot (10.42.0.x network)
+- ESP32 **does NOT connect directly** to HiveMQ Cloud when on PiSpot
+- Raspberry Pi bridge script (`mqtt_bridge.py`) forwards all messages to cloud
+- Desktop dashboard continues working unchanged (connects to local Pi broker)
+
+### Fallback Architecture (Hospital WiFi - When PiSpot Fails)
 
 ```
-ESP32 → Hospital WiFi → HiveMQ Cloud DIRECT
+ESP32 → Hospital WiFi → HiveMQ Cloud DIRECT (8883 TLS)
                               ↓
                     Mobile App (works immediately)
 ```
 
-**When used**: When PiSpot fails or ESP32 out of range.
+**When used**: 
+- PiSpot fails or ESP32 out of range
+- ESP32 automatically detects it's NOT on PiSpot (IP not 10.42.0.x)
+- ESP32 connects directly to HiveMQ Cloud
+- Bridge script not needed (ESP32 handles cloud connection directly)
 
 ---
 
@@ -184,6 +193,62 @@ void _ensureAhuRegistered(String topicData) {
    - Username: `almed`
    - Password: `YourSecurePassword123!`
 4. **Save password NOW** (you won't see it again!)
+
+#### 4. Setup Raspberry Pi Bridge Script (Required for PiSpot)
+
+The bridge script forwards all MQTT messages from local Pi broker to HiveMQ Cloud.
+
+**4.1 Install Python MQTT Library:**
+
+```bash
+sudo pip3 install paho-mqtt
+```
+
+**4.2 Update Bridge Script Credentials:**
+
+Edit `/home/almed/Documents/almed_ahu/mqtt_bridge.py`:
+
+```python
+# CLOUD BROKER (HiveMQ Cloud)
+CLOUD_BROKER = "YOUR_CLUSTER_URL.s1.eu.hivemq.cloud"  # Your HiveMQ cluster URL
+CLOUD_PORT = 8883
+CLOUD_USER = "almed"
+CLOUD_PASS = "YourSecurePassword123!"  # Your HiveMQ password
+```
+
+**4.3 Install Bridge as Systemd Service:**
+
+```bash
+# Copy service file
+sudo cp /home/almed/Documents/almed_ahu/mqtt-bridge.service /etc/systemd/system/
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable service (starts on boot)
+sudo systemctl enable mqtt-bridge.service
+
+# Start service
+sudo systemctl start mqtt-bridge.service
+
+# Check status
+sudo systemctl status mqtt-bridge.service
+
+# View logs
+sudo journalctl -u mqtt-bridge -f
+```
+
+**4.4 Verify Bridge is Working:**
+
+```bash
+# Check bridge is forwarding
+sudo journalctl -u mqtt-bridge | grep "Bridge ready"
+
+# Expected output:
+# ✓ Connected to LOCAL broker (Raspberry Pi)
+# ✓ Connected to CLOUD broker (HiveMQ)
+# Bridge ready: LOCAL → CLOUD forwarding active
+```
 
 ---
 

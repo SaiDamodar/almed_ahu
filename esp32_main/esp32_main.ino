@@ -219,6 +219,7 @@ void clearSystemState(){
 
 // ---------- Logging ----------
 void mqttPublishLog(const char* level, const String& msg){
+  // Publish logs to both brokers (only cloud when NOT on PiSpot)
   StaticJsonDocument<240> doc;
   doc["ts"]  = millis();
   doc["lvl"] = level;
@@ -226,12 +227,12 @@ void mqttPublishLog(const char* level, const String& msg){
   char buf[280];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   
-  // Publish to LOCAL broker
+  // Publish to LOCAL broker (always when connected - RPI bridge forwards to cloud)
   if(mqttLocal.connected()) {
     mqttLocal.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
   }
-  // Publish to CLOUD broker
-  if(mqttCloud.connected()) {
+  // Publish to CLOUD broker only when NOT on PiSpot (Hospital WiFi fallback)
+  if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
   }
 }
@@ -498,12 +499,12 @@ void publishTelemetry(){
   char buf[576];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   
-  // Publish to LOCAL broker
+  // Publish to LOCAL broker (always when connected - RPI bridge forwards to cloud)
   if(mqttLocal.connected()) {
     mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
   }
-  // Publish to CLOUD broker
-  if(mqttCloud.connected()) {
+  // Publish to CLOUD broker only when NOT on PiSpot (Hospital WiFi fallback)
+  if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
   }
 }
@@ -525,12 +526,12 @@ void publishState(){
   char buf[640];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   
-  // Publish to LOCAL broker (retained)
+  // Publish to LOCAL broker (retained - RPI bridge forwards to cloud)
   if(mqttLocal.connected()) {
     mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
   }
-  // Publish to CLOUD broker (retained)
-  if(mqttCloud.connected()) {
+  // Publish to CLOUD broker (retained) only when NOT on PiSpot (Hospital WiFi fallback)
+  if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
   }
 }
@@ -725,12 +726,12 @@ void rotateWifiIfNeeded(){
 
 // ================================ MQTT ======================================
 void publishStatusOnline(){
-  // Publish to LOCAL broker
+  // Publish to LOCAL broker (always when connected)
   if(mqttLocal.connected()) {
     mqttLocal.publish(tStatus().c_str(), "online", true);
   }
-  // Publish to CLOUD broker
-  if(mqttCloud.connected()) {
+  // Publish to CLOUD broker only when NOT on PiSpot (RPI bridge forwards from local)
+  if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tStatus().c_str(), "online", true);
   }
 }
@@ -939,8 +940,28 @@ void ensureMqttLocal(){
   }
 }
 
+// ========== NETWORK DETECTION ==========
+// Detect if ESP32 is connected to PiSpot (10.42.0.x network)
+bool isOnPiSpot() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  IPAddress localIP = WiFi.localIP();
+  // PiSpot uses 10.42.0.x IP range
+  return (localIP[0] == 10 && localIP[1] == 42 && localIP[2] == 0);
+}
+
 // ========== CLOUD MQTT CONNECTION (Priority 2) ==========
+// Only connects when NOT on PiSpot (fallback: Hospital WiFi direct to cloud)
 void ensureMqttCloud(){
+  // If on PiSpot, disconnect from cloud (RPI bridge will handle forwarding)
+  if (isOnPiSpot()) {
+    if (mqttCloud.connected()) {
+      mqttCloud.disconnect();
+      Serial.println("⚠️ On PiSpot - Disconnected from cloud (RPI bridge handles forwarding)");
+    }
+    return;
+  }
+  
+  // Only connect to cloud when NOT on PiSpot (Hospital WiFi fallback)
   if(mqttCloud.connected()) return;
   if (WiFi.status()!=WL_CONNECTED) return;
 
@@ -959,7 +980,7 @@ void ensureMqttCloud(){
                          tStatus().c_str(), 1, true, "offline");
   if(ok){
     mqttCloud.subscribe(tCmd().c_str(), 1);
-    motorLogMsg("✓ CLOUD MQTT connected (" + mqttHostCloud + ":" + String(MQTT_PORT_CLOUD) + ")");
+    motorLogMsg("✓ CLOUD MQTT connected (Hospital WiFi → HiveMQ direct: " + mqttHostCloud + ":" + String(MQTT_PORT_CLOUD) + ")");
     publishStatusOnline();
     publishState();
   }else{
