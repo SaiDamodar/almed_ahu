@@ -505,8 +505,8 @@ class _ComponentStatus extends StatelessWidget {
     );
   }
 
-  String _getFanLabel(int fanSpeed) {
-    switch (fanSpeed) {
+  String _getFanLabel(int? fanSpeed) {
+    switch (fanSpeed ?? 0) {
       case 0:
         return 'Fan (OFF)';
       case 1:
@@ -516,7 +516,7 @@ class _ComponentStatus extends StatelessWidget {
       case 3:
         return 'Fan (HIGH)';
       default:
-        return 'Fan';
+        return 'Fan (OFF)';  // Default to OFF
     }
   }
 }
@@ -762,6 +762,7 @@ class _FanControl extends StatelessWidget {
       builder: (context, data, child) {
         final currentSpeed = data.state?.fanSpeed ?? 0;
         final isFanOn = data.state?.fan ?? false;
+        final isSystemRunning = data.state?.run ?? false;
 
         return Container(
           padding: const EdgeInsets.all(20),
@@ -812,10 +813,11 @@ class _FanControl extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               // Single toggle button - cycles LOW → MID → HIGH → LOW
+              // Only enabled when system is running
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: data.isOnline
+                  onPressed: (data.isOnline && isSystemRunning)
                       ? () {
                           final provider = Provider.of<AppProvider>(context, listen: false);
                           provider.toggleFanSpeed(ahuId);
@@ -854,29 +856,65 @@ class _FanControl extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _FanSpeedIndicator(
-                      label: 'LOW',
-                      speed: 1,
-                      isActive: currentSpeed == 1,
-                      color: const Color(0xFF6EE7B7),
-                    ),
-                    const SizedBox(width: 8),
-                    _FanSpeedIndicator(
-                      label: 'MID',
-                      speed: 2,
-                      isActive: currentSpeed == 2,
-                      color: const Color(0xFF34D399),
-                    ),
-                    const SizedBox(width: 8),
-                    _FanSpeedIndicator(
-                      label: 'HIGH',
-                      speed: 3,
-                      isActive: currentSpeed == 3,
-                      color: const Color(0xFF10B981),
-                    ),
+                    // Show OFF indicator when system not running
+                    if (!isSystemRunning || currentSpeed == 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Colors.grey.shade400,
+                            width: 2,
+                          ),
+                        ),
+                        child: Text(
+                          'OFF',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      )
+                    else ...[
+                      _FanSpeedIndicator(
+                        label: 'LOW',
+                        speed: 1,
+                        isActive: currentSpeed == 1,
+                        color: const Color(0xFF6EE7B7),
+                      ),
+                      const SizedBox(width: 8),
+                      _FanSpeedIndicator(
+                        label: 'MID',
+                        speed: 2,
+                        isActive: currentSpeed == 2,
+                        color: const Color(0xFF34D399),
+                      ),
+                      const SizedBox(width: 8),
+                      _FanSpeedIndicator(
+                        label: 'HIGH',
+                        speed: 3,
+                        isActive: currentSpeed == 3,
+                        color: const Color(0xFF10B981),
+                      ),
+                    ],
                   ],
                 ),
               ),
+              // Show message when system not running
+              if (!isSystemRunning) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Fan will turn ON when system starts',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
+                    fontStyle: FontStyle.italic,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ],
           ),
         );
@@ -886,6 +924,8 @@ class _FanControl extends StatelessWidget {
 
   String _getFanSpeedLabel(int speed) {
     switch (speed) {
+      case 0:
+        return 'OFF';
       case 1:
         return 'LOW (5V)';
       case 2:
@@ -893,12 +933,14 @@ class _FanControl extends StatelessWidget {
       case 3:
         return 'HIGH (12V)';
       default:
-        return 'LOW (5V)';  // Default to LOW (no OFF mode)
+        return 'OFF';  // Default to OFF (fan off when system not running)
     }
   }
 
   Color _getFanSpeedColor(int speed) {
     switch (speed) {
+      case 0:
+        return Colors.grey;  // Grey for OFF
       case 1:
         return const Color(0xFF6EE7B7);  // Light green
       case 2:
@@ -906,7 +948,7 @@ class _FanControl extends StatelessWidget {
       case 3:
         return const Color(0xFF10B981);  // Dark green
       default:
-        return const Color(0xFF6EE7B7);  // Default to LOW color
+        return Colors.grey;  // Default to grey (OFF)
     }
   }
 }

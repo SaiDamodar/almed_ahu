@@ -125,12 +125,14 @@ class ControlPanel extends StatelessWidget {
   }
 
   Widget _buildFanControl(BuildContext context) {
-    final currentSpeed = state?.fanSpeed ?? 1;  // Default to 1 (LOW) instead of 0
-    final isFanOn = state?.fan ?? true;  // Fan is always on (at minimum LOW)
+    final currentSpeed = state?.fanSpeed ?? 0;  // Default to 0 (OFF) when system not running
+    final isFanOn = state?.fan ?? false;  // Fan is OFF until system starts
+    final isSystemRunning = state?.run ?? false;
 
-    Color speedColor = Colors.green.shade300;
-    if (currentSpeed == 2) speedColor = Colors.green.shade600;
-    if (currentSpeed == 3) speedColor = Colors.green.shade900;
+    Color speedColor = Colors.grey;
+    if (currentSpeed == 1) speedColor = Colors.green.shade300;
+    else if (currentSpeed == 2) speedColor = Colors.green.shade600;
+    else if (currentSpeed == 3) speedColor = Colors.green.shade900;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -164,10 +166,11 @@ class ControlPanel extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           // Single toggle button - cycles LOW → MID → HIGH → LOW
+          // Only enabled when system is running
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: isOnline
+              onPressed: (isOnline && isSystemRunning)
                   ? () {
                       final provider = Provider.of<AppProvider>(context, listen: false);
                       provider.toggleFanSpeed(ahuId);
@@ -198,13 +201,48 @@ class ControlPanel extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _FanSpeedIndicator(label: 'LOW', speed: 1, isActive: currentSpeed == 1),
-              const SizedBox(width: 8),
-              _FanSpeedIndicator(label: 'MID', speed: 2, isActive: currentSpeed == 2),
-              const SizedBox(width: 8),
-              _FanSpeedIndicator(label: 'HIGH', speed: 3, isActive: currentSpeed == 3),
+              if (!isSystemRunning || currentSpeed == 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: Colors.grey.shade400,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Text(
+                    'OFF',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                )
+              else ...[
+                _FanSpeedIndicator(label: 'LOW', speed: 1, isActive: currentSpeed == 1),
+                const SizedBox(width: 8),
+                _FanSpeedIndicator(label: 'MID', speed: 2, isActive: currentSpeed == 2),
+                const SizedBox(width: 8),
+                _FanSpeedIndicator(label: 'HIGH', speed: 3, isActive: currentSpeed == 3),
+              ],
             ],
           ),
+          // Show message when system not running
+          if (!isSystemRunning) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Fan will turn ON when system starts',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade600,
+                fontStyle: FontStyle.italic,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
       ),
     );
@@ -212,6 +250,8 @@ class ControlPanel extends StatelessWidget {
 
   String _getFanSpeedLabel(int speed) {
     switch (speed) {
+      case 0:
+        return 'OFF';
       case 1:
         return 'LOW (5V)';
       case 2:
@@ -219,7 +259,7 @@ class ControlPanel extends StatelessWidget {
       case 3:
         return 'HIGH (12V)';
       default:
-        return 'LOW (5V)';  // Default to LOW (no OFF mode)
+        return 'OFF';  // Default to OFF (fan off when system not running)
     }
   }
 }

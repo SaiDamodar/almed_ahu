@@ -87,15 +87,18 @@ unsigned long heatLastOnAt  = 0, heatLastOffAt = 0;
 // NOTE: Fan relays are ACTIVE LOW (LOW = relay ON, HIGH = relay OFF)
 // This matches CP/HEAT relay behavior: LOW = ON, HIGH = OFF
 
-// Fan speed modes (OFF removed - fan always runs at minimum LOW speed)
+// Fan speed modes
+// NOTE: FAN_OFF is internal only (used when system is not running)
+// Users can only select LOW/MID/HIGH when system is running
 enum FanSpeed {
+  FAN_OFF = 0,    // Internal: Fan OFF (system not running)
   FAN_LOW = 1,    // 5V (low speed) - LM2596 #1
   FAN_MID = 2,    // 9V (medium speed) - LM2596 #2
   FAN_HIGH = 3    // 12V (high speed) - LM2596 #3
 };
 
-FanSpeed fanSpeed = FAN_LOW;  // Fan always starts at LOW (no OFF mode)
-bool fanOn = true;  // Fan is always on (at minimum LOW speed)
+FanSpeed fanSpeed = FAN_OFF;  // Fan starts OFF - only turns on when system starts
+bool fanOn = false;  // Fan is OFF until system starts
 bool fanManualMode = false;  // When true, automatic control is disabled
 unsigned long fanManualModeUntil = 0;  // Timestamp when manual mode expires (0 = never expires)
 
@@ -250,14 +253,14 @@ void emergencyStopMotors(){
   emergencyStopFan();
 }
 
-// Emergency: set fan to LOW speed minimum (never OFF)
+// Emergency: turn fan OFF (system failure)
 void emergencyStopFan() {
-  digitalWrite(PIN_FAN_RELAY_LOW, LOW);    // Relay ON (LOW speed)
+  digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
   digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
   digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
-  fanSpeed = FAN_LOW;
-  fanOn = true;
-  Serial.println("⚠️ EMERGENCY: Fan set to LOW speed (minimum)");
+  fanSpeed = FAN_OFF;
+  fanOn = false;
+  Serial.println("⚠️ EMERGENCY: Fan turned OFF");
 }
 
 // ---------- Relay writers (open-drain: LOW=ON, HIGH=OFF) ----------
@@ -329,8 +332,17 @@ void setFanSpeed(FanSpeed speed) {
   fanSpeed = speed;
   
   switch (speed) {
-    // Note: FAN_OFF removed - fan always runs at minimum LOW speed
-    // case FAN_OFF removed - fan never turns off
+    case FAN_OFF:
+      // All relays OFF - HIGH = relay OFF for ACTIVE LOW
+      digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
+      digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
+      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
+      fanOn = false;
+      motorLogMsg("Fan: OFF (system not running)");
+      Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
+      Serial.print(" GPIO13="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
+      break;
       
     case FAN_LOW:
       // Connect LM2596 #1 (5V) to fan - LOW = relay ON for ACTIVE LOW
@@ -401,9 +413,9 @@ void controlFan(float temp, float hum) {
   lastFanControlCheck = now;
   
   if (!runState) {
-    // System not running -> fan stays at LOW speed minimum (never OFF)
-    if (!fanManualMode && fanSpeed != FAN_LOW) {
-      setFanSpeed(FAN_LOW);
+    // System not running -> turn fan OFF
+    if (!fanManualMode && fanSpeed != FAN_OFF) {
+      setFanSpeed(FAN_OFF);
     }
     return;
   }
@@ -442,6 +454,11 @@ void startSystem(){
       m1StopAt = millis() + M1_START_RUN; 
       m2ScheduledAfterM1 = false; // will be set when M1 stops
     }
+    // Turn fan ON to LOW speed when system starts
+    if (fanSpeed == FAN_OFF) {
+      setFanSpeed(FAN_LOW);
+      motorLogMsg("Fan: Turned ON (LOW speed) - system started");
+    }
     motorLogMsg("[RUN] STARTED");
   }
 }
@@ -452,6 +469,11 @@ void stopSystem(){
   shuttingDown = true;
   shutdownStarted = false;   // NEW: ensure we start M1 post-drain only once
   shutdownM2Pending = false;
+  // Turn fan OFF when system stops
+  if (fanSpeed != FAN_OFF) {
+    setFanSpeed(FAN_OFF);
+    motorLogMsg("Fan: Turned OFF - system stopped");
+  }
   clearSystemState(); // Clear saved state on intentional stop
   motorLogMsg("[RUN] STOP requested → Shutdown Drain");
 }
@@ -794,11 +816,22 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
   
   // ========== FAN CONTROL COMMANDS ==========
   // Toggle fan speed: LOW → MID → HIGH → LOW (cycles through speeds)
+  // Only works when system is running (fan must be ON)
   if (doc.containsKey("fanToggle")){
+    // Only toggle if system is running
+    if (!runState) {
+      motorLogMsg("Fan: Cannot toggle - system not running");
+      return;
+    }
+    
     // Cycle through speeds: LOW → MID → HIGH → LOW
     FanSpeed nextSpeed = FAN_LOW;  // Default to LOW
     
     switch (fanSpeed) {
+      case FAN_OFF:
+        // If somehow OFF, start at LOW
+        nextSpeed = FAN_LOW;
+        break;
       case FAN_LOW:
         nextSpeed = FAN_MID;
         break;
@@ -824,15 +857,26 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
     motorLogMsg("Fan toggled to: " + String((int)nextSpeed) + " (Manual mode enabled)");
   }
   
-  // Legacy support: direct speed setting (0=OFF removed, now maps to LOW)
+  // Legacy support: direct speed setting (0=OFF ignored when system running)
   if (doc.containsKey("fan")){
     int speed = doc["fan"].as<int>();
     if (speed >= 0 && speed <= 3){
-      FanSpeed targetSpeed = FAN_LOW;
-      if (speed == 1) targetSpeed = FAN_LOW;
+      // Only allow speed changes when system is running
+      if (!runState && speed != 0) {
+        motorLogMsg("Fan: Cannot set speed - system not running");
+        return;
+      }
+      
+      FanSpeed targetSpeed = FAN_OFF;
+      if (speed == 0) targetSpeed = FAN_OFF;
+      else if (speed == 1) targetSpeed = FAN_LOW;
       else if (speed == 2) targetSpeed = FAN_MID;
       else if (speed == 3) targetSpeed = FAN_HIGH;
-      else targetSpeed = FAN_LOW;  // speed 0 or invalid → LOW (no OFF)
+      
+      // If trying to set fan ON when system not running, ignore
+      if (!runState && targetSpeed != FAN_OFF) {
+        return;
+      }
       
       fanManualMode = true;
       if (FAN_MANUAL_MODE_TIMEOUT > 0) {
@@ -841,7 +885,11 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
         fanManualModeUntil = 0;
       }
       setFanSpeed(targetSpeed);
-      motorLogMsg("Fan speed set via MQTT: " + String((int)targetSpeed) + " (Manual mode enabled)");
+      if (targetSpeed == FAN_OFF) {
+        motorLogMsg("Fan turned OFF via MQTT");
+      } else {
+        motorLogMsg("Fan speed set via MQTT: " + String((int)targetSpeed) + " (Manual mode enabled)");
+      }
     }
   }
   
@@ -995,14 +1043,14 @@ void setup(){
   pinMode(PIN_FAN_RELAY_MID, OUTPUT);
   pinMode(PIN_FAN_RELAY_HIGH, OUTPUT);
   
-  // Fan always starts at LOW speed (no OFF mode)
-  // Initialize to LOW: GPIO18=LOW (ON), others HIGH (OFF)
-  digitalWrite(PIN_FAN_RELAY_LOW, LOW);    // Relay ON (ACTIVE LOW)
+  // Fan starts OFF - only turns on when system starts
+  // Initialize to OFF: all relays HIGH (OFF)
+  digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
   digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
   digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
   delay(100);  // Allow relays to settle
-  fanSpeed = FAN_LOW;
-  fanOn = true;
+  fanSpeed = FAN_OFF;
+  fanOn = false;
   
   Serial.println("✓ Fan control initialized (3 LM2596 + 3 relay, ACTIVE LOW)");
   Serial.println("  Fan Relay LOW:  GPIO 18 (LM2596 #1: 5V)");

@@ -71,6 +71,8 @@ class MotorStatus extends StatelessWidget {
 
   String _getFanLabel(int fanSpeed) {
     switch (fanSpeed) {
+      case 0:
+        return 'Fan (OFF)';
       case 1:
         return 'Fan (LOW)';
       case 2:
@@ -78,7 +80,7 @@ class MotorStatus extends StatelessWidget {
       case 3:
         return 'Fan (HIGH)';
       default:
-        return 'Fan (LOW)';  // Default to LOW (no OFF mode)
+        return 'Fan (OFF)';  // Default to OFF (fan off when system not running)
     }
   }
 
