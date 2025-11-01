@@ -145,10 +145,15 @@ class MqttService {
     sendCommand(ahu, {'humset': humidity});
   }
 
-  /// Set fan speed (0=OFF, 1=LOW, 2=MID, 3=HIGH)
+  /// Set fan speed (1=LOW, 2=MID, 3=HIGH) - OFF mode removed
   void setFanSpeed(AhuUnit ahu, int speed) {
-    if (speed < 0 || speed > 3) return;
+    if (speed < 1 || speed > 3) return;  // Removed OFF (0), minimum is LOW (1)
     sendCommand(ahu, {'fan': speed});
+  }
+
+  /// Toggle fan speed: LOW → MID → HIGH → LOW (cycles through speeds)
+  void toggleFanSpeed(AhuUnit ahu) {
+    sendCommand(ahu, {'fanToggle': true});
   }
 
   /// Provision WiFi credentials

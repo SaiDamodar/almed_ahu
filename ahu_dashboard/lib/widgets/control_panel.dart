@@ -125,8 +125,12 @@ class ControlPanel extends StatelessWidget {
   }
 
   Widget _buildFanControl(BuildContext context) {
-    final currentSpeed = state?.fanSpeed ?? 0;
-    final isFanOn = state?.fan ?? false;
+    final currentSpeed = state?.fanSpeed ?? 1;  // Default to 1 (LOW) instead of 0
+    final isFanOn = state?.fan ?? true;  // Fan is always on (at minimum LOW)
+
+    Color speedColor = Colors.green.shade300;
+    if (currentSpeed == 2) speedColor = Colors.green.shade600;
+    if (currentSpeed == 3) speedColor = Colors.green.shade900;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -139,7 +143,7 @@ class ControlPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.air, color: Colors.green, size: 32),
+              Icon(Icons.air, color: speedColor, size: 32),
               const SizedBox(width: 12),
               const Text(
                 'Fan Control',
@@ -159,47 +163,46 @@ class ControlPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          // Single toggle button - cycles LOW → MID → HIGH → LOW
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: isOnline
+                  ? () {
+                      final provider = Provider.of<AppProvider>(context, listen: false);
+                      provider.toggleFanSpeed(ahuId);
+                    }
+                  : null,
+              icon: Icon(Icons.air, size: 24, color: speedColor),
+              label: Text(
+                'Toggle Fan Speed',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: speedColor,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: speedColor.withOpacity(0.1),
+                foregroundColor: speedColor,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(color: speedColor, width: 2),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Speed indicators
           Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Expanded(
-                child: _buildFanSpeedButton(
-                  context,
-                  label: 'OFF',
-                  speed: 0,
-                  isSelected: currentSpeed == 0,
-                  color: Colors.grey,
-                ),
-              ),
+              _FanSpeedIndicator(label: 'LOW', speed: 1, isActive: currentSpeed == 1),
               const SizedBox(width: 8),
-              Expanded(
-                child: _buildFanSpeedButton(
-                  context,
-                  label: 'LOW',
-                  speed: 1,
-                  isSelected: currentSpeed == 1,
-                  color: Colors.green.shade300,
-                ),
-              ),
+              _FanSpeedIndicator(label: 'MID', speed: 2, isActive: currentSpeed == 2),
               const SizedBox(width: 8),
-              Expanded(
-                child: _buildFanSpeedButton(
-                  context,
-                  label: 'MID',
-                  speed: 2,
-                  isSelected: currentSpeed == 2,
-                  color: Colors.green.shade600,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildFanSpeedButton(
-                  context,
-                  label: 'HIGH',
-                  speed: 3,
-                  isSelected: currentSpeed == 3,
-                  color: Colors.green.shade900,
-                ),
-              ),
+              _FanSpeedIndicator(label: 'HIGH', speed: 3, isActive: currentSpeed == 3),
             ],
           ),
         ],
@@ -207,42 +210,8 @@ class ControlPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildFanSpeedButton(
-    BuildContext context, {
-    required String label,
-    required int speed,
-    required bool isSelected,
-    required Color color,
-  }) {
-    return ElevatedButton(
-      onPressed: isOnline && !isSelected
-          ? () {
-              final provider = Provider.of<AppProvider>(context, listen: false);
-              provider.setFanSpeed(ahuId, speed);
-            }
-          : null,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? color : Colors.grey.shade200,
-        foregroundColor: isSelected ? Colors.white : Colors.grey.shade700,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
   String _getFanSpeedLabel(int speed) {
     switch (speed) {
-      case 0:
-        return 'OFF';
       case 1:
         return 'LOW (5V)';
       case 2:
@@ -250,8 +219,47 @@ class ControlPanel extends StatelessWidget {
       case 3:
         return 'HIGH (12V)';
       default:
-        return 'UNKNOWN';
+        return 'LOW (5V)';  // Default to LOW (no OFF mode)
     }
+  }
+}
+
+class _FanSpeedIndicator extends StatelessWidget {
+  final String label;
+  final int speed;
+  final bool isActive;
+
+  const _FanSpeedIndicator({
+    required this.label,
+    required this.speed,
+    required this.isActive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Color color = Colors.green.shade300;
+    if (speed == 2) color = Colors.green.shade600;
+    if (speed == 3) color = Colors.green.shade900;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isActive ? color : Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isActive ? color : Colors.grey.shade400,
+          width: 1.5,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: isActive ? Colors.white : Colors.grey.shade700,
+        ),
+      ),
+    );
   }
 
   Widget _buildSetpointControl(

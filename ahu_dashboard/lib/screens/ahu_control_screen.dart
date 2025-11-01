@@ -811,64 +811,71 @@ class _FanControl extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _FanSpeedButton(
-                      label: 'OFF',
-                      speed: 0,
-                      isSelected: currentSpeed == 0,
-                      color: Colors.grey,
-                      isEnabled: data.isOnline,
-                      onPressed: () {
-                        final provider = Provider.of<AppProvider>(context, listen: false);
-                        provider.setFanSpeed(ahuId, 0);
-                      },
+              // Single toggle button - cycles LOW → MID → HIGH → LOW
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: data.isOnline
+                      ? () {
+                          final provider = Provider.of<AppProvider>(context, listen: false);
+                          provider.toggleFanSpeed(ahuId);
+                        }
+                      : null,
+                  icon: Icon(
+                    Icons.air_rounded,
+                    size: 28,
+                    color: _getFanSpeedColor(currentSpeed),
+                  ),
+                  label: Text(
+                    'Toggle Fan Speed',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _getFanSpeedColor(currentSpeed),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _FanSpeedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _getFanSpeedColor(currentSpeed).withOpacity(0.1),
+                    foregroundColor: _getFanSpeedColor(currentSpeed),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(
+                        color: _getFanSpeedColor(currentSpeed),
+                        width: 2,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Display current speed with indicator
+              Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _FanSpeedIndicator(
                       label: 'LOW',
                       speed: 1,
-                      isSelected: currentSpeed == 1,
+                      isActive: currentSpeed == 1,
                       color: const Color(0xFF6EE7B7),
-                      isEnabled: data.isOnline,
-                      onPressed: () {
-                        final provider = Provider.of<AppProvider>(context, listen: false);
-                        provider.setFanSpeed(ahuId, 1);
-                      },
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _FanSpeedButton(
+                    const SizedBox(width: 8),
+                    _FanSpeedIndicator(
                       label: 'MID',
                       speed: 2,
-                      isSelected: currentSpeed == 2,
+                      isActive: currentSpeed == 2,
                       color: const Color(0xFF34D399),
-                      isEnabled: data.isOnline,
-                      onPressed: () {
-                        final provider = Provider.of<AppProvider>(context, listen: false);
-                        provider.setFanSpeed(ahuId, 2);
-                      },
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _FanSpeedButton(
+                    const SizedBox(width: 8),
+                    _FanSpeedIndicator(
                       label: 'HIGH',
                       speed: 3,
-                      isSelected: currentSpeed == 3,
+                      isActive: currentSpeed == 3,
                       color: const Color(0xFF10B981),
-                      isEnabled: data.isOnline,
-                      onPressed: () {
-                        final provider = Provider.of<AppProvider>(context, listen: false);
-                        provider.setFanSpeed(ahuId, 3);
-                      },
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -879,8 +886,6 @@ class _FanControl extends StatelessWidget {
 
   String _getFanSpeedLabel(int speed) {
     switch (speed) {
-      case 0:
-        return 'OFF';
       case 1:
         return 'LOW (5V)';
       case 2:
@@ -888,45 +893,55 @@ class _FanControl extends StatelessWidget {
       case 3:
         return 'HIGH (12V)';
       default:
-        return 'UNKNOWN';
+        return 'LOW (5V)';  // Default to LOW (no OFF mode)
+    }
+  }
+
+  Color _getFanSpeedColor(int speed) {
+    switch (speed) {
+      case 1:
+        return const Color(0xFF6EE7B7);  // Light green
+      case 2:
+        return const Color(0xFF34D399);  // Medium green
+      case 3:
+        return const Color(0xFF10B981);  // Dark green
+      default:
+        return const Color(0xFF6EE7B7);  // Default to LOW color
     }
   }
 }
 
-class _FanSpeedButton extends StatelessWidget {
+class _FanSpeedIndicator extends StatelessWidget {
   final String label;
   final int speed;
-  final bool isSelected;
+  final bool isActive;
   final Color color;
-  final bool isEnabled;
-  final VoidCallback onPressed;
 
-  const _FanSpeedButton({
+  const _FanSpeedIndicator({
     required this.label,
     required this.speed,
-    required this.isSelected,
+    required this.isActive,
     required this.color,
-    required this.isEnabled,
-    required this.onPressed,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton(
-      onPressed: isEnabled && !isSelected ? onPressed : null,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? color : Colors.grey.shade200,
-        foregroundColor: isSelected ? Colors.white : Colors.grey.shade700,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isActive ? color : Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isActive ? color : Colors.grey.shade400,
+          width: 2,
         ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
       ),
       child: Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.bold,
+          color: isActive ? Colors.white : Colors.grey.shade700,
         ),
       ),
     );

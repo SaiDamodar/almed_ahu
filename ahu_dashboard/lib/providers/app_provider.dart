@@ -216,11 +216,19 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  /// Set fan speed (0=OFF, 1=LOW, 2=MID, 3=HIGH)
+  /// Set fan speed (1=LOW, 2=MID, 3=HIGH) - OFF mode removed
   void setFanSpeed(String ahuId, int speed) {
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
       _mqttService?.setFanSpeed(ahu, speed);
+    }
+  }
+
+  /// Toggle fan speed: LOW → MID → HIGH → LOW (cycles through speeds)
+  void toggleFanSpeed(String ahuId) {
+    final ahu = _ahuUnits[ahuId];
+    if (ahu != null) {
+      _mqttService?.toggleFanSpeed(ahu);
     }
   }
 

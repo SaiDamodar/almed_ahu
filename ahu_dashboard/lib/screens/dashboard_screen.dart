@@ -449,9 +449,7 @@ class _SensorDisplay extends StatelessWidget {
 }
 
 String _getFanLabel(int? fanSpeed) {
-  switch (fanSpeed ?? 0) {
-    case 0:
-      return 'Fan OFF';
+  switch (fanSpeed ?? 1) {  // Default to 1 (LOW) instead of 0 (OFF)
     case 1:
       return 'Fan LOW';
     case 2:
@@ -459,7 +457,7 @@ String _getFanLabel(int? fanSpeed) {
     case 3:
       return 'Fan HIGH';
     default:
-      return 'Fan';
+      return 'Fan LOW';  // Default to LOW (no OFF mode)
   }
 }
 

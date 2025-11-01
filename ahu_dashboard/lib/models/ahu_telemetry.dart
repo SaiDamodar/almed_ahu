@@ -47,11 +47,9 @@ class AhuTelemetry {
   /// Check if sensor data is valid
   bool get hasSensorData => temp != null && hum != null;
 
-  /// Get fan speed display string
+  /// Get fan speed display string (OFF mode removed - always at minimum LOW)
   String get fanSpeedDisplay {
     switch (fanSpeed) {
-      case 0:
-        return 'OFF';
       case 1:
         return 'LOW (5V)';
       case 2:
@@ -59,7 +57,7 @@ class AhuTelemetry {
       case 3:
         return 'HIGH (12V)';
       default:
-        return 'UNKNOWN';
+        return 'LOW (5V)';  // Default to LOW (no OFF mode)
     }
   }
 }
