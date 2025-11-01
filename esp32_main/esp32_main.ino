@@ -241,6 +241,18 @@ void emergencyStopMotors(){
   if (m2Active) { m2_stop(); Serial.println("⚠️ EMERGENCY: Motor-2 stopped (WiFi/system failure)"); }
   if (cpOn) { cpWrite(false); cpOn=false; Serial.println("⚠️ EMERGENCY: CP stopped"); }
   if (heatOn) { heatWrite(false); heatOn=false; Serial.println("⚠️ EMERGENCY: Heater stopped"); }
+  // Emergency: Turn OFF all fan relays
+  emergencyStopFan();
+}
+
+// Emergency stop fan (turn OFF all relays)
+void emergencyStopFan() {
+  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
+  digitalWrite(PIN_FAN_RELAY_MID, LOW);
+  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  fanSpeed = FAN_OFF;
+  fanOn = false;
+  Serial.println("⚠️ EMERGENCY: All fan relays OFF");
 }
 
 // ---------- Relay writers (open-drain: LOW=ON, HIGH=OFF) ----------
@@ -299,43 +311,66 @@ void controlHeater(float h){
 // ========== FAN CONTROL FUNCTIONS (3 LM2596 + 3 Relay) ==========
 // Set fan speed - only ONE relay ON at a time
 // Each relay connects one LM2596 output (5V, 9V, or 12V) to the fan
+// NOTE: Assumes relay modules are ACTIVE HIGH (HIGH = relay ON, LOW = relay OFF)
+// If your relays are ACTIVE LOW, invert the HIGH/LOW values below
 void setFanSpeed(FanSpeed speed) {
   if (speed == fanSpeed) return;  // No change needed
   
-  // IMPORTANT: Turn OFF all relays first (safety - prevents short circuits)
+  // CRITICAL: Turn OFF all relays first (safety - prevents short circuits)
   digitalWrite(PIN_FAN_RELAY_LOW, LOW);
   digitalWrite(PIN_FAN_RELAY_MID, LOW);
   digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
-  delay(50);  // Allow relays to settle before switching
+  delay(100);  // Allow relays to settle before switching (increased delay for safety)
   
   fanSpeed = speed;
   
   switch (speed) {
     case FAN_OFF:
-      // All relays already OFF
+      // All relays already OFF - double check to ensure all are OFF
+      digitalWrite(PIN_FAN_RELAY_LOW, LOW);
+      digitalWrite(PIN_FAN_RELAY_MID, LOW);
+      digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
       fanOn = false;
-      motorLogMsg("Fan: OFF");
+      motorLogMsg("Fan: OFF (all relays OFF)");
+      Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
+      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
       
     case FAN_LOW:
-      // Connect LM2596 #1 (5V) to fan
+      // Connect LM2596 #1 (5V) to fan - ensure only this one is ON
       digitalWrite(PIN_FAN_RELAY_LOW, HIGH);  // Relay #1 ON
+      digitalWrite(PIN_FAN_RELAY_MID, LOW);   // Relay #2 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_HIGH, LOW);  // Relay #3 OFF (safety)
       fanOn = true;
       motorLogMsg("Fan: LOW speed (5V)");
+      Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
+      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
       
     case FAN_MID:
-      // Connect LM2596 #2 (9V) to fan
-      digitalWrite(PIN_FAN_RELAY_MID, HIGH);  // Relay #2 ON
+      // Connect LM2596 #2 (9V) to fan - ensure only this one is ON
+      digitalWrite(PIN_FAN_RELAY_LOW, LOW);   // Relay #1 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay #2 ON
+      digitalWrite(PIN_FAN_RELAY_HIGH, LOW);  // Relay #3 OFF (safety)
       fanOn = true;
       motorLogMsg("Fan: MID speed (9V)");
+      Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
+      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
       
     case FAN_HIGH:
-      // Connect LM2596 #3 (12V) to fan
-      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH);  // Relay #3 ON
+      // Connect LM2596 #3 (12V) to fan - ensure only this one is ON
+      digitalWrite(PIN_FAN_RELAY_LOW, LOW);   // Relay #1 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_MID, LOW);   // Relay #2 OFF (safety)
+      digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay #3 ON
       fanOn = true;
       motorLogMsg("Fan: HIGH speed (12V)");
+      Serial.print("DEBUG: GPIO18="); Serial.print(digitalRead(PIN_FAN_RELAY_LOW));
+      Serial.print(" GPIO5="); Serial.print(digitalRead(PIN_FAN_RELAY_MID));
+      Serial.print(" GPIO4="); Serial.println(digitalRead(PIN_FAN_RELAY_HIGH));
       break;
   }
   
@@ -343,7 +378,16 @@ void setFanSpeed(FanSpeed speed) {
 }
 
 // Automatic fan control based on temperature/humidity
+// Throttled to prevent rapid switching (only checks every 2 seconds)
+static unsigned long lastFanControlCheck = 0;
+const unsigned long FAN_CONTROL_INTERVAL = 2000;  // Check every 2 seconds
+
 void controlFan(float temp, float hum) {
+  // Throttle automatic control to prevent rapid switching
+  unsigned long now = millis();
+  if (now - lastFanControlCheck < FAN_CONTROL_INTERVAL) return;
+  lastFanControlCheck = now;
+  
   if (!runState) {
     // System not running -> turn off fan
     if (fanOn) {
@@ -354,19 +398,23 @@ void controlFan(float temp, float hum) {
   
   if (isnan(temp)) return;  // Need valid temperature reading
   
+  FanSpeed targetSpeed = FAN_OFF;
+  
   // Temperature-based speed control
   if (temp >= TEMP_FAN_HIGH) {
-    setFanSpeed(FAN_HIGH);
+    targetSpeed = FAN_HIGH;
   } else if (temp >= TEMP_FAN_MID) {
-    setFanSpeed(FAN_MID);
+    targetSpeed = FAN_MID;
   } else if (temp >= TEMP_FAN_LOW) {
-    setFanSpeed(FAN_LOW);
+    targetSpeed = FAN_LOW;
   } else if (hum >= HUM_FAN_THRESHOLD) {
     // High humidity -> run at low speed
-    setFanSpeed(FAN_LOW);
-  } else {
-    // Normal conditions -> fan off
-    setFanSpeed(FAN_OFF);
+    targetSpeed = FAN_LOW;
+  }
+  
+  // Only change if speed actually needs to change
+  if (targetSpeed != fanSpeed) {
+    setFanSpeed(targetSpeed);
   }
 }
 
@@ -875,7 +923,12 @@ void setup(){
   pinMode(PIN_FAN_RELAY_MID, OUTPUT);
   pinMode(PIN_FAN_RELAY_HIGH, OUTPUT);
   
-  // All relays OFF at boot (fan OFF)
+  // All relays OFF at boot (fan OFF) - ensure all are explicitly LOW
+  digitalWrite(PIN_FAN_RELAY_LOW, LOW);
+  digitalWrite(PIN_FAN_RELAY_MID, LOW);
+  digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
+  delay(100);  // Allow relays to settle
+  // Double-check all are OFF
   digitalWrite(PIN_FAN_RELAY_LOW, LOW);
   digitalWrite(PIN_FAN_RELAY_MID, LOW);
   digitalWrite(PIN_FAN_RELAY_HIGH, LOW);
