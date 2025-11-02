@@ -52,6 +52,13 @@ dependencies:
   
   # Intl for date/time formatting
   intl: ^0.20.1
+  
+  # Firebase for mobile app
+  firebase_core: ^2.24.0
+  firebase_auth: ^4.15.0
+  firebase_messaging: ^14.7.0
+  cloud_firestore: ^4.13.0
+  firebase_storage: ^11.5.0
 
 dev_dependencies:
   flutter_test:

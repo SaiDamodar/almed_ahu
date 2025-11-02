@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import '../models/ahu_telemetry.dart';
@@ -14,6 +15,7 @@ class MqttService {
   final int port;
   final String username;
   final String password;
+  final bool useTLS;
 
   // Stream controllers for different message types
   final _telemetryController = StreamController<MapEntry<String, AhuTelemetry>>.broadcast();
@@ -37,6 +39,7 @@ class MqttService {
     this.port = 1883,
     required this.username,
     required this.password,
+    this.useTLS = false,
   });
 
   /// Connect to MQTT broker
@@ -51,6 +54,13 @@ class MqttService {
       _client!.onSubscribed = _onSubscribed;
       _client!.pongCallback = _pong;
 
+      // Enable TLS for cloud connections
+      if (useTLS) {
+        _client!.secure = true;
+        _client!.securityContext = SecurityContext.defaultContext;
+        print('MQTT: TLS enabled for secure connection');
+      }
+
       final connMessage = MqttConnectMessage()
           .withClientIdentifier('ahu_dashboard_${DateTime.now().millisecondsSinceEpoch}')
           .authenticateAs(username, password)
@@ -64,7 +74,7 @@ class MqttService {
       await _client!.connect();
 
       if (_client!.connectionStatus!.state == MqttConnectionState.connected) {
-        print('MQTT: Connected to $broker:$port');
+        print('MQTT: Connected to $broker:$port ${useTLS ? "(TLS)" : ""}');
         _isConnected = true;
         _connectionController.add(true);
 

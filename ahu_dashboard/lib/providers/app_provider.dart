@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import '../models/ahu_unit.dart';
 import '../models/ahu_telemetry.dart';
@@ -44,18 +45,40 @@ class AppProvider extends ChangeNotifier {
   }
 
   /// Initialize MQTT connection
+  /// Automatically detects platform and uses appropriate broker
+  /// Mobile: Uses HiveMQ Cloud with TLS
+  /// Desktop/Linux: Uses local MQTT broker
   Future<bool> initializeMqtt({
-    String broker = '127.0.0.1',
-    int port = 1883,
-    String username = 'almed',
-    String password = 'Almed1234\$',
+    String? broker,
+    int? port,
+    String? username,
+    String? password,
   }) async {
-    _mqttService = MqttService(
-      broker: broker,
-      port: port,
-      username: username,
-      password: password,
-    );
+    // Detect platform
+    final bool isMobile = Platform.isAndroid || Platform.isIOS;
+    
+    // Configure based on platform
+    if (isMobile) {
+      // Mobile: Use HiveMQ Cloud with TLS
+      _mqttService = MqttService(
+        broker: broker ?? 'ec1158fe4e0941df85f0a7bf133bf117.s1.eu.hivemq.cloud',
+        port: port ?? 8883,
+        username: username ?? 'almed',
+        password: password ?? 'AlMed123456',
+        useTLS: true,
+      );
+      print('AppProvider: Initializing MQTT for MOBILE (HiveMQ Cloud with TLS)');
+    } else {
+      // Desktop/Linux: Use local MQTT broker
+      _mqttService = MqttService(
+        broker: broker ?? '127.0.0.1',
+        port: port ?? 1883,
+        username: username ?? 'almed',
+        password: password ?? 'Almed1234\$',
+        useTLS: false,
+      );
+      print('AppProvider: Initializing MQTT for DESKTOP (Local broker)');
+    }
 
     // Listen to connection status
     _mqttService!.connectionStream.listen((connected) {
