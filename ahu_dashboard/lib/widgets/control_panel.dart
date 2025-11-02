@@ -46,7 +46,8 @@ class ControlPanel extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: isOnline
                     ? () {
-                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        final provider =
+                            Provider.of<AppProvider>(context, listen: false);
                         provider.toggleAhu(ahuId);
                       }
                     : null,
@@ -87,7 +88,8 @@ class ControlPanel extends StatelessWidget {
                     color: Colors.orange,
                     onChanged: isOnline
                         ? (value) {
-                            final provider = Provider.of<AppProvider>(context, listen: false);
+                            final provider = Provider.of<AppProvider>(context,
+                                listen: false);
                             provider.setTemperature(ahuId, value);
                           }
                         : null,
@@ -106,7 +108,8 @@ class ControlPanel extends StatelessWidget {
                     color: Colors.blue,
                     onChanged: isOnline
                         ? (value) {
-                            final provider = Provider.of<AppProvider>(context, listen: false);
+                            final provider = Provider.of<AppProvider>(context,
+                                listen: false);
                             provider.setHumidity(ahuId, value);
                           }
                         : null,
@@ -125,13 +128,16 @@ class ControlPanel extends StatelessWidget {
   }
 
   Widget _buildFanControl(BuildContext context) {
-    final currentSpeed = state?.fanSpeed ?? 0;  // Default to 0 (OFF) when system not running
-    final isFanOn = state?.fan ?? false;  // Fan is OFF until system starts
+    final currentSpeed =
+        state?.fanSpeed ?? 0; // Default to 0 (OFF) when system not running
+    final isFanOn = state?.fan ?? false; // Fan is OFF until system starts
     final isSystemRunning = state?.run ?? false;
 
     Color speedColor = Colors.grey;
-    if (currentSpeed == 1) speedColor = Colors.green.shade300;
-    else if (currentSpeed == 2) speedColor = Colors.green.shade600;
+    if (currentSpeed == 1) {
+      speedColor = Colors.green.shade300;
+    } else if (currentSpeed == 2)
+      speedColor = Colors.green.shade600;
     else if (currentSpeed == 3) speedColor = Colors.green.shade900;
 
     return Container(
@@ -172,7 +178,8 @@ class ControlPanel extends StatelessWidget {
             child: ElevatedButton.icon(
               onPressed: (isOnline && isSystemRunning)
                   ? () {
-                      final provider = Provider.of<AppProvider>(context, listen: false);
+                      final provider =
+                          Provider.of<AppProvider>(context, listen: false);
                       provider.toggleFanSpeed(ahuId);
                     }
                   : null,
@@ -203,7 +210,8 @@ class ControlPanel extends StatelessWidget {
             children: [
               if (!isSystemRunning || currentSpeed == 0)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(6),
@@ -222,11 +230,14 @@ class ControlPanel extends StatelessWidget {
                   ),
                 )
               else ...[
-                _FanSpeedIndicator(label: 'LOW', speed: 1, isActive: currentSpeed == 1),
+                _FanSpeedIndicator(
+                    label: 'LOW', speed: 1, isActive: currentSpeed == 1),
                 const SizedBox(width: 8),
-                _FanSpeedIndicator(label: 'MID', speed: 2, isActive: currentSpeed == 2),
+                _FanSpeedIndicator(
+                    label: 'MID', speed: 2, isActive: currentSpeed == 2),
                 const SizedBox(width: 8),
-                _FanSpeedIndicator(label: 'HIGH', speed: 3, isActive: currentSpeed == 3),
+                _FanSpeedIndicator(
+                    label: 'HIGH', speed: 3, isActive: currentSpeed == 3),
               ],
             ],
           ),
@@ -259,47 +270,8 @@ class ControlPanel extends StatelessWidget {
       case 3:
         return 'HIGH (12V)';
       default:
-        return 'OFF';  // Default to OFF (fan off when system not running)
+        return 'OFF'; // Default to OFF (fan off when system not running)
     }
-  }
-}
-
-class _FanSpeedIndicator extends StatelessWidget {
-  final String label;
-  final int speed;
-  final bool isActive;
-
-  const _FanSpeedIndicator({
-    required this.label,
-    required this.speed,
-    required this.isActive,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Color color = Colors.green.shade300;
-    if (speed == 2) color = Colors.green.shade600;
-    if (speed == 3) color = Colors.green.shade900;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: isActive ? color : Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: isActive ? color : Colors.grey.shade400,
-          width: 1.5,
-        ),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: isActive ? Colors.white : Colors.grey.shade700,
-        ),
-      ),
-    );
   }
 
   Widget _buildSetpointControl(
@@ -368,4 +340,41 @@ class _FanSpeedIndicator extends StatelessWidget {
   }
 }
 
+class _FanSpeedIndicator extends StatelessWidget {
+  final String label;
+  final int speed;
+  final bool isActive;
 
+  const _FanSpeedIndicator({
+    required this.label,
+    required this.speed,
+    required this.isActive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Color color = Colors.green.shade300;
+    if (speed == 2) color = Colors.green.shade600;
+    if (speed == 3) color = Colors.green.shade900;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isActive ? color : Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isActive ? color : Colors.grey.shade400,
+          width: 1.5,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: isActive ? Colors.white : Colors.grey.shade700,
+        ),
+      ),
+    );
+  }
+}

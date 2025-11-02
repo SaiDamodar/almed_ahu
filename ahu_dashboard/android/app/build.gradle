@@ -2,7 +2,6 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
-    id "com.google.gms.google-services"
 }
 
 def localProperties = new Properties()
@@ -30,7 +29,7 @@ if (flutterVersionName == null) {
 
 android {
     namespace "com.almed.ahu_dashboard"
-    compileSdkVersion 34
+    compileSdk 36
     
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -48,7 +47,7 @@ android {
     defaultConfig {
         applicationId "com.almed.ahu_dashboard"
         minSdkVersion flutter.minSdkVersion
-        targetSdkVersion 34
+        targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
@@ -64,10 +63,19 @@ flutter {
     source '../..'
 }
 
+// Apply Google Services plugin only if google-services.json exists
+// The plugin is required for Firebase but needs the config file
+def googleServicesFile = file("google-services.json")
+if (googleServicesFile.exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
     
-    // Firebase
+    // Firebase dependencies (required for app code)
+    // Note: Firebase will work in development even without google-services.json
+    // but you'll need the file for production/cloud features
     implementation platform('com.google.firebase:firebase-bom:32.6.0')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-firestore'
