@@ -26,6 +26,8 @@ import signal
 import time
 import hashlib
 import json
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
 
 # ========== CONFIGURATION ==========
 # LOCAL BROKER (Raspberry Pi Mosquitto)
@@ -40,6 +42,12 @@ CLOUD_BROKER = "ec1158fe4e0941df85f0a7bf133bf117.s1.eu.hivemq.cloud"  # YOUR Hiv
 CLOUD_PORT = 8883
 CLOUD_USER = "almed"
 CLOUD_PASS = "AlMed123456"  # YOUR HiveMQ password
+
+# INFLUXDB CONFIGURATION
+INFLUXDB_URL = "https://us-east-1-1.aws.cloud2.influxdata.com/"
+INFLUXDB_TOKEN = "ajBlMxmhBTC7DG3nqgdrjAFCNU5kP9SHpp1FZxy1hWKrqbNGEi1_O-v2UbXRHSAC1HTCcpyJKvlePltkhxnNrQ=="
+INFLUXDB_ORG = "ALMED AHU"
+INFLUXDB_BUCKET = "AHU_Telemetry"
 
 # LOGGING
 LOG_FILE = "/var/log/mqtt_bridge.log"
@@ -80,6 +88,84 @@ DUPLICATE_SKIP_WINDOW = 10  # Skip exact duplicates within 10 seconds
 local_devices = set()  # Set of device IDs (e.g., {"ahu-01", "ahu-02"})
 DEVICE_TIMEOUT = 300  # Remove device if no message seen for 5 minutes
 device_last_seen = {}  # device_id -> timestamp
+
+# ========== COMMAND DEDUPLICATION (Cloud → Local) ==========
+# Prevent duplicate commands from being forwarded twice
+command_cache = {}  # topic -> (payload_hash, timestamp)
+COMMAND_DEBOUNCE_MS = 500  # Ignore duplicate commands within 500ms
+
+# ========== INFLUXDB CLIENT ==========
+influxdb_client = None
+influxdb_write_api = None
+
+def init_influxdb():
+    """Initialize InfluxDB client"""
+    global influxdb_client, influxdb_write_api
+    try:
+        influxdb_client = InfluxDBClient(
+            url=INFLUXDB_URL,
+            token=INFLUXDB_TOKEN,
+            org=INFLUXDB_ORG
+        )
+        influxdb_write_api = influxdb_client.write_api(write_options=SYNCHRONOUS)
+        logger.info(f"✓ InfluxDB connected: {INFLUXDB_ORG}/{INFLUXDB_BUCKET}")
+        return True
+    except Exception as e:
+        logger.error(f"✗ InfluxDB connection failed: {e}")
+        return False
+
+def write_telemetry_to_influxdb(topic, payload_dict):
+    """Write telemetry data to InfluxDB"""
+    global influxdb_write_api
+    
+    if influxdb_write_api is None:
+        return
+    
+    try:
+        # Extract device info from topic: almed/ahu/{site}/{room}/{device-id}/telemetry
+        parts = topic.split('/')
+        if len(parts) < 5:
+            return
+        
+        device_id = parts[4]  # ahu-01, ahu-02, etc.
+        site = parts[2] if len(parts) > 2 else 'hospitalA'
+        room = parts[3] if len(parts) > 3 else 'room1'
+        
+        # Create InfluxDB point with tags and fields
+        point = Point("ahu_telemetry") \
+            .tag("device_id", device_id) \
+            .tag("site", site) \
+            .tag("room", room)
+        
+        # Add fields only if they exist and are not None
+        if 'temp' in payload_dict and payload_dict['temp'] is not None:
+            point = point.field("temperature", float(payload_dict['temp']))
+        
+        if 'hum' in payload_dict and payload_dict['hum'] is not None:
+            point = point.field("humidity", float(payload_dict['hum']))
+        
+        if 'fanSpeed' in payload_dict:
+            point = point.field("fan_speed", int(payload_dict.get('fanSpeed', 0)))
+        
+        point = point.field("fan_on", bool(payload_dict.get('fan', False))) \
+            .field("m1_active", bool(payload_dict.get('m1', False))) \
+            .field("m2_active", bool(payload_dict.get('m2', False))) \
+            .field("cp_on", bool(payload_dict.get('cp', False))) \
+            .field("heater_on", bool(payload_dict.get('heater', False))) \
+            .field("system_running", bool(payload_dict.get('run', False))) \
+            .field("temp_setpoint", float(payload_dict.get('tempSet', 0))) \
+            .field("hum_setpoint", float(payload_dict.get('humSet', 0)))
+        
+        # Use current time for InfluxDB (ESP32 ts is milliseconds since boot, not Unix time)
+        # InfluxDB will use server time if timestamp not specified
+        point.time(time.time_ns(), WritePrecision.NS)
+        
+        # Write to InfluxDB
+        influxdb_write_api.write(bucket=INFLUXDB_BUCKET, org=INFLUXDB_ORG, record=point)
+        logger.debug(f"→ INFLUXDB: {device_id} (temp: {payload_dict.get('temp')}, hum: {payload_dict.get('hum')})")
+        
+    except Exception as e:
+        logger.error(f"✗ InfluxDB write error: {e}")
 
 def extract_device_id_from_topic(topic):
     """Extract device ID from topic: almed/ahu/{site}/{room}/{device-id}/{type}"""
@@ -167,6 +253,11 @@ def on_local_message(client, userdata, msg):
         # Parse JSON and create hash excluding timestamp
         try:
             payload_dict = json.loads(payload.decode('utf-8'))
+            
+            # ========== WRITE TO INFLUXDB ==========
+            if topic.endswith('/telemetry'):
+                write_telemetry_to_influxdb(topic, payload_dict)
+            
             # Remove timestamp field for comparison (always changes)
             if 'ts' in payload_dict:
                 del payload_dict['ts']
@@ -261,6 +352,29 @@ def on_cloud_message(client, userdata, msg):
     if device_id and device_id in local_devices:
         logger.debug(f"→ Forwarding command for local device: {device_id}")
     
+    # ========== COMMAND DEDUPLICATION ==========
+    # Prevent duplicate commands from being forwarded within debounce window
+    payload_hash = hashlib.md5(payload).hexdigest()
+    current_time = time.time()
+    
+    # Check if this exact command was forwarded recently
+    cache_key = f"{topic}_{payload_hash}"
+    if cache_key in command_cache:
+        cached_time = command_cache[cache_key]
+        time_diff_ms = (current_time - cached_time) * 1000
+        
+        if time_diff_ms < COMMAND_DEBOUNCE_MS:
+            logger.info(f"⊘ SKIP (duplicate command within {COMMAND_DEBOUNCE_MS}ms): {topic}")
+            return
+    
+    # Cache this command BEFORE forwarding (prevents race condition)
+    command_cache[cache_key] = current_time
+    
+    # Cleanup old cache entries (older than 1 minute)
+    cleanup_keys = [k for k, t in command_cache.items() if current_time - t > 60]
+    for k in cleanup_keys:
+        del command_cache[k]
+    
     try:
         # Temporarily disable local→cloud forwarding to prevent loops
         global forward_from_local
@@ -316,6 +430,22 @@ def signal_handler(sig, frame):
     bridge_running = False
     local_client.disconnect()
     cloud_client.disconnect()
+    
+    # Close InfluxDB connections
+    global influxdb_write_api, influxdb_client
+    if influxdb_write_api:
+        try:
+            influxdb_write_api.close()
+            logger.info("✓ InfluxDB write API closed")
+        except:
+            pass
+    if influxdb_client:
+        try:
+            influxdb_client.close()
+            logger.info("✓ InfluxDB client closed")
+        except:
+            pass
+    
     logger.info("Bridge stopped")
     sys.exit(0)
 
@@ -332,6 +462,9 @@ if __name__ == "__main__":
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    
+    # ========== INITIALIZE INFLUXDB ==========
+    init_influxdb()
     
     # ========== LOCAL CLIENT (subscribes to Raspberry Pi broker) ==========
     local_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, "bridge_local")
@@ -397,5 +530,20 @@ if __name__ == "__main__":
         cloud_client.loop_stop()
         local_client.disconnect()
         cloud_client.disconnect()
+        
+        # Close InfluxDB connections
+        try:
+            if influxdb_write_api:
+                influxdb_write_api.close()
+                logger.info("✓ InfluxDB write API closed")
+        except:
+            pass
+        try:
+            if influxdb_client:
+                influxdb_client.close()
+                logger.info("✓ InfluxDB client closed")
+        except:
+            pass
+        
         logger.info("Bridge stopped")
 

@@ -62,6 +62,7 @@ echo "  ✓ Flutter SDK and Flutter-Pi"
 echo "  ✓ MQTT broker (Mosquitto) with authentication"
 echo "  ✓ WiFi hotspot configuration"
 echo "  ✓ MQTT bridge to HiveMQ Cloud"
+echo "  ✓ InfluxDB client library for data storage"
 echo "  ✓ All necessary drivers and services"
 echo ""
 read -p "Press Enter to continue or Ctrl+C to cancel..."
@@ -108,6 +109,7 @@ apt install -y \
     python3 \
     python3-pip \
     python3-venv \
+    ca-certificates \
     unclutter \
     x11-xserver-utils \
     hostapd \
@@ -320,12 +322,20 @@ echo -e "${GREEN}✓ WiFi hotspot configured (PiSpot, Password: 12345678)${NC}"
 print_step "6/10" "Setting up MQTT Bridge to HiveMQ Cloud"
 
 echo -e "${YELLOW}Installing Python MQTT libraries...${NC}"
-pip3 install paho-mqtt > /dev/null 2>&1
+apt install -y python3-paho-mqtt 2>&1 | grep -v "already installed" || true
+check_success
+
+echo -e "${YELLOW}Installing InfluxDB client library...${NC}"
+apt install -y python3-influxdb-client 2>&1 | grep -v "already installed" || true
 check_success
 
 # Create directories for bridge if not existing
 mkdir -p "$HOME_DIR/Documents/almed_ahu"
 mkdir -p /var/log
+
+# Ensure log directory has proper permissions
+touch /var/log/mqtt_bridge.log 2>/dev/null || true
+chmod 644 /var/log/mqtt_bridge.log 2>/dev/null || true
 
 echo -e "${YELLOW}Copying MQTT bridge script (if available)...${NC}"
 if [ -f "$SCRIPT_DIR/mqtt_bridge.py" ]; then
@@ -451,7 +461,8 @@ ufw --force enable 2>/dev/null || true
 ufw default deny incoming 2>/dev/null || true
 ufw default allow outgoing 2>/dev/null || true
 ufw allow 22/tcp comment 'SSH' 2>/dev/null || true
-ufw allow 1883/tcp comment 'MQTT' 2>/dev/null || true
+ufw allow 1883/tcp comment 'MQTT Local' 2>/dev/null || true
+ufw allow 8883/tcp comment 'MQTT TLS (HiveMQ Cloud)' 2>/dev/null || true
 ufw allow 80/tcp comment 'HTTP' 2>/dev/null || true
 ufw allow 443/tcp comment 'HTTPS' 2>/dev/null || true
 check_success
@@ -477,6 +488,8 @@ Raspberry Pi User: $PI_USER
   - Flutter-Pi: $(flutter-pi --version 2>/dev/null | head -1 || echo "Installed")
   - Mosquitto MQTT Broker: $(mosquitto -h 2>&1 | grep version || echo "Installed")
   - Python 3: $(python3 --version)
+  - Python MQTT Client (paho-mqtt): Installed
+  - Python InfluxDB Client: Installed
   - System Dependencies: All installed
 
 ✓ CONFIGURED SERVICES:
@@ -515,9 +528,10 @@ Raspberry Pi User: $PI_USER
      sudo systemctl enable ahu-dashboard.service
      sudo systemctl start ahu-dashboard.service
 
-  4. (Optional) Configure MQTT bridge to HiveMQ Cloud:
+  4. (Optional) Configure MQTT bridge to HiveMQ Cloud and InfluxDB:
      Edit: $HOME_DIR/Documents/almed_ahu/mqtt_bridge.py
      Set CLOUD_BROKER, CLOUD_USER, CLOUD_PASS
+     Set INFLUXDB_URL, INFLUXDB_TOKEN, INFLUXDB_ORG, INFLUXDB_BUCKET
      sudo systemctl enable mqtt-bridge.service
      sudo systemctl start mqtt-bridge.service
 
@@ -552,6 +566,7 @@ echo "  ✓ Flutter SDK and Flutter-Pi"
 echo "  ✓ MQTT Broker (Mosquitto)"
 echo "  ✓ WiFi Hotspot (PiSpot)"
 echo "  ✓ MQTT Bridge service"
+echo "  ✓ InfluxDB client library"
 echo "  ✓ Dashboard kiosk service"
 echo "  ✓ Firewall and security"
 echo "  ✓ All drivers and dependencies"
