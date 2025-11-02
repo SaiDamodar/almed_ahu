@@ -19,6 +19,18 @@
         "editor.suggestSelection": "first",
         "editor.tabCompletion": "onlySnippets",
         "editor.wordBasedSuggestions": "off"
-    }
+    },
+    "java.jdt.ls.java.home": "C:\\Program Files\\Android\\Android Studio\\jbr",
+    "java.home": "C:\\Program Files\\Android\\Android Studio\\jbr",
+    "gradle.java.home": "C:\\Program Files\\Android\\Android Studio\\jbr",
+    "gradle.nestedProjects": false,
+    "java.compile.nullAnalysis.mode": "automatic",
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.import.gradle.enabled": true,
+    "java.import.gradle.wrapper.enabled": true,
+    "files.associations": {
+        "*.gradle": "groovy"
+    },
+    "java.errors.incompleteClasspath.severity": "ignore"
 }
 

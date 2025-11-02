@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
@@ -21,7 +22,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
@@ -34,11 +35,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                     const Color(0xFF1E293B),
                     const Color(0xFF334155),
                   ]
-                : [
-                    Colors.white,
-                    Colors.blue.shade50,
-                    Colors.blue.shade100,
-                  ],
+                : [Colors.white, Colors.blue.shade50, Colors.blue.shade100],
           ),
         ),
         child: SafeArea(
@@ -46,166 +43,191 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
             children: [
               // Top bar
               Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  // ALMED Branding
-                  Text(
-                    'ALMED',
-                    style: TextStyle(
-                      fontFamily: 'Verdana',
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Container(
-                    width: 1,
-                    height: 24,
-                    color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
-                  ),
-                  const SizedBox(width: 16),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    // ALMED Branding
+                    Text(
+                      'ALMED',
+                      style: TextStyle(
+                        fontFamily: 'Verdana',
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black,
+                        letterSpacing: 1.5,
                       ),
                     ),
-                    child: IconButton(
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      onPressed: () => Navigator.of(context).pop(),
+                    const SizedBox(width: 16),
+                    Container(
+                      width: 1,
+                      height: 24,
+                      color: Theme.of(
+                        context,
+                      ).dividerColor.withValues(alpha: 0.3),
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Consumer<AppProvider>(
-                      builder: (context, provider, child) {
-                        final ahu = provider.ahuUnits.firstWhere((a) => a.id == widget.ahuId);
-                        final status = provider.getStatus(widget.ahuId);
-                        final isOnline = status == 'online';
-                        
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              ahu.name,
-                              style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                                fontSize: 22,
-                              ),
-                            ),
-                            Row(
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: isOnline ? AppTheme.success : AppTheme.error,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  isOnline ? 'Online' : 'Offline',
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                              ],
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                  // Start/Stop toggle
-                  Selector<AppProvider, bool>(
-                    selector: (_, provider) => provider.getState(widget.ahuId)?.run ?? false,
-                    builder: (context, isRunning, child) {
-                      return Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: isRunning
-                                ? [const Color(0xFFEF4444), const Color(0xFFDC2626)]
-                                : [const Color(0xFF10B981), const Color(0xFF059669)],
-                          ),
-                          borderRadius: BorderRadius.circular(12),
+                    const SizedBox(width: 16),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Theme.of(
+                            context,
+                          ).dividerColor.withValues(alpha: 0.1),
                         ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              final provider = Provider.of<AppProvider>(context, listen: false);
-                              provider.toggleAhu(widget.ahuId);
-                            },
-                            borderRadius: BorderRadius.circular(12),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Consumer<AppProvider>(
+                        builder: (context, provider, child) {
+                          final ahu = provider.ahuUnits.firstWhere(
+                            (a) => a.id == widget.ahuId,
+                          );
+                          final status = provider.getStatus(widget.ahuId);
+                          final isOnline = status == 'online';
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                ahu.name,
+                                style: Theme.of(context).textTheme.displayMedium
+                                    ?.copyWith(fontSize: 22),
+                              ),
+                              Row(
                                 children: [
-                                  Icon(
-                                    isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
-                                    color: Colors.white,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    isRunning ? 'Stop' : 'Start',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: isOnline
+                                          ? AppTheme.success
+                                          : AppTheme.error,
+                                      shape: BoxShape.circle,
                                     ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    isOnline ? 'Online' : 'Offline',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
                                   ),
                                 ],
                               ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-            // Content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  children: [
-                    // Temperature & Humidity
-                    _SensorControls(ahuId: widget.ahuId),
-                    const SizedBox(height: 20),
-
-                    // Component Status
-                    _ComponentStatus(ahuId: widget.ahuId),
-                    const SizedBox(height: 20),
-
-                    // Logs (collapsible) - ADMIN ONLY
-                    Consumer<AppProvider>(
-                      builder: (context, provider, child) {
-                        if (provider.currentRole == UserRole.admin) {
-                          return Column(
-                            children: [
-                              _LogsSection(
-                                ahuId: widget.ahuId,
-                                isExpanded: _showLogs,
-                                onToggle: () => setState(() => _showLogs = !_showLogs),
-                              ),
-                              const SizedBox(height: 20),
                             ],
                           );
-                        }
-                        return const SizedBox.shrink();
+                        },
+                      ),
+                    ),
+                    // Start/Stop toggle
+                    Selector<AppProvider, bool>(
+                      selector: (_, provider) =>
+                          provider.getState(widget.ahuId)?.run ?? false,
+                      builder: (context, isRunning, child) {
+                        return Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isRunning
+                                  ? [
+                                      const Color(0xFFEF4444),
+                                      const Color(0xFFDC2626),
+                                    ]
+                                  : [
+                                      const Color(0xFF10B981),
+                                      const Color(0xFF059669),
+                                    ],
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                final provider = Provider.of<AppProvider>(
+                                  context,
+                                  listen: false,
+                                );
+                                provider.toggleAhu(widget.ahuId);
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isRunning
+                                          ? Icons.stop_rounded
+                                          : Icons.play_arrow_rounded,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      isRunning ? 'Stop' : 'Start',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
                       },
                     ),
                   ],
                 ),
               ),
+
+              // Content
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      // Temperature & Humidity
+                      _SensorControls(ahuId: widget.ahuId),
+                      const SizedBox(height: 20),
+
+                      // Component Status
+                      _ComponentStatus(ahuId: widget.ahuId),
+                      const SizedBox(height: 20),
+
+                      // Logs (collapsible) - ADMIN ONLY
+                      Consumer<AppProvider>(
+                        builder: (context, provider, child) {
+                          if (provider.currentRole == UserRole.admin) {
+                            return Column(
+                              children: [
+                                _LogsSection(
+                                  ahuId: widget.ahuId,
+                                  isExpanded: _showLogs,
+                                  onToggle: () =>
+                                      setState(() => _showLogs = !_showLogs),
+                                ),
+                                const SizedBox(height: 20),
+                              ],
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -242,7 +264,10 @@ class _SensorControls extends StatelessWidget {
                 min: 15,
                 max: 30,
                 onChanged: (value) {
-                  final provider = Provider.of<AppProvider>(context, listen: false);
+                  final provider = Provider.of<AppProvider>(
+                    context,
+                    listen: false,
+                  );
                   provider.setTemperature(ahuId, value);
                 },
               ),
@@ -260,7 +285,10 @@ class _SensorControls extends StatelessWidget {
                 min: 30,
                 max: 80,
                 onChanged: (value) {
-                  final provider = Provider.of<AppProvider>(context, listen: false);
+                  final provider = Provider.of<AppProvider>(
+                    context,
+                    listen: false,
+                  );
                   provider.setHumidity(ahuId, value);
                 },
               ),
@@ -297,98 +325,257 @@ class _SensorControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [color.withValues(alpha: 0.15), color.withValues(alpha: 0.08)]
+              : [Colors.white, color.withValues(alpha: 0.05)],
         ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: color.withValues(alpha: 0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 32),
-          const SizedBox(height: 12),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 16),
-          // Actual value
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                actual,
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-              Text(
-                unit,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: color.withValues(alpha: 0.7),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Actual',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
-          ),
-          const SizedBox(height: 20),
-          // Setpoint controls
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                Text(
-                  'Setpoint',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    IconButton(
-                      onPressed: setpoint > min ? () => onChanged(setpoint - 0.5) : null,
-                      icon: const Icon(Icons.remove_circle_rounded),
-                      color: color,
-                      iconSize: 28,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      '${setpoint.toStringAsFixed(1)}$unit',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: color,
+                // Icon with glow effect
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.3),
+                        blurRadius: 15,
+                        spreadRadius: 2,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    IconButton(
-                      onPressed: setpoint < max ? () => onChanged(setpoint + 0.5) : null,
-                      icon: const Icon(Icons.add_circle_rounded),
+                    ],
+                  ),
+                  child: Icon(icon, color: color, size: 28),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.9)
+                        : Colors.black87,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Large actual value with glow
+                ShaderMask(
+                  shaderCallback: (bounds) => LinearGradient(
+                    colors: [color, color.withValues(alpha: 0.7)],
+                  ).createShader(bounds),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        actual,
+                        style: const TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          height: 1,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          unit,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'ACTUAL',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
                       color: color,
-                      iconSize: 28,
+                      letterSpacing: 1.2,
                     ),
-                  ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Modern setpoint controls
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        color.withValues(alpha: 0.2),
+                        color.withValues(alpha: 0.1),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'SETPOINT',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: color.withValues(alpha: 0.8),
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _GlossyButton(
+                            icon: Icons.remove,
+                            color: color,
+                            onPressed: setpoint > min
+                                ? () => onChanged(setpoint - 0.5)
+                                : null,
+                          ),
+                          const SizedBox(width: 16),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: color.withValues(alpha: 0.2),
+                                  blurRadius: 8,
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              '${setpoint.toStringAsFixed(1)}$unit',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: color,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          _GlossyButton(
+                            icon: Icons.add,
+                            color: color,
+                            onPressed: setpoint < max
+                                ? () => onChanged(setpoint + 0.5)
+                                : null,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+// Glossy button widget
+class _GlossyButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onPressed;
+
+  const _GlossyButton({
+    required this.icon,
+    required this.color,
+    this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnabled = onPressed != null;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            gradient: isEnabled
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      color.withValues(alpha: 0.8),
+                      color.withValues(alpha: 0.6),
+                    ],
+                  )
+                : null,
+            color: isEnabled ? null : Colors.grey.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: isEnabled
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Icon(
+            icon,
+            color: isEnabled ? Colors.white : Colors.grey,
+            size: 20,
+          ),
+        ),
       ),
     );
   }
@@ -401,32 +588,81 @@ class _ComponentStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Selector<AppProvider, _ComponentData>(
-      selector: (_, provider) => _ComponentData(state: provider.getState(ahuId)),
+      selector: (_, provider) =>
+          _ComponentData(state: provider.getState(ahuId)),
       builder: (context, data, child) {
         return Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [
+                      Colors.white.withValues(alpha: 0.05),
+                      Colors.white.withValues(alpha: 0.02),
+                    ]
+                  : [Colors.white, Colors.grey.shade50],
             ),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                'Component Status',
-                style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 18),
-                textAlign: TextAlign.center,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          AppTheme.info.withValues(alpha: 0.2),
+                          AppTheme.info.withValues(alpha: 0.1),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.dashboard_rounded,
+                      size: 20,
+                      color: AppTheme.info,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Component Status',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                alignment: WrapAlignment.center,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              const SizedBox(height: 20),
+              // 2-column grid layout
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 1.5,
                 children: [
                   Consumer<AppProvider>(
                     builder: (context, provider, child) {
@@ -434,12 +670,12 @@ class _ComponentStatus extends StatelessWidget {
                       return GestureDetector(
                         onTap: isAdmin
                             ? () => showDialog(
-                                  context: context,
-                                  builder: (context) => MotorTimingDialog(
-                                    ahuId: ahuId,
-                                    motorLabel: 'Motor 1 & 2 Timing',
-                                  ),
-                                )
+                                context: context,
+                                builder: (context) => MotorTimingDialog(
+                                  ahuId: ahuId,
+                                  motorLabel: 'Motor 1 & 2 Timing',
+                                ),
+                              )
                             : null,
                         child: _StatusIndicator(
                           icon: Icons.water_rounded,
@@ -457,12 +693,12 @@ class _ComponentStatus extends StatelessWidget {
                       return GestureDetector(
                         onTap: isAdmin
                             ? () => showDialog(
-                                  context: context,
-                                  builder: (context) => MotorTimingDialog(
-                                    ahuId: ahuId,
-                                    motorLabel: 'Motor 1 & 2 Timing',
-                                  ),
-                                )
+                                context: context,
+                                builder: (context) => MotorTimingDialog(
+                                  ahuId: ahuId,
+                                  motorLabel: 'Motor 1 & 2 Timing',
+                                ),
+                              )
                             : null,
                         child: _StatusIndicator(
                           icon: Icons.cleaning_services_rounded,
@@ -526,7 +762,7 @@ class _ComponentStatus extends StatelessWidget {
       case 3:
         return 'Fan (HIGH)';
       default:
-        return 'Fan (OFF)';  // Default to OFF
+        return 'Fan (OFF)'; // Default to OFF
     }
   }
 }
@@ -548,73 +784,153 @@ class _StatusIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 160,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isActive ? color.withValues(alpha: 0.1) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isActive ? color : Theme.of(context).dividerColor.withValues(alpha: 0.3),
-          width: 1.5,
-        ),
-      ),
-      child: MouseRegion(
-        cursor: isClickable ? SystemMouseCursors.click : SystemMouseCursors.basic,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Stack(
-              alignment: Alignment.topRight,
-              children: [
-                Icon(
-                  icon,
-                  color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
-                  size: 28,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return MouseRegion(
+      cursor: isClickable ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: isActive
+              ? LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    color.withValues(alpha: 0.25),
+                    color.withValues(alpha: 0.15),
+                  ],
+                )
+              : LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: isDark
+                      ? [
+                          Colors.white.withValues(alpha: 0.05),
+                          Colors.white.withValues(alpha: 0.02),
+                        ]
+                      : [
+                          Colors.white.withValues(alpha: 0.9),
+                          Colors.grey.shade50,
+                        ],
                 ),
-                if (isClickable)
-                  Icon(
-                    Icons.touch_app_rounded,
-                    size: 14,
-                    color: AppTheme.info.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isActive
+                ? color.withValues(alpha: 0.5)
+                : Theme.of(context).dividerColor.withValues(alpha: 0.2),
+            width: isActive ? 2 : 1,
+          ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
                   ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color,
+                ]
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Icon with glow
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? color.withValues(alpha: 0.2)
+                          : Colors.transparent,
+                      shape: BoxShape.circle,
+                      boxShadow: isActive
+                          ? [
+                              BoxShadow(
+                                color: color.withValues(alpha: 0.4),
+                                blurRadius: 12,
+                                spreadRadius: 2,
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Icon(
+                      icon,
+                      color: isActive
+                          ? color
+                          : isDark
+                          ? Colors.white.withValues(alpha: 0.4)
+                          : Colors.black54,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Label
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: isActive
+                          ? color
+                          : isDark
+                          ? Colors.white.withValues(alpha: 0.7)
+                          : Colors.black87,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  // Status badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? color.withValues(alpha: 0.3)
+                          : Colors.grey.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isActive
+                            ? color.withValues(alpha: 0.4)
+                            : Colors.grey.withValues(alpha: 0.2),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      isActive ? 'ON' : 'OFF',
+                      style: TextStyle(
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                        color: isActive ? color : Colors.grey.shade600,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                  if (isClickable) ...[
+                    const SizedBox(height: 4),
+                    Icon(
+                      Icons.touch_app,
+                      size: 10,
+                      color: AppTheme.info.withValues(alpha: 0.6),
+                    ),
+                  ],
+                ],
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              isActive ? 'ACTIVE' : 'IDLE',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
-              ),
-            ),
-          // Spacer to match clickable cards height (2px spacing + ~13px text line height = 15px)
-          SizedBox(height: isClickable ? 2 : 15),
-          if (isClickable)
-            Text(
-              'Tap to toggle',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 9,
-                fontStyle: FontStyle.italic,
-                color: AppTheme.info.withValues(alpha: 0.7),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -661,11 +977,15 @@ class _LogsSection extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'System Logs',
-                        style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 18),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.displayMedium?.copyWith(fontSize: 18),
                       ),
                     ),
                     Icon(
-                      isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                      isExpanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ],
@@ -701,31 +1021,37 @@ class _LogsSection extends StatelessWidget {
                                     log.lvl == 'ERROR'
                                         ? Icons.error_rounded
                                         : log.lvl == 'WARN'
-                                            ? Icons.warning_rounded
-                                            : Icons.info_rounded,
+                                        ? Icons.warning_rounded
+                                        : Icons.info_rounded,
                                     size: 16,
                                     color: log.lvl == 'ERROR'
                                         ? AppTheme.error
                                         : log.lvl == 'WARN'
-                                            ? AppTheme.info
-                                            : AppTheme.info,
+                                        ? AppTheme.info
+                                        : AppTheme.info,
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
                                     log.formattedTime,
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                      fontFamily: 'monospace',
-                                      fontSize: 12,
-                                    ),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          fontFamily: 'monospace',
+                                          fontSize: 12,
+                                        ),
                                   ),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       log.msg,
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        fontFamily: 'monospace',
-                                        fontSize: 12,
-                                      ),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            fontFamily: 'monospace',
+                                            fontSize: 12,
+                                          ),
                                     ),
                                   ),
                                 ],
@@ -760,7 +1086,6 @@ class _SensorData {
   int get hashCode => telemetry.hashCode ^ state.hashCode;
 }
 
-
 class _ComponentData {
   final state;
 
@@ -776,4 +1101,3 @@ class _ComponentData {
   @override
   int get hashCode => state.hashCode;
 }
-
