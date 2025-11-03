@@ -1,0 +1,18 @@
+YOUR SHA-1 FINGERPRINT FOR FIREBASE CONSOLE
+
+Copy this SHA-1 value and add it to Firebase Console:
+
+9C:B6:53:AE:98:EB:BA:6C:7D:6B:E5:DB:98:16:89:53:C7:29:10:65
+
+WHERE TO ADD:
+1. Firebase Console → Project Settings (gear icon)
+2. Scroll to "Your apps" section
+3. Find your Android app
+4. Click "Add fingerprint"
+5. Paste the SHA-1 above
+6. Click "Save"
+
+IMPORTANT:
+- Wait 10-15 minutes after adding for changes to propagate
+- Google Sign-In won't work until SHA-1 is added and propagated
+

@@ -54,11 +54,14 @@ dependencies:
   intl: ^0.20.1
   
   # Firebase for mobile app
-  firebase_core: ^2.24.0
-  firebase_auth: ^4.15.0
-  firebase_messaging: ^14.7.0
-  cloud_firestore: ^4.13.0
-  firebase_storage: ^11.5.0
+  firebase_core: ^4.2.0
+  firebase_auth: ^6.1.1
+  firebase_messaging: ^16.0.3
+  cloud_firestore: ^6.0.3
+  firebase_storage: ^13.0.3
+  
+  # Google Sign-In for authentication
+  google_sign_in: ^6.2.1
 
 dev_dependencies:
   flutter_test:
