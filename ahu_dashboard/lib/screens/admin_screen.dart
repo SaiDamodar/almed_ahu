@@ -89,7 +89,7 @@ class _AdminScreenState extends State<AdminScreen> {
                     Container(
                       width: 1,
                       height: 24,
-                      color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
+                      color: Theme.of(context).dividerColor.withOpacity( 0.3),
                     ),
                     const SizedBox(width: 16),
                     // Back button
@@ -98,7 +98,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         color: Theme.of(context).cardColor,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                          color: Theme.of(context).dividerColor.withOpacity( 0.1),
                         ),
                       ),
                       child: IconButton(
@@ -122,7 +122,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         color: Theme.of(context).cardColor,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                          color: Theme.of(context).dividerColor.withOpacity( 0.1),
                         ),
                       ),
                       child: IconButton(
@@ -162,7 +162,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                     return Icon(
                                       Icons.air_rounded,
                                       size: 80,
-                                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                                      color: Theme.of(context).colorScheme.primary.withOpacity( 0.3),
                                     );
                                   },
                                 ),
@@ -189,7 +189,7 @@ class _AdminScreenState extends State<AdminScreen> {
                               color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                                color: Theme.of(context).dividerColor.withOpacity( 0.1),
                               ),
                             ),
                             padding: const EdgeInsets.all(20.0),
@@ -249,7 +249,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                 color: Theme.of(context).cardColor,
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(
-                                  color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                                  color: Theme.of(context).dividerColor.withOpacity( 0.1),
                                 ),
                               ),
                               padding: const EdgeInsets.all(20.0),
@@ -363,7 +363,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                 color: Theme.of(context).cardColor,
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(
-                                  color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                                  color: Theme.of(context).dividerColor.withOpacity( 0.1),
                                 ),
                               ),
                               padding: const EdgeInsets.all(20.0),
@@ -439,7 +439,7 @@ class _AdminScreenState extends State<AdminScreen> {
                               color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
+                                color: Theme.of(context).dividerColor.withOpacity( 0.2),
                               ),
                             ),
                             child: Column(
@@ -710,5 +710,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 }
+
 
 

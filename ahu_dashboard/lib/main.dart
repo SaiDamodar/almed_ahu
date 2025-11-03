@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:io' show Platform;
+import 'dart:async' show TimeoutException;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -22,37 +23,21 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase on all platforms
-  try {
-    if (kIsWeb) {
-      // For web, Firebase is initialized via index.html script
-      // Wait a bit for the script to load
-      await Future.delayed(const Duration(milliseconds: 100));
-      await Firebase.initializeApp(
-        options: const FirebaseOptions(
-          apiKey: "AIzaSyAEhD6G7resVDxTLqp3Ih0A9tbZqlvd-1Q",
-          authDomain: "almed-ahu-cloud.firebaseapp.com",
-          projectId: "almed-ahu-cloud",
-          storageBucket: "almed-ahu-cloud.firebasestorage.app",
-          messagingSenderId: "600445539105",
-          appId: "1:600445539105:web:web_app_id",
-        ),
-      );
-    } else {
-      // For mobile, use default initialization
+  // Skip Firebase on web for now (UI-only mode)
+  if (kIsWeb) {
+    print('Web platform: Skipping Firebase initialization - running in UI demo mode');
+    // Firebase initialization skipped - all Firebase features will show "not initialized" errors
+    // This allows the UI to work instantly without waiting for Firebase connection
+  } else {
+    // Mobile initialization
+    try {
       await Firebase.initializeApp();
+      if (Platform.isAndroid || Platform.isIOS) {
+        FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      }
+    } catch (e) {
+      print('Firebase mobile init error: $e');
     }
-    print('Firebase: Initialized successfully');
-
-    // Setup background message handler (only on mobile)
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    }
-  } catch (e, stackTrace) {
-    print('Firebase: Initialization error - $e');
-    print('Firebase: Stack trace - $stackTrace');
-    print('Firebase: Continuing without Firebase (may need config files)');
-    // On web, try to continue even if Firebase init fails
   }
 
   runApp(const AhuDashboardApp());
@@ -102,3 +87,4 @@ class _HomeWrapper extends StatelessWidget {
     return const LoginScreen();
   }
 }
+

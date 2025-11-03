@@ -59,7 +59,7 @@ class DashboardScreen extends StatelessWidget {
                     Container(
                       width: 1,
                       height: 30,
-                      color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
+                      color: Theme.of(context).dividerColor.withOpacity( 0.3),
                     ),
                     const SizedBox(width: 20),
                     Expanded(
@@ -104,7 +104,7 @@ class DashboardScreen extends StatelessWidget {
                       color: Theme.of(context).cardColor,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                        color: Theme.of(context).dividerColor.withOpacity( 0.1),
                       ),
                     ),
                     child: IconButton(
@@ -127,7 +127,7 @@ class DashboardScreen extends StatelessWidget {
                           color: Theme.of(context).cardColor,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                            color: Theme.of(context).dividerColor.withOpacity( 0.1),
                           ),
                         ),
                         child: IconButton(
@@ -152,7 +152,7 @@ class DashboardScreen extends StatelessWidget {
                             color: Theme.of(context).cardColor,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                              color: Theme.of(context).dividerColor.withOpacity( 0.1),
                             ),
                           ),
                           child: IconButton(
@@ -198,7 +198,7 @@ class DashboardScreen extends StatelessWidget {
                                   return Icon(
                                     Icons.air_rounded,
                                     size: 80,
-                                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                                    color: Theme.of(context).colorScheme.primary.withOpacity( 0.3),
                                   );
                                 },
                               ),
@@ -271,7 +271,7 @@ class _ModernAhuCard extends StatelessWidget {
                   color: Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
-                    color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                    color: Theme.of(context).dividerColor.withOpacity( 0.1),
                   ),
                 ),
                 padding: const EdgeInsets.all(24),
@@ -303,7 +303,7 @@ class _ModernAhuCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
                             color: (isOnline ? AppTheme.success : AppTheme.error)
-                                .withValues(alpha: 0.1),
+                                .withOpacity( 0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
@@ -413,7 +413,7 @@ class _SensorDisplay extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity( 0.1),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -437,7 +437,7 @@ class _SensorDisplay extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: color.withValues(alpha: 0.7),
+                  color: color.withOpacity( 0.7),
                 ),
               ),
             ],
@@ -479,10 +479,10 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,
+        color: isActive ? color.withOpacity( 0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isActive ? color : Theme.of(context).dividerColor.withValues(alpha: 0.3),
+          color: isActive ? color : Theme.of(context).dividerColor.withOpacity( 0.3),
           width: 1.5,
         ),
       ),
@@ -521,4 +521,5 @@ class _AhuCardData {
   @override
   int get hashCode => telemetry.hashCode ^ state.hashCode ^ status.hashCode;
 }
+
 

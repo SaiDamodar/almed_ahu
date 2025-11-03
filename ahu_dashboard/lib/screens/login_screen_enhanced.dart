@@ -85,7 +85,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                   shape: BoxShape.circle,
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.2),
+                                      color: Colors.black.withOpacity( 0.2),
                                       blurRadius: 20,
                                       spreadRadius: 5,
                                     ),
@@ -334,7 +334,7 @@ class _AnimatedRoleCardState extends State<_AnimatedRoleCard>
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: widget.color.withValues(alpha: 0.1),
+                      color: widget.color.withOpacity( 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -369,4 +369,5 @@ class _AnimatedRoleCardState extends State<_AnimatedRoleCard>
     );
   }
 }
+
 

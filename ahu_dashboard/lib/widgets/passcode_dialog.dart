@@ -108,7 +108,7 @@ class _PasscodeDialogState extends State<PasscodeDialog> with SingleTickerProvid
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
+              color: Colors.black.withOpacity( 0.3),
               blurRadius: 20,
               spreadRadius: 5,
             ),
@@ -128,13 +128,13 @@ class _PasscodeDialogState extends State<PasscodeDialog> with SingleTickerProvid
                     gradient: LinearGradient(
                       colors: [
                         AppTheme.lightPrimary,
-                        AppTheme.lightPrimary.withValues(alpha: 0.7),
+                        AppTheme.lightPrimary.withOpacity( 0.7),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.lightPrimary.withValues(alpha: 0.3),
+                        color: AppTheme.lightPrimary.withOpacity( 0.3),
                         blurRadius: 15,
                         spreadRadius: 2,
                       ),
@@ -160,7 +160,7 @@ class _PasscodeDialogState extends State<PasscodeDialog> with SingleTickerProvid
                 Text(
                   'Enter 4-digit passcode',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.6),
+                    color: (isDark ? Colors.white : Colors.black).withOpacity( 0.6),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -187,11 +187,11 @@ class _PasscodeDialogState extends State<PasscodeDialog> with SingleTickerProvid
                               ? AppTheme.error
                               : index < _enteredPasscode.length
                                   ? AppTheme.lightPrimary
-                                  : (isDark ? Colors.white : Colors.black).withValues(alpha: 0.2),
+                                  : (isDark ? Colors.white : Colors.black).withOpacity( 0.2),
                           border: Border.all(
                             color: _isError
                                 ? AppTheme.error
-                                : AppTheme.lightPrimary.withValues(alpha: 0.5),
+                                : AppTheme.lightPrimary.withOpacity( 0.5),
                             width: 2,
                           ),
                         ),
@@ -312,26 +312,26 @@ class _NumericKeypad extends StatelessWidget {
                       end: Alignment.bottomRight,
                       colors: isDark
                           ? [
-                              Colors.white.withValues(alpha: 0.15),
-                              Colors.white.withValues(alpha: 0.2),
+                              Colors.white.withOpacity( 0.15),
+                              Colors.white.withOpacity( 0.2),
                             ]
                           : [
-                              Colors.black.withValues(alpha: 0.08),
-                              Colors.black.withValues(alpha: 0.12),
+                              Colors.black.withOpacity( 0.08),
+                              Colors.black.withOpacity( 0.12),
                             ],
                     ),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: isDark
-                          ? Colors.white.withValues(alpha: 0.3)
-                          : Colors.black.withValues(alpha: 0.2),
+                          ? Colors.white.withOpacity( 0.3)
+                          : Colors.black.withOpacity( 0.2),
                       width: 1.5,
                     ),
                     boxShadow: [
                       BoxShadow(
                         color: isDark
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.1),
+                            ? Colors.white.withOpacity( 0.1)
+                            : Colors.black.withOpacity( 0.1),
                         blurRadius: 8,
                         spreadRadius: 1,
                       ),
@@ -375,18 +375,18 @@ class _KeypadButton extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                AppTheme.lightPrimary.withValues(alpha: 0.3),
-                AppTheme.lightPrimary.withValues(alpha: 0.4),
+                AppTheme.lightPrimary.withOpacity( 0.3),
+                AppTheme.lightPrimary.withOpacity( 0.4),
               ],
             ),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: AppTheme.lightPrimary.withValues(alpha: 0.6),
+              color: AppTheme.lightPrimary.withOpacity( 0.6),
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.lightPrimary.withValues(alpha: 0.2),
+                color: AppTheme.lightPrimary.withOpacity( 0.2),
                 blurRadius: 8,
                 spreadRadius: 1,
               ),
@@ -407,4 +407,5 @@ class _KeypadButton extends StatelessWidget {
     );
   }
 }
+
 

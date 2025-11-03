@@ -99,7 +99,7 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
+              color: Colors.black.withOpacity( 0.3),
               blurRadius: 20,
               spreadRadius: 5,
             ),
@@ -115,7 +115,7 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
                 gradient: LinearGradient(
                   colors: [
                     AppTheme.lightPrimary,
-                    AppTheme.lightPrimary.withValues(alpha: 0.8),
+                    AppTheme.lightPrimary.withOpacity( 0.8),
                   ],
                 ),
                 borderRadius: const BorderRadius.only(
@@ -147,7 +147,7 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
                           widget.motorLabel,
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.white.withValues(alpha: 0.9),
+                            color: Colors.white.withOpacity( 0.9),
                           ),
                         ),
                       ],
@@ -367,22 +367,22 @@ class _TimingControl extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: isDark
               ? [
-                  color.withValues(alpha: 0.15),
-                  color.withValues(alpha: 0.2),
+                  color.withOpacity( 0.15),
+                  color.withOpacity( 0.2),
                 ]
               : [
-                  color.withValues(alpha: 0.08),
-                  color.withValues(alpha: 0.12),
+                  color.withOpacity( 0.08),
+                  color.withOpacity( 0.12),
                 ],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: color.withValues(alpha: 0.4),
+          color: color.withOpacity( 0.4),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.15),
+            color: color.withOpacity( 0.15),
             blurRadius: 8,
             spreadRadius: 1,
           ),
@@ -409,7 +409,7 @@ class _TimingControl extends StatelessWidget {
           Text(
             helpText,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+              color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity( 0.6),
             ),
           ),
           const SizedBox(height: 16),
@@ -450,4 +450,5 @@ class _TimingControl extends StatelessWidget {
     );
   }
 }
+
 

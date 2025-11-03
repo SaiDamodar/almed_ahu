@@ -17,3 +17,4 @@ Map<String, dynamic> _$AhuLogToJson(AhuLog instance) => <String, dynamic>{
       'lvl': instance.lvl,
       'msg': instance.msg,
     };
+

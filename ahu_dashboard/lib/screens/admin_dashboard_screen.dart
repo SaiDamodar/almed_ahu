@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/firebase_service.dart';
+import '../providers/app_provider.dart';
+import '../models/user_role.dart';
 import 'admin_pages/overview_page.dart';
 import 'admin_pages/users_page.dart';
 import 'admin_pages/devices_page.dart';
@@ -20,6 +23,35 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _selectedIndex = 0;
   final FirebaseService _firebaseService = FirebaseService();
+  bool _isInitializing = true;
+  String? _initError;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeDashboard();
+  }
+
+  Future<void> _initializeDashboard() async {
+    // Show UI immediately without waiting for anything
+    if (mounted) {
+      setState(() {
+        _isInitializing = false;
+      });
+    }
+    
+    // Do initialization in background (non-blocking)
+    try {
+      final appProvider = Provider.of<AppProvider>(context, listen: false);
+      appProvider.setUserRole(UserRole.admin);
+      
+      // Skip MQTT on web - it doesn't work properly with WebSockets
+      // Firebase features will work without MQTT
+      print('Admin dashboard loaded - MQTT skipped on web platform');
+    } catch (e) {
+      print('Background initialization error (non-fatal): $e');
+    }
+  }
 
   final List<_NavItem> _navItems = [
     _NavItem('Dashboard', Icons.dashboard_outlined, 0),
@@ -45,6 +77,52 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isInitializing) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF1A1D2E),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6C63FF)),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Initializing Dashboard...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                ),
+              ),
+              if (_initError != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 32),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: const Color(0xFFEF4444).withOpacity(0.3),
+                    ),
+                  ),
+                  child: Text(
+                    _initError!,
+                    style: const TextStyle(
+                      color: Color(0xFFEF4444),
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF1A1D2E),
       body: Row(
@@ -286,3 +364,4 @@ class _NavItem {
 
   _NavItem(this.title, this.icon, this.index);
 }
+

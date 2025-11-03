@@ -32,30 +32,49 @@
   <title>AHU Control Dashboard</title>
   <link rel="manifest" href="manifest.json">
   
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
-  
-  <!-- Firebase Config -->
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyAEhD6G7resVDxTLqp3Ih0A9tbZqlvd-1Q",
-      authDomain: "almed-ahu-cloud.firebaseapp.com",
-      projectId: "almed-ahu-cloud",
-      storageBucket: "almed-ahu-cloud.firebasestorage.app",
-      messagingSenderId: "600445539105",
-      appId: "1:600445539105:web:web_app_id"
-    };
-    
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    console.log('Firebase initialized for web');
-  </script>
+  <!-- Firebase is initialized in main.dart (Dart code) with proper error handling -->
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <!-- Loading indicator -->
+  <div id="loading" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: sans-serif;">
+    <div style="text-align: center;">
+      <div style="border: 4px solid #f3f3f3; border-top: 4px solid #6C63FF; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+      <p style="margin-top: 16px;">Loading Dashboard...</p>
+    </div>
+  </div>
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+  
+  <!-- Old Flutter web loader (compatible with SDK 3.2.x) -->
+  <script src="flutter.js" defer></script>
+  <script>
+    window.addEventListener('load', function(ev) {
+      // Remove loading indicator
+      var loading = document.querySelector('#loading');
+      
+      // DISABLE SERVICE WORKER - load fresh every time
+      _flutter.loader.loadEntrypoint({
+        serviceWorker: {
+          serviceWorkerVersion: null,
+        },
+        onEntrypointLoaded: function(engineInitializer) {
+          engineInitializer.initializeEngine({
+            serviceWorkerSettings: {
+              serviceWorkerUrl: null  // Disable service worker
+            }
+          }).then(function(appRunner) {
+            if (loading) {
+              loading.remove();
+            }
+            appRunner.runApp();
+          });
+        }
+      });
+    });
+  </script>
 </body>
 </html>

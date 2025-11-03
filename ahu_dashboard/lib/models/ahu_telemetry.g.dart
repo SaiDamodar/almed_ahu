@@ -36,3 +36,4 @@ Map<String, dynamic> _$AhuTelemetryToJson(AhuTelemetry instance) =>
       'humSet': instance.humSet,
       'ts': instance.ts,
     };
+

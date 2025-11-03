@@ -257,8 +257,8 @@ class _StatusBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: isOnline
-            ? Colors.green.withValues(alpha: 0.1)
-            : Colors.red.withValues(alpha: 0.1),
+            ? Colors.green.withOpacity( 0.1)
+            : Colors.red.withOpacity( 0.1),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -303,7 +303,7 @@ class _SensorReading extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity( 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -346,7 +346,7 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: isActive ? color.withValues(alpha: 0.2) : Colors.grey.withValues(alpha: 0.1),
+        color: isActive ? color.withOpacity( 0.2) : Colors.grey.withOpacity( 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isActive ? color : Colors.grey,
@@ -364,4 +364,5 @@ class _StatusChip extends StatelessWidget {
     );
   }
 }
+
 

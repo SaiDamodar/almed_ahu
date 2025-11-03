@@ -378,3 +378,4 @@ class _FanSpeedIndicator extends StatelessWidget {
     );
   }
 }
+

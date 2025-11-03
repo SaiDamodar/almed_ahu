@@ -1,20 +1,44 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 /// Firebase service for authentication and user management
 class FirebaseService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  // Lazy initialization - only access when Firebase is ready
+  FirebaseAuth get _auth => FirebaseAuth.instance;
+  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
+  FirebaseMessaging get _messaging => FirebaseMessaging.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
 
-  /// Current user
-  User? get currentUser => _auth.currentUser;
+  /// Check if Firebase is initialized
+  bool get isFirebaseInitialized {
+    try {
+      Firebase.app();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
 
-  /// Stream of auth state changes
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  /// Current user (safe - returns null if Firebase not ready)
+  User? get currentUser {
+    try {
+      return isFirebaseInitialized ? _auth.currentUser : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Stream of auth state changes (safe - returns empty stream if not ready)
+  Stream<User?> get authStateChanges {
+    try {
+      return isFirebaseInitialized ? _auth.authStateChanges() : Stream.value(null);
+    } catch (e) {
+      return Stream.value(null);
+    }
+  }
 
   /// Sign in with email and password
   Future<UserCredential?> signInWithEmail({
@@ -22,6 +46,10 @@ class FirebaseService {
     required String password,
   }) async {
     try {
+      if (!isFirebaseInitialized) {
+        print('FirebaseService: Firebase not initialized');
+        return null;
+      }
       final credential = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
@@ -37,6 +65,10 @@ class FirebaseService {
   /// Returns UserCredential if successful, null if cancelled or error
   Future<UserCredential?> signInWithGoogle() async {
     try {
+      if (!isFirebaseInitialized) {
+        print('FirebaseService: Firebase not initialized');
+        return null;
+      }
       print('FirebaseService: Starting Google Sign-In flow...');
       
       // Trigger Google Sign-In flow
@@ -213,6 +245,10 @@ class FirebaseService {
     String? displayName,
   }) async {
     try {
+      if (!isFirebaseInitialized) {
+        throw Exception('Firebase not initialized. Please wait or refresh the page.');
+      }
+      
       if (role == 'client' && accessKey == null) {
         throw Exception('Access key is required for client accounts');
       }
@@ -258,6 +294,10 @@ class FirebaseService {
     String? displayName,
   }) async {
     try {
+      if (!isFirebaseInitialized) {
+        throw Exception('Firebase not initialized. Please wait or refresh the page.');
+      }
+      
       final updateData = <String, dynamic>{};
 
       if (accessKey != null) {
@@ -286,12 +326,24 @@ class FirebaseService {
 
   /// Get all users (admin only)
   Stream<QuerySnapshot> getAllUsers() {
-    return _firestore.collection('users').snapshots();
+    try {
+      if (!isFirebaseInitialized) {
+        print('FirebaseService: Firebase not initialized - returning empty stream');
+        return Stream.empty();
+      }
+      return _firestore.collection('users').snapshots();
+    } catch (e) {
+      print('FirebaseService: Error getting users - $e');
+      return Stream.empty();
+    }
   }
 
   /// Delete user (admin only)
   Future<void> deleteUser(String email) async {
     try {
+      if (!isFirebaseInitialized) {
+        throw Exception('Firebase not initialized. Please wait or refresh the page.');
+      }
       await _firestore.collection('users').doc(email).delete();
       print('FirebaseService: User deleted successfully - $email');
     } catch (e) {
@@ -303,6 +355,10 @@ class FirebaseService {
   /// Sign out
   Future<void> signOut() async {
     try {
+      if (!isFirebaseInitialized) {
+        print('FirebaseService: Firebase not initialized');
+        return;
+      }
       await _googleSignIn.signOut();
       await _auth.signOut();
       print('FirebaseService: User signed out successfully');
@@ -315,6 +371,10 @@ class FirebaseService {
   /// Initialize Firebase Cloud Messaging
   Future<String?> initializeMessaging() async {
     try {
+      if (!isFirebaseInitialized) {
+        print('FirebaseService: Firebase not initialized');
+        return null;
+      }
       // Request permission
       NotificationSettings settings = await _messaging.requestPermission(
         alert: true,
@@ -349,4 +409,5 @@ class FirebaseService {
   // Note: Background message handler must be top-level function
   // Defined in main.dart as firebaseMessagingBackgroundHandler
 }
+
 

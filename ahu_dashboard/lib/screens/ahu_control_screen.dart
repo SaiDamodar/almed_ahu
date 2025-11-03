@@ -63,7 +63,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                       height: 24,
                       color: Theme.of(
                         context,
-                      ).dividerColor.withValues(alpha: 0.3),
+                      ).dividerColor.withOpacity( 0.3),
                     ),
                     const SizedBox(width: 16),
                     Container(
@@ -73,7 +73,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                         border: Border.all(
                           color: Theme.of(
                             context,
-                          ).dividerColor.withValues(alpha: 0.1),
+                          ).dividerColor.withOpacity( 0.1),
                         ),
                       ),
                       child: IconButton(
@@ -333,14 +333,14 @@ class _SensorControl extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: isDark
-              ? [color.withValues(alpha: 0.15), color.withValues(alpha: 0.08)]
-              : [Colors.white, color.withValues(alpha: 0.05)],
+              ? [color.withOpacity( 0.15), color.withOpacity( 0.08)]
+              : [Colors.white, color.withOpacity( 0.05)],
         ),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: color.withValues(alpha: 0.3), width: 1.5),
+        border: Border.all(color: color.withOpacity( 0.3), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.1),
+            color: color.withOpacity( 0.1),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -358,11 +358,11 @@ class _SensorControl extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.15),
+                    color: color.withOpacity( 0.15),
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: color.withValues(alpha: 0.3),
+                        color: color.withOpacity( 0.3),
                         blurRadius: 15,
                         spreadRadius: 2,
                       ),
@@ -377,7 +377,7 @@ class _SensorControl extends StatelessWidget {
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: isDark
-                        ? Colors.white.withValues(alpha: 0.9)
+                        ? Colors.white.withOpacity( 0.9)
                         : Colors.black87,
                     letterSpacing: 0.5,
                   ),
@@ -386,7 +386,7 @@ class _SensorControl extends StatelessWidget {
                 // Large actual value with glow
                 ShaderMask(
                   shaderCallback: (bounds) => LinearGradient(
-                    colors: [color, color.withValues(alpha: 0.7)],
+                    colors: [color, color.withOpacity( 0.7)],
                   ).createShader(bounds),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -422,7 +422,7 @@ class _SensorControl extends StatelessWidget {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.15),
+                    color: color.withOpacity( 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -444,13 +444,13 @@ class _SensorControl extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        color.withValues(alpha: 0.2),
-                        color.withValues(alpha: 0.1),
+                        color.withOpacity( 0.2),
+                        color.withOpacity( 0.1),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: color.withValues(alpha: 0.3),
+                      color: color.withOpacity( 0.3),
                       width: 1,
                     ),
                   ),
@@ -461,7 +461,7 @@ class _SensorControl extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: color.withValues(alpha: 0.8),
+                          color: color.withOpacity( 0.8),
                           letterSpacing: 1.2,
                         ),
                       ),
@@ -483,11 +483,11 @@ class _SensorControl extends StatelessWidget {
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.9),
+                              color: Colors.white.withOpacity( 0.9),
                               borderRadius: BorderRadius.circular(12),
                               boxShadow: [
                                 BoxShadow(
-                                  color: color.withValues(alpha: 0.2),
+                                  color: color.withOpacity( 0.2),
                                   blurRadius: 8,
                                 ),
                               ],
@@ -553,17 +553,17 @@ class _GlossyButton extends StatelessWidget {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      color.withValues(alpha: 0.8),
-                      color.withValues(alpha: 0.6),
+                      color.withOpacity( 0.8),
+                      color.withOpacity( 0.6),
                     ],
                   )
                 : null,
-            color: isEnabled ? null : Colors.grey.withValues(alpha: 0.2),
+            color: isEnabled ? null : Colors.grey.withOpacity( 0.2),
             borderRadius: BorderRadius.circular(12),
             boxShadow: isEnabled
                 ? [
                     BoxShadow(
-                      color: color.withValues(alpha: 0.3),
+                      color: color.withOpacity( 0.3),
                       blurRadius: 8,
                       offset: const Offset(0, 4),
                     ),
@@ -602,19 +602,19 @@ class _ComponentStatus extends StatelessWidget {
               end: Alignment.bottomRight,
               colors: isDark
                   ? [
-                      Colors.white.withValues(alpha: 0.05),
-                      Colors.white.withValues(alpha: 0.02),
+                      Colors.white.withOpacity( 0.05),
+                      Colors.white.withOpacity( 0.02),
                     ]
                   : [Colors.white, Colors.grey.shade50],
             ),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
+              color: Theme.of(context).dividerColor.withOpacity( 0.2),
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Colors.black.withOpacity( 0.05),
                 blurRadius: 20,
                 offset: const Offset(0, 8),
               ),
@@ -630,8 +630,8 @@ class _ComponentStatus extends StatelessWidget {
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          AppTheme.info.withValues(alpha: 0.2),
-                          AppTheme.info.withValues(alpha: 0.1),
+                          AppTheme.info.withOpacity( 0.2),
+                          AppTheme.info.withOpacity( 0.1),
                         ],
                       ),
                       borderRadius: BorderRadius.circular(12),
@@ -795,8 +795,8 @@ class _StatusIndicator extends StatelessWidget {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    color.withValues(alpha: 0.25),
-                    color.withValues(alpha: 0.15),
+                    color.withOpacity( 0.25),
+                    color.withOpacity( 0.15),
                   ],
                 )
               : LinearGradient(
@@ -804,32 +804,32 @@ class _StatusIndicator extends StatelessWidget {
                   end: Alignment.bottomRight,
                   colors: isDark
                       ? [
-                          Colors.white.withValues(alpha: 0.05),
-                          Colors.white.withValues(alpha: 0.02),
+                          Colors.white.withOpacity( 0.05),
+                          Colors.white.withOpacity( 0.02),
                         ]
                       : [
-                          Colors.white.withValues(alpha: 0.9),
+                          Colors.white.withOpacity( 0.9),
                           Colors.grey.shade50,
                         ],
                 ),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isActive
-                ? color.withValues(alpha: 0.5)
-                : Theme.of(context).dividerColor.withValues(alpha: 0.2),
+                ? color.withOpacity( 0.5)
+                : Theme.of(context).dividerColor.withOpacity( 0.2),
             width: isActive ? 2 : 1,
           ),
           boxShadow: isActive
               ? [
                   BoxShadow(
-                    color: color.withValues(alpha: 0.3),
+                    color: color.withOpacity( 0.3),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
                 ]
               : [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
+                    color: Colors.black.withOpacity( 0.03),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -849,13 +849,13 @@ class _StatusIndicator extends StatelessWidget {
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: isActive
-                          ? color.withValues(alpha: 0.2)
+                          ? color.withOpacity( 0.2)
                           : Colors.transparent,
                       shape: BoxShape.circle,
                       boxShadow: isActive
                           ? [
                               BoxShadow(
-                                color: color.withValues(alpha: 0.4),
+                                color: color.withOpacity( 0.4),
                                 blurRadius: 12,
                                 spreadRadius: 2,
                               ),
@@ -867,7 +867,7 @@ class _StatusIndicator extends StatelessWidget {
                       color: isActive
                           ? color
                           : isDark
-                          ? Colors.white.withValues(alpha: 0.4)
+                          ? Colors.white.withOpacity( 0.4)
                           : Colors.black54,
                       size: 22,
                     ),
@@ -885,7 +885,7 @@ class _StatusIndicator extends StatelessWidget {
                       color: isActive
                           ? color
                           : isDark
-                          ? Colors.white.withValues(alpha: 0.7)
+                          ? Colors.white.withOpacity( 0.7)
                           : Colors.black87,
                       letterSpacing: 0.3,
                     ),
@@ -899,13 +899,13 @@ class _StatusIndicator extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color: isActive
-                          ? color.withValues(alpha: 0.3)
-                          : Colors.grey.withValues(alpha: 0.15),
+                          ? color.withOpacity( 0.3)
+                          : Colors.grey.withOpacity( 0.15),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: isActive
-                            ? color.withValues(alpha: 0.4)
-                            : Colors.grey.withValues(alpha: 0.2),
+                            ? color.withOpacity( 0.4)
+                            : Colors.grey.withOpacity( 0.2),
                         width: 1,
                       ),
                     ),
@@ -924,7 +924,7 @@ class _StatusIndicator extends StatelessWidget {
                     Icon(
                       Icons.touch_app,
                       size: 10,
-                      color: AppTheme.info.withValues(alpha: 0.6),
+                      color: AppTheme.info.withOpacity( 0.6),
                     ),
                   ],
                 ],
@@ -955,7 +955,7 @@ class _LogsSection extends StatelessWidget {
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+          color: Theme.of(context).dividerColor.withOpacity( 0.1),
         ),
       ),
       child: Column(
@@ -1101,3 +1101,4 @@ class _ComponentData {
   @override
   int get hashCode => state.hashCode;
 }
+

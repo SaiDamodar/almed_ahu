@@ -20,7 +20,7 @@ class DevicesPage extends StatelessWidget {
             color: const Color(0xFF1E2640),
             border: Border(
               bottom: BorderSide(
-                color: Colors.white.withValues(alpha: 0.1),
+                color: Colors.white.withOpacity( 0.1),
                 width: 1,
               ),
             ),
@@ -43,7 +43,7 @@ class DevicesPage extends StatelessWidget {
                     Text(
                       'Monitor and control all AHU devices',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.6),
+                        color: Colors.white.withOpacity( 0.6),
                         fontSize: 14,
                       ),
                     ),
@@ -70,7 +70,7 @@ class DevicesPage extends StatelessWidget {
                       color: const Color(0xFF1E2640),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: Colors.white.withOpacity( 0.1),
                       ),
                     ),
                     child: Column(
@@ -79,7 +79,7 @@ class DevicesPage extends StatelessWidget {
                         Icon(
                           Icons.devices_outlined,
                           size: 64,
-                          color: Colors.white.withValues(alpha: 0.3),
+                          color: Colors.white.withOpacity( 0.3),
                         ),
                         const SizedBox(height: 16),
                         const Text(
@@ -94,7 +94,7 @@ class DevicesPage extends StatelessWidget {
                         Text(
                           'Devices will appear here when connected',
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.6),
+                            color: Colors.white.withOpacity( 0.6),
                             fontSize: 14,
                           ),
                         ),
@@ -153,7 +153,7 @@ class _DeviceCard extends StatelessWidget {
         color: const Color(0xFF1E2640),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
+          color: Colors.white.withOpacity( 0.1),
           width: 1,
         ),
       ),
@@ -163,8 +163,8 @@ class _DeviceCard extends StatelessWidget {
           height: 48,
           decoration: BoxDecoration(
             color: isOnline 
-                ? Colors.green.withValues(alpha: 0.1)
-                : Colors.grey.withValues(alpha: 0.1),
+                ? Colors.green.withOpacity( 0.1)
+                : Colors.grey.withOpacity( 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(
@@ -185,14 +185,14 @@ class _DeviceCard extends StatelessWidget {
               Text(
                 'ID: ${device.id}',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
+                  color: Colors.white.withOpacity( 0.7),
                   fontSize: 13,
                 ),
               ),
               Text(
                 'Location: ${device.site}/${device.room}',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
+                  color: Colors.white.withOpacity( 0.7),
                   fontSize: 13,
                 ),
               ),
@@ -210,7 +210,7 @@ class _DeviceCard extends StatelessWidget {
                       boxShadow: isOnline
                           ? [
                               BoxShadow(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.5),
+                                color: const Color(0xFF10B981).withOpacity( 0.5),
                                 blurRadius: 4,
                                 spreadRadius: 1,
                               ),
@@ -305,7 +305,7 @@ class _DeviceCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                                color: const Color(0xFF10B981).withOpacity( 0.3),
                                 blurRadius: 8,
                                 offset: const Offset(0, 4),
                               ),
@@ -332,7 +332,7 @@ class _DeviceCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                                color: const Color(0xFFEF4444).withOpacity( 0.3),
                                 blurRadius: 8,
                                 offset: const Offset(0, 4),
                               ),
@@ -390,10 +390,10 @@ class _MetricTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity( 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: color.withValues(alpha: 0.3),
+          color: color.withOpacity( 0.3),
           width: 1,
         ),
       ),
@@ -402,7 +402,7 @@ class _MetricTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
+              color: color.withOpacity( 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: color, size: 24),
@@ -420,7 +420,7 @@ class _MetricTile extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
+              color: Colors.white.withOpacity( 0.6),
               fontSize: 12,
             ),
           ),
@@ -429,4 +429,5 @@ class _MetricTile extends StatelessWidget {
     );
   }
 }
+
 

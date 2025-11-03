@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import '../models/ahu_telemetry.dart';
@@ -57,8 +57,15 @@ class MqttService {
       // Enable TLS for cloud connections
       if (useTLS) {
         _client!.secure = true;
-        _client!.securityContext = SecurityContext.defaultContext;
-        print('MQTT: TLS enabled for secure connection');
+        if (!kIsWeb) {
+          // SecurityContext is only available on native platforms
+          // Import dart:io conditionally if needed, but for now rely on default
+          print('MQTT: TLS enabled for secure connection (native)');
+        } else {
+          // Web uses WebSocket secure connections (wss://)
+          // The mqtt_client package handles this automatically
+          print('MQTT: TLS enabled for secure WebSocket connection (web)');
+        }
       }
 
       final connMessage = MqttConnectMessage()
@@ -319,5 +326,6 @@ class MqttService {
     _connectionController.close();
   }
 }
+
 
 

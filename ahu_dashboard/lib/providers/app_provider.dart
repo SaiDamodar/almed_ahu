@@ -47,6 +47,7 @@ class AppProvider extends ChangeNotifier {
   /// Initialize MQTT connection
   /// Automatically detects platform and uses appropriate broker
   /// Mobile: Uses HiveMQ Cloud with TLS
+  /// Web: Uses HiveMQ Cloud with TLS (WebSockets)
   /// Desktop/Linux: Uses local MQTT broker
   Future<bool> initializeMqtt({
     String? broker,
@@ -55,7 +56,8 @@ class AppProvider extends ChangeNotifier {
     String? password,
   }) async {
     // Detect platform
-    final bool isMobile = Platform.isAndroid || Platform.isIOS;
+    final bool isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final bool isWeb = kIsWeb;
     
     // Configure based on platform
     if (isMobile) {
@@ -68,6 +70,16 @@ class AppProvider extends ChangeNotifier {
         useTLS: true,
       );
       print('AppProvider: Initializing MQTT for MOBILE (HiveMQ Cloud with TLS)');
+    } else if (isWeb) {
+      // Web: Use HiveMQ Cloud with TLS (WebSocket port)
+      _mqttService = MqttService(
+        broker: broker ?? 'ec1158fe4e0941df85f0a7bf133bf117.s1.eu.hivemq.cloud',
+        port: port ?? 8884, // WebSocket port for HiveMQ Cloud
+        username: username ?? 'almed',
+        password: password ?? 'AlMed123456',
+        useTLS: true,
+      );
+      print('AppProvider: Initializing MQTT for WEB (HiveMQ Cloud WebSocket)');
     } else {
       // Desktop/Linux: Use local MQTT broker
       _mqttService = MqttService(
@@ -325,5 +337,6 @@ class AppProvider extends ChangeNotifier {
     super.dispose();
   }
 }
+
 
 

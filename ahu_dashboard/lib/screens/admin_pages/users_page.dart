@@ -29,7 +29,7 @@ class _UsersPageState extends State<UsersPage> {
             color: const Color(0xFF1E2640),
             border: Border(
               bottom: BorderSide(
-                color: Colors.white.withValues(alpha: 0.1),
+                color: Colors.white.withOpacity( 0.1),
                 width: 1,
               ),
             ),
@@ -52,7 +52,7 @@ class _UsersPageState extends State<UsersPage> {
                     Text(
                       'Manage users, roles, and device assignments',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.6),
+                        color: Colors.white.withOpacity( 0.6),
                         fontSize: 14,
                       ),
                     ),
@@ -67,7 +67,7 @@ class _UsersPageState extends State<UsersPage> {
                   color: const Color(0xFF141B2D),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: Colors.white.withOpacity( 0.1),
                     width: 1,
                   ),
                 ),
@@ -76,12 +76,12 @@ class _UsersPageState extends State<UsersPage> {
                   decoration: InputDecoration(
                     hintText: 'Search users...',
                     hintStyle: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.4),
+                      color: Colors.white.withOpacity( 0.4),
                     ),
                     border: InputBorder.none,
                     prefixIcon: Icon(
                       Icons.search_rounded,
-                      color: Colors.white.withValues(alpha: 0.4),
+                      color: Colors.white.withOpacity( 0.4),
                       size: 20,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
@@ -104,7 +104,7 @@ class _UsersPageState extends State<UsersPage> {
                   color: const Color(0xFF141B2D),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: Colors.white.withOpacity( 0.1),
                     width: 1,
                   ),
                 ),
@@ -113,7 +113,7 @@ class _UsersPageState extends State<UsersPage> {
                   hint: Text(
                     'All Roles',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.6),
+                      color: Colors.white.withOpacity( 0.6),
                     ),
                   ),
                   dropdownColor: const Color(0xFF1E2640),
@@ -141,7 +141,7 @@ class _UsersPageState extends State<UsersPage> {
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF3B82F6).withValues(alpha: 0.3),
+                      color: const Color(0xFF3B82F6).withOpacity( 0.3),
                       blurRadius: 8,
                       offset: const Offset(0, 4),
                     ),
@@ -191,7 +191,7 @@ class _UsersPageState extends State<UsersPage> {
                             color: const Color(0xFF1E2640),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.1),
+                              color: Colors.white.withOpacity( 0.1),
                             ),
                           ),
                           child: Column(
@@ -238,7 +238,7 @@ class _UsersPageState extends State<UsersPage> {
                             color: const Color(0xFF1E2640),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.1),
+                              color: Colors.white.withOpacity( 0.1),
                             ),
                           ),
                           child: Column(
@@ -246,7 +246,7 @@ class _UsersPageState extends State<UsersPage> {
                               Icon(
                                 Icons.people_outline_rounded,
                                 size: 64,
-                                color: Colors.white.withValues(alpha: 0.3),
+                                color: Colors.white.withOpacity( 0.3),
                               ),
                               const SizedBox(height: 16),
                               const Text(
@@ -261,7 +261,7 @@ class _UsersPageState extends State<UsersPage> {
                               Text(
                                 'Create your first user to get started',
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.6),
+                                  color: Colors.white.withOpacity( 0.6),
                                   fontSize: 14,
                                 ),
                               ),
@@ -420,7 +420,7 @@ class _UserCard extends StatelessWidget {
         color: const Color(0xFF1E2640),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
+          color: Colors.white.withOpacity( 0.1),
           width: 1,
         ),
       ),
@@ -433,7 +433,7 @@ class _UserCard extends StatelessWidget {
             gradient: LinearGradient(
               colors: [
                 roleColor,
-                roleColor.withValues(alpha: 0.7),
+                roleColor.withOpacity( 0.7),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -465,7 +465,7 @@ class _UserCard extends StatelessWidget {
                     email,
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.white.withValues(alpha: 0.6),
+                      color: Colors.white.withOpacity( 0.6),
                     ),
                   ),
                 ],
@@ -474,10 +474,10 @@ class _UserCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: roleColor.withValues(alpha: 0.15),
+                color: roleColor.withOpacity( 0.15),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: roleColor.withValues(alpha: 0.3),
+                  color: roleColor.withOpacity( 0.3),
                   width: 1,
                 ),
               ),
@@ -500,7 +500,7 @@ class _UserCard extends StatelessWidget {
                 boxShadow: isActive
                     ? [
                         BoxShadow(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.5),
+                          color: const Color(0xFF10B981).withOpacity( 0.5),
                           blurRadius: 4,
                           spreadRadius: 1,
                         ),
@@ -519,14 +519,14 @@ class _UserCard extends StatelessWidget {
                 Icon(
                   Icons.devices_other_rounded,
                   size: 16,
-                  color: Colors.white.withValues(alpha: 0.5),
+                  color: Colors.white.withOpacity( 0.5),
                 ),
                 const SizedBox(width: 4),
                 Text(
                   '${assignedDevices.length} device(s)',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.white.withValues(alpha: 0.6),
+                    color: Colors.white.withOpacity( 0.6),
                   ),
                 ),
               ],
@@ -538,14 +538,14 @@ class _UserCard extends StatelessWidget {
                   Icon(
                     Icons.access_time_rounded,
                     size: 16,
-                    color: Colors.white.withValues(alpha: 0.5),
+                    color: Colors.white.withOpacity( 0.5),
                   ),
                   const SizedBox(width: 4),
                   Text(
                     'Last login: ${_formatDate(lastLogin.toDate())}',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.white.withValues(alpha: 0.6),
+                      color: Colors.white.withOpacity( 0.6),
                     ),
                   ),
                 ],
@@ -563,14 +563,14 @@ class _UserCard extends StatelessWidget {
                 color: const Color(0xFF141B2D),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.1),
+                  color: Colors.white.withOpacity( 0.1),
                 ),
               ),
               child: IconButton(
                 icon: const Icon(Icons.edit_rounded, size: 18),
                 onPressed: onEdit,
                 tooltip: 'Edit User',
-                color: Colors.white.withValues(alpha: 0.8),
+                color: Colors.white.withOpacity( 0.8),
                 padding: EdgeInsets.zero,
               ),
             ),
@@ -582,14 +582,14 @@ class _UserCard extends StatelessWidget {
                 color: const Color(0xFF141B2D),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.1),
+                  color: Colors.white.withOpacity( 0.1),
                 ),
               ),
               child: IconButton(
                 icon: const Icon(Icons.devices_rounded, size: 18),
                 onPressed: onAssignDevices,
                 tooltip: 'Assign Devices',
-                color: Colors.white.withValues(alpha: 0.8),
+                color: Colors.white.withOpacity( 0.8),
                 padding: EdgeInsets.zero,
               ),
             ),
@@ -601,7 +601,7 @@ class _UserCard extends StatelessWidget {
                 color: const Color(0xFF141B2D),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.1),
+                  color: Colors.white.withOpacity( 0.1),
                 ),
               ),
               child: IconButton(
@@ -633,4 +633,5 @@ class _UserCard extends StatelessWidget {
     }
   }
 }
+
 

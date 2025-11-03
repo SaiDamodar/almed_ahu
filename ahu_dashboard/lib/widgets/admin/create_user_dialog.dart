@@ -212,6 +212,19 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
       return;
     }
     
+    // Check Firebase first
+    if (!_firebaseService.isFirebaseInitialized) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Firebase not initialized. Please wait or refresh the page.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+    
     if (_selectedRole == 'client' && _selectedDevices.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -266,4 +279,5 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
     }
   }
 }
+
 
