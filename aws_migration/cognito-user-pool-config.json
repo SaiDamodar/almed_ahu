@@ -1,0 +1,41 @@
+{
+  "PoolName": "almed-ahu-users",
+  "Policies": {
+    "PasswordPolicy": {
+      "MinimumLength": 8,
+      "RequireUppercase": true,
+      "RequireLowercase": true,
+      "RequireNumbers": true,
+      "RequireSymbols": true
+    }
+  },
+  "AutoVerifiedAttributes": ["email"],
+  "Schema": [
+    {
+      "Name": "email",
+      "AttributeDataType": "String",
+      "Required": true,
+      "Mutable": true
+    },
+    {
+      "Name": "name",
+      "AttributeDataType": "String",
+      "Required": false,
+      "Mutable": true
+    },
+    {
+      "Name": "custom:role",
+      "AttributeDataType": "String",
+      "Required": false,
+      "Mutable": true
+    },
+    {
+      "Name": "custom:assigned_devs",
+      "AttributeDataType": "String",
+      "Required": false,
+      "Mutable": true
+    }
+  ],
+  "UsernameAttributes": ["email"]
+}
+

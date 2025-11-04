@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "custom:custom:role",
+    "Value": "admin"
+  },
+  {
+    "Name": "custom:custom:assigned_devs",
+    "Value": "ahu-01,ahu-02"
+  }
+]
+

@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:io' show Platform;
-import 'dart:async' show TimeoutException;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'providers/app_provider.dart';
 import 'providers/theme_provider.dart';
-import 'screens/login_screen.dart';
+// Login screen removed - admin only, no customer access
 import 'screens/admin_dashboard_screen.dart';
-import 'services/firebase_service.dart';
 import 'theme/app_theme.dart';
+import 'models/user_role.dart';
 
 /// Background message handler (must be top-level)
 @pragma('vm:entry-point')
@@ -63,8 +62,8 @@ class AhuDashboardApp extends StatelessWidget {
             themeMode: themeProvider.themeMode,
             routes: {
               '/': (context) => _HomeWrapper(),
-              '/login': (context) => const LoginScreen(),
               '/admin': (context) => const AdminDashboardScreen(),
+              // Login route removed - admin only, no customer access
             },
             initialRoute: '/',
           );
@@ -74,17 +73,29 @@ class AhuDashboardApp extends StatelessWidget {
   }
 }
 
-/// Home wrapper that routes based on platform and auth state
-class _HomeWrapper extends StatelessWidget {
+/// Home wrapper - Always goes directly to admin dashboard (admin only)
+class _HomeWrapper extends StatefulWidget {
+  @override
+  State<_HomeWrapper> createState() => _HomeWrapperState();
+}
+
+class _HomeWrapperState extends State<_HomeWrapper> {
+  @override
+  void initState() {
+    super.initState();
+    // Automatically initialize admin role and MQTT connection
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = Provider.of<AppProvider>(context, listen: false);
+      provider.setUserRole(UserRole.admin);
+      provider.initializeMqtt();
+      provider.loadDefaultAhus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    // On web, show admin dashboard directly (skip login for now)
-    if (kIsWeb) {
-      return const AdminDashboardScreen();
-    }
-
-    // On mobile, show login screen
-    return const LoginScreen();
+    // Always show admin dashboard directly (admin only - no login page)
+    return const AdminDashboardScreen();
   }
 }
 

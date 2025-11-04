@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import '../models/ahu_unit.dart';
 import '../models/ahu_telemetry.dart';
@@ -46,51 +45,39 @@ class AppProvider extends ChangeNotifier {
 
   /// Initialize MQTT connection
   /// Automatically detects platform and uses appropriate broker
-  /// Mobile: Uses HiveMQ Cloud with TLS
-  /// Web: Uses HiveMQ Cloud with TLS (WebSockets)
-  /// Desktop/Linux: Uses local MQTT broker
+  /// ALL PLATFORMS NOW USE LOCAL MQTT BROKER (Raspberry Pi)
+  /// The Raspberry Pi bridge forwards messages to AWS IoT Core
+  /// 
+  /// Tries common Pi IPs in order:
+  /// 1. User-specified broker (if provided)
+  /// 2. 10.42.0.1 (Pi hotspot - most common)
+  /// 3. raspberrypi.local (mDNS name)
+  /// 4. 192.168.1.100 (fallback network IP)
   Future<bool> initializeMqtt({
     String? broker,
     int? port,
     String? username,
     String? password,
   }) async {
-    // Detect platform
-    final bool isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-    final bool isWeb = kIsWeb;
+    // ALL platforms connect to LOCAL MQTT broker on Raspberry Pi
+    // The Pi's mqtt_bridge_aws.py handles forwarding to AWS IoT Core
     
-    // Configure based on platform
-    if (isMobile) {
-      // Mobile: Use HiveMQ Cloud with TLS
-      _mqttService = MqttService(
-        broker: broker ?? 'ec1158fe4e0941df85f0a7bf133bf117.s1.eu.hivemq.cloud',
-        port: port ?? 8883,
-        username: username ?? 'almed',
-        password: password ?? 'AlMed123456',
-        useTLS: true,
-      );
-      print('AppProvider: Initializing MQTT for MOBILE (HiveMQ Cloud with TLS)');
-    } else if (isWeb) {
-      // Web: Use HiveMQ Cloud with TLS (WebSocket port)
-      _mqttService = MqttService(
-        broker: broker ?? 'ec1158fe4e0941df85f0a7bf133bf117.s1.eu.hivemq.cloud',
-        port: port ?? 8884, // WebSocket port for HiveMQ Cloud
-        username: username ?? 'almed',
-        password: password ?? 'AlMed123456',
-        useTLS: true,
-      );
-      print('AppProvider: Initializing MQTT for WEB (HiveMQ Cloud WebSocket)');
-    } else {
-      // Desktop/Linux: Use local MQTT broker
-      _mqttService = MqttService(
-        broker: broker ?? '127.0.0.1',
-        port: port ?? 1883,
-        username: username ?? 'almed',
-        password: password ?? 'Almed1234\$',
-        useTLS: false,
-      );
-      print('AppProvider: Initializing MQTT for DESKTOP (Local broker)');
-    }
+    // Default broker priority:
+    // 1. User-provided broker
+    // 2. Pi hotspot IP (10.42.0.1) - most common for ESP32 setup
+    // 3. mDNS name (raspberrypi.local) - works if mDNS is enabled
+    // 4. Fallback network IP (192.168.1.100)
+    final defaultBroker = broker ?? '10.42.0.1'; // Pi hotspot IP (most common)
+    
+    _mqttService = MqttService(
+      broker: defaultBroker,
+      port: port ?? 1883,
+      username: username ?? 'almed',
+      password: password ?? 'Almed1234\$',
+      useTLS: false, // Local connection, no TLS needed
+    );
+    print('AppProvider: Initializing MQTT - Connecting to Raspberry Pi bridge at $defaultBroker:${port ?? 1883}');
+    print('AppProvider: If connection fails, check Pi IP. Common IPs: 10.42.0.1 (hotspot), 192.168.1.x (network), raspberrypi.local (mDNS)');
 
     // Listen to connection status
     _mqttService!.connectionStream.listen((connected) {

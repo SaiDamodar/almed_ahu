@@ -1,0 +1,305 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ALMED AHU IoT Platform - AWS Infrastructure Setup'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: almed-ahu
+    Description: Project name prefix for resources
+  
+  Region:
+    Type: String
+    Default: ap-south-1
+    Description: AWS region for resources
+
+Resources:
+  # ========== IAM ROLE FOR IOT RULES ==========
+  IoTTimestreamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-iot-timestream-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonTimestreamFullAccess
+  
+  IoTDynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-iot-dynamodb-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+
+  # ========== IOT THING TYPE ==========
+  AHUThingType:
+    Type: AWS::IoT::ThingType
+    Properties:
+      ThingTypeName: AHUDevice
+      ThingTypeProperties:
+        Description: AHU Control Unit Device
+
+  # ========== IOT POLICY FOR DEVICES ==========
+  DevicePolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: AHUDevicePolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:Connect
+            Resource: !Sub 'arn:aws:iot:${Region}:${AWS::AccountId}:client/${iot:ClientId}'
+          - Effect: Allow
+            Action:
+              - iot:Publish
+              - iot:Subscribe
+              - iot:Receive
+            Resource: !Sub 'arn:aws:iot:${Region}:${AWS::AccountId}:topic/almed/ahu/*'
+
+  # ========== IOT POLICY FOR BRIDGE ==========
+  BridgePolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: AHUBridgePolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:Connect
+            Resource: !Sub 'arn:aws:iot:${Region}:${AWS::AccountId}:client/bridge_*'
+          - Effect: Allow
+            Action:
+              - iot:Publish
+              - iot:Subscribe
+              - iot:Receive
+            Resource: !Sub 'arn:aws:iot:${Region}:${AWS::AccountId}:topic/almed/ahu/*'
+
+  # ========== TIMESTREAM DATABASE ==========
+  TimestreamDatabase:
+    Type: AWS::Timestream::Database
+    Properties:
+      DatabaseName: ahu_telemetry
+
+  TimestreamTable:
+    Type: AWS::Timestream::Table
+    Properties:
+      DatabaseName: !Ref TimestreamDatabase
+      TableName: sensor_data
+      RetentionProperties:
+        MemoryStoreRetentionPeriodInHours: 730
+        MagneticStoreRetentionPeriodInDays: 36500
+
+  # ========== DYNAMODB TABLES ==========
+  DeviceStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ahu-device-state
+      AttributeDefinitions:
+        - AttributeName: device_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: device_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  UserAssignmentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ahu-user-assignments
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # ========== COGNITO USER POOL ==========
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${ProjectName}-users'
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: role
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+        - Name: assigned_devices
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: ahu-dashboard-client
+      UserPoolId: !Ref UserPool
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      GenerateSecret: false
+
+  # ========== IOT RULES ==========
+  TelemetryToTimestreamRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: ahu-telemetry-to-timestream
+      TopicPattern: almed/ahu/+/+/+/telemetry
+      Sql: |
+        SELECT 
+          topic(4) as device_id,
+          topic(2) as site,
+          topic(3) as room,
+          temp as measure_value::double,
+          'temperature' as measure_name,
+          timestamp() as time
+        FROM 'almed/ahu/+/+/+/telemetry'
+      RuleDisabled: false
+      Actions:
+        - Timestream:
+            DatabaseName: !Ref TimestreamDatabase
+            TableName: !Ref TimestreamTable
+            RoleArn: !GetAtt IoTTimestreamRole.Arn
+            Dimensions:
+              - Name: device_id
+                Value: '${device_id}'
+              - Name: site
+                Value: '${site}'
+              - Name: room
+                Value: '${room}'
+            Timestamp:
+              Value: '${time}'
+
+  HumidityToTimestreamRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: ahu-humidity-to-timestream
+      TopicPattern: almed/ahu/+/+/+/telemetry
+      Sql: |
+        SELECT 
+          topic(4) as device_id,
+          topic(2) as site,
+          topic(3) as room,
+          hum as measure_value::double,
+          'humidity' as measure_name,
+          timestamp() as time
+        FROM 'almed/ahu/+/+/+/telemetry'
+      RuleDisabled: false
+      Actions:
+        - Timestream:
+            DatabaseName: !Ref TimestreamDatabase
+            TableName: !Ref TimestreamTable
+            RoleArn: !GetAtt IoTTimestreamRole.Arn
+            Dimensions:
+              - Name: device_id
+                Value: '${device_id}'
+              - Name: site
+                Value: '${site}'
+              - Name: room
+                Value: '${room}'
+            Timestamp:
+              Value: '${time}'
+
+  StateToDynamoDBRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: ahu-state-to-dynamodb
+      TopicPattern: almed/ahu/+/+/+/state
+      Sql: |
+        SELECT 
+          topic(4) as device_id,
+          topic(2) as site,
+          topic(3) as room,
+          * as state
+        FROM 'almed/ahu/+/+/+/state'
+      RuleDisabled: false
+      Actions:
+        - DynamoDBv2:
+            RoleArn: !GetAtt IoTDynamoDBRole.Arn
+            PutItem:
+              TableName: !Ref DeviceStateTable
+              Item:
+                device_id:
+                  String: '${device_id}'
+                site:
+                  String: '${site}'
+                room:
+                  String: '${room}'
+                state:
+                  String: '${state}'
+                timestamp:
+                  String: timestamp()
+
+Outputs:
+  IoTEndpoint:
+    Description: AWS IoT Core Endpoint
+    Value: !Sub '${AWS::AccountId}.iot.${Region}.amazonaws.com'
+    Export:
+      Name: !Sub '${ProjectName}-iot-endpoint'
+
+  TimestreamDatabase:
+    Description: Timestream Database Name
+    Value: !Ref TimestreamDatabase
+    Export:
+      Name: !Sub '${ProjectName}-timestream-db'
+
+  TimestreamTable:
+    Description: Timestream Table Name
+    Value: !Ref TimestreamTable
+    Export:
+      Name: !Sub '${ProjectName}-timestream-table'
+
+  DeviceStateTable:
+    Description: DynamoDB Device State Table
+    Value: !Ref DeviceStateTable
+    Export:
+      Name: !Sub '${ProjectName}-device-state-table'
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+    Export:
+      Name: !Sub '${ProjectName}-user-pool-id'
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+    Export:
+      Name: !Sub '${ProjectName}-user-pool-client-id'
+
+  DevicePolicyArn:
+    Description: IoT Device Policy ARN
+    Value: !Ref DevicePolicy
+    Export:
+      Name: !Sub '${ProjectName}-device-policy-arn'
+

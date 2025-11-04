@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../services/firebase_service.dart';
 import '../../providers/app_provider.dart';
+import '../../services/aws_admin_service.dart';
 import 'package:provider/provider.dart';
 
 class CreateUserDialog extends StatefulWidget {
@@ -15,7 +15,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
   final _emailController = TextEditingController();
   final _nameController = TextEditingController();
   final _accessKeyController = TextEditingController();
-  final FirebaseService _firebaseService = FirebaseService();
+  final _tempPasswordController = TextEditingController();
   String _selectedRole = 'client';
   List<String> _selectedDevices = [];
   bool _isLoading = false;
@@ -25,6 +25,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
     _emailController.dispose();
     _nameController.dispose();
     _accessKeyController.dispose();
+    _tempPasswordController.dispose();
     super.dispose();
   }
 
@@ -71,6 +72,28 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                     prefixIcon: Icon(Icons.person_rounded),
                   ),
                   validator: (value) => null,
+                ),
+                const SizedBox(height: 16),
+                
+                // Temporary Password (for AWS Cognito)
+                TextFormField(
+                  controller: _tempPasswordController,
+                  decoration: const InputDecoration(
+                    labelText: 'Temporary Password *',
+                    hintText: 'TempPass123!',
+                    prefixIcon: Icon(Icons.lock_rounded),
+                    helperText: 'User will set permanent password on first login',
+                  ),
+                  obscureText: true,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Temporary password is required';
+                    }
+                    if (value.length < 8) {
+                      return 'Password must be at least 8 characters';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
                 
@@ -212,19 +235,6 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
       return;
     }
     
-    // Check Firebase first
-    if (!_firebaseService.isFirebaseInitialized) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Firebase not initialized. Please wait or refresh the page.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-    
     if (_selectedRole == 'client' && _selectedDevices.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -240,43 +250,240 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
     });
     
     try {
-      await _firebaseService.createUser(
+      final awsService = AWSAdminService();
+      final result = await awsService.createUser(
         email: _emailController.text.trim(),
+        tempPassword: _tempPasswordController.text.trim(),
         role: _selectedRole,
-        accessKey: _selectedRole == 'client' 
-            ? _accessKeyController.text.trim() 
-            : null,
-        assignedDevices: _selectedRole == 'client' ? _selectedDevices : null,
         displayName: _nameController.text.trim().isEmpty 
             ? null 
             : _nameController.text.trim(),
+        assignedDevices: _selectedRole == 'client' ? _selectedDevices : null,
       );
       
-      if (context.mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('User created successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
-    } finally {
       if (mounted) {
         setState(() {
           _isLoading = false;
         });
+        
+        if (result['needsSetup'] == true) {
+          // AWS credentials not configured - show instructions
+          _showAWSCLIInstructions();
+        } else if (result['success'] == true) {
+          // Success - user created
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ User created successfully!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        } else {
+          // Error occurred
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ ${result['message']}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
       }
     }
+  }
+
+  void _showAWSCLIInstructions() {
+    final email = _emailController.text.trim();
+    final tempPassword = _tempPasswordController.text.trim();
+    final role = _selectedRole;
+    final devicesStr = _selectedDevices.join(',');
+    final displayName = _nameController.text.trim();
+    
+    // Generate AWS CLI command
+    // AWS Cognito configuration (from setup)
+    const userPoolId = 'ap-south-1_LSTShtM9R';
+    const region = 'ap-south-1';
+    
+    String command = '''
+aws cognito-idp admin-create-user \\
+  --user-pool-id $userPoolId \\
+  --username $email \\
+  --user-attributes \\
+    Name=email,Value=$email \\
+    Name=email_verified,Value=true \\
+    Name=custom:role,Value=$role''';
+
+    if (devicesStr.isNotEmpty) {
+      command += ' \\\n    Name=custom:assigned_devices,Value="$devicesStr"';
+    }
+    
+    if (displayName.isNotEmpty) {
+      command += ' \\\n    Name=name,Value="$displayName"';
+    }
+    
+    command += ''' \\
+  --temporary-password "$tempPassword" \\
+  --message-action SUPPRESS \\
+  --region $region''';
+
+    // Show dialog with instructions
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.blue),
+            SizedBox(width: 12),
+            Text('Create User via AWS'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'User creation requires AWS Console or AWS CLI. Use one of the options below:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              
+              // Option 1: AWS Console
+              ExpansionTile(
+                title: const Text('Option 1: AWS Console (Easiest)'),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('1. Go to:'),
+                        const SizedBox(height: 8),
+                        SelectableText(
+                          'https://console.aws.amazon.com/cognito/v2/idp/user-pools?region=$region',
+                          style: const TextStyle(color: Colors.blue),
+                        ),
+                        const SizedBox(height: 16),
+                        Text('2. Click on: $userPoolId'),
+                        const SizedBox(height: 8),
+                        const Text('3. Click "Users" → "Create user"'),
+                        const SizedBox(height: 8),
+                        const Text('4. Fill in:'),
+                        Text('   - Email: $email'),
+                        Text('   - Password: $tempPassword'),
+                        const Text('   - Mark email verified: ✅'),
+                        const SizedBox(height: 8),
+                        const Text('5. Add custom attributes:'),
+                        Text('   - custom:role = $role'),
+                        if (devicesStr.isNotEmpty)
+                          Text('   - custom:assigned_devices = $devicesStr'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 8),
+              
+              // Option 2: AWS CLI
+              ExpansionTile(
+                title: const Text('Option 2: AWS CLI (Faster)'),
+                initiallyExpanded: true,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Copy and run this command:'),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade900,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey.shade700),
+                          ),
+                          child: SelectableText(
+                            command,
+                            style: const TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'After creating, set permanent password:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade900,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey.shade700),
+                          ),
+                          child: SelectableText(
+                            'aws cognito-idp admin-set-user-password \\\n'
+                            '  --user-pool-id $userPoolId \\\n'
+                            '  --username $email \\\n'
+                            '  --password "$tempPassword" \\\n'
+                            '  --permanent \\\n'
+                            '  --region $region',
+                            style: const TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context); // Close create dialog too
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Instructions shown - create user via AWS Console/CLI'),
+                  backgroundColor: Colors.blue,
+                ),
+              );
+            },
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

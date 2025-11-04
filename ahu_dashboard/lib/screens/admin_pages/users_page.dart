@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../services/firebase_service.dart';
+import '../../services/aws_admin_service.dart';
 import '../../widgets/admin/create_user_dialog.dart';
 import '../../widgets/admin/edit_user_dialog.dart';
 import '../../widgets/admin/device_assignment_dialog.dart';
@@ -14,9 +13,53 @@ class UsersPage extends StatefulWidget {
 }
 
 class _UsersPageState extends State<UsersPage> {
-  final FirebaseService _firebaseService = FirebaseService();
+  final AWSAdminService _awsService = AWSAdminService();
   String _searchQuery = '';
   String? _filterRole;
+  List<Map<String, dynamic>> _users = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    setState(() => _isLoading = true);
+    
+    final result = await _awsService.listUsers();
+    
+    if (result['success'] == true && result['data'] != null) {
+      final usersData = result['data']['Users'] as List?;
+      if (usersData != null) {
+        setState(() {
+          _users = usersData.map((user) {
+            // Parse AWS Cognito user format
+            final attributes = (user['Attributes'] as List).fold<Map<String, String>>(
+              {},
+              (map, attr) => map..[attr['Name']] = attr['Value'],
+            );
+            
+            return {
+              'email': user['Username'],
+              'displayName': attributes['name'] ?? attributes['email'] ?? 'Unknown',
+              'role': attributes['custom:role'] ?? 'client',
+              'assignedDevices': (attributes['custom:assigned_devices'] ?? '').split(',').where((s) => s.isNotEmpty).toList(),
+              'enabled': user['Enabled'] ?? true,
+              'status': user['UserStatus'] ?? 'UNKNOWN',
+            };
+          }).toList();
+          _isLoading = false;
+        });
+      }
+    } else {
+      setState(() {
+        _users = [];
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -169,157 +212,106 @@ class _UsersPageState extends State<UsersPage> {
         Expanded(
           child: Container(
             color: const Color(0xFF141B2D),
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _firebaseService.getAllUsers(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
+            child: _isLoading
+                ? const Center(
                     child: CircularProgressIndicator(
                       valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
                     ),
-                  );
-                }
-                
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
+                  )
+                : _users.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(48),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E2640),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.1),
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.people_outline_rounded,
+                                    size: 64,
+                                    color: Colors.white.withOpacity(0.3),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'No users found',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Create your first user to get started',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.6),
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : () {
+                        // Filter users
+                        final filteredUsers = _users.where((user) {
+                          final email = (user['email'] ?? '').toString().toLowerCase();
+                          final role = (user['role'] ?? '').toString();
+
+                          // Search filter
+                          if (_searchQuery.isNotEmpty && !email.contains(_searchQuery)) {
+                            return false;
+                          }
+
+                          // Role filter
+                          if (_filterRole != null && role != _filterRole) {
+                            return false;
+                          }
+
+                          return true;
+                        }).toList();
+
+                        return ListView.builder(
                           padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E2640),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Colors.white.withOpacity( 0.1),
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.error_outline_rounded,
-                                size: 64,
-                                color: const Color(0xFFEF4444),
-                              ),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'Error loading users',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                snapshot.error.toString(),
-                                style: const TextStyle(
-                                  color: Color(0xFFEF4444),
-                                  fontSize: 14,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-                
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(48),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E2640),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Colors.white.withOpacity( 0.1),
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.people_outline_rounded,
-                                size: 64,
-                                color: Colors.white.withOpacity( 0.3),
-                              ),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'No users found',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Create your first user to get started',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity( 0.6),
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-                
-                final allDocs = snapshot.data!.docs;
-                final filteredDocs = allDocs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final email = (data['email'] ?? '').toString().toLowerCase();
-                  final role = (data['role'] ?? '').toString();
-                  
-                  // Search filter
-                  if (_searchQuery.isNotEmpty && !email.contains(_searchQuery)) {
-                    return false;
-                  }
-                  
-                  // Role filter
-                  if (_filterRole != null && role != _filterRole) {
-                    return false;
-                  }
-                  
-                  return true;
-                }).toList();
-                
-                return ListView.builder(
-                  padding: const EdgeInsets.all(24),
-                  itemCount: filteredDocs.length,
-                  itemBuilder: (context, index) {
-                    final doc = filteredDocs[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _UserCard(
-                      userData: data,
-                      userId: doc.id,
-                      onEdit: () => _showEditUserDialog(data, doc.id),
-                      onDelete: () => _showDeleteConfirmDialog(doc.id, data['email'] ?? ''),
-                      onAssignDevices: () => _showDeviceAssignmentDialog(data, doc.id),
-                    );
-                  },
-                );
-              },
-            ),
+                          itemCount: filteredUsers.length,
+                          itemBuilder: (context, index) {
+                            final userData = filteredUsers[index];
+                            return _UserCard(
+                              userData: userData,
+                              userId: userData['email'],
+                              onEdit: () => _showEditUserDialog(userData, userData['email']),
+                              onDelete: () => _showDeleteConfirmDialog(userData['email'], userData['email']),
+                              onAssignDevices: () => _showDeviceAssignmentDialog(userData, userData['email']),
+                            );
+                          },
+                        );
+                      }(),
           ),
         ),
       ],
     );
   }
 
-  void _showCreateUserDialog() {
-    showDialog(
+  void _showCreateUserDialog() async {
+    final result = await showDialog(
       context: context,
       builder: (context) => const CreateUserDialog(),
     );
+    
+    // Reload users if dialog returned true (user created)
+    if (result == true) {
+      _loadUsers();
+    }
   }
 
   void _showEditUserDialog(Map<String, dynamic> userData, String userId) {
@@ -357,11 +349,18 @@ class _UsersPageState extends State<UsersPage> {
             onPressed: () async {
               Navigator.pop(context);
               try {
-                await _firebaseService.deleteUser(email);
+                final result = await _awsService.deleteUser(email);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('User deleted successfully')),
-                  );
+                  if (result['success'] == true) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('User deleted successfully')),
+                    );
+                    _loadUsers(); // Reload users list
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: ${result['message']}')),
+                    );
+                  }
                 }
               } catch (e) {
                 if (context.mounted) {
@@ -406,9 +405,9 @@ class _UserCard extends StatelessWidget {
     final email = userData['email'] ?? '';
     final role = userData['role'] ?? 'client';
     final displayName = userData['displayName'] ?? email.split('@')[0];
-    final isActive = userData['isActive'] ?? true;
+    final isActive = userData['enabled'] ?? true;
     final assignedDevices = (userData['assignedDevices'] as List<dynamic>?) ?? [];
-    final lastLogin = userData['lastLogin'] as Timestamp?;
+    final status = userData['status'] ?? 'UNKNOWN';
     
     final roleColor = role == 'admin' 
         ? const Color(0xFF3B82F6)
@@ -531,26 +530,24 @@ class _UserCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (lastLogin != null) ...[
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(
-                    Icons.access_time_rounded,
-                    size: 16,
-                    color: Colors.white.withOpacity( 0.5),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  size: 16,
+                  color: Colors.white.withOpacity( 0.5),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Status: $status',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity( 0.6),
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Last login: ${_formatDate(lastLogin.toDate())}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white.withOpacity( 0.6),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ],
         ),
         trailing: Row(

@@ -45,9 +45,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final appProvider = Provider.of<AppProvider>(context, listen: false);
       appProvider.setUserRole(UserRole.admin);
       
-      // Skip MQTT on web - it doesn't work properly with WebSockets
-      // Firebase features will work without MQTT
-      print('Admin dashboard loaded - MQTT skipped on web platform');
+      // Initialize MQTT connection to Raspberry Pi
+      await appProvider.initializeMqtt();
+      appProvider.loadDefaultAhus();
+      print('Admin dashboard loaded - MQTT connection initialized');
     } catch (e) {
       print('Background initialization error (non-fatal): $e');
     }
