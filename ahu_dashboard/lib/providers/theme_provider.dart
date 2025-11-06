@@ -37,4 +37,3 @@ class ThemeProvider extends ChangeNotifier {
   }
 }
 
-

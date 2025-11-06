@@ -42,7 +42,14 @@ class AppTheme {
       onBackground: lightOnSurface,
     ),
     scaffoldBackgroundColor: lightBackground,
-    // cardTheme removed for compatibility with older Flutter versions
+    cardTheme: CardThemeData(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: Colors.grey.shade200, width: 1),
+      ),
+      color: lightSurface,
+    ),
     appBarTheme: const AppBarTheme(
       elevation: 0,
       centerTitle: false,
@@ -124,7 +131,14 @@ class AppTheme {
       onBackground: darkOnSurface,
     ),
     scaffoldBackgroundColor: darkBackground,
-    // cardTheme removed for compatibility with older Flutter versions
+    cardTheme: CardThemeData(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.1), width: 1),
+      ),
+      color: darkSurface,
+    ),
     appBarTheme: const AppBarTheme(
       elevation: 0,
       centerTitle: false,
@@ -176,7 +190,7 @@ class AppTheme {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: Colors.white.withOpacity( 0.1)),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
@@ -191,5 +205,4 @@ class AppTheme {
     ),
   );
 }
-
 

@@ -80,7 +80,7 @@ class MotorStatus extends StatelessWidget {
       case 3:
         return 'Fan (HIGH)';
       default:
-        return 'Fan (OFF)';  // Default to OFF (fan off when system not running)
+        return 'Fan';
     }
   }
 
@@ -134,6 +134,5 @@ class MotorStatus extends StatelessWidget {
     );
   }
 }
-
 
 

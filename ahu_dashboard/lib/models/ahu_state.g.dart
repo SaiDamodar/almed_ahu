@@ -41,4 +41,3 @@ Map<String, dynamic> _$AhuStateToJson(AhuState instance) => <String, dynamic>{
       'm2_run': instance.m2Run,
       'm2_delay': instance.m2Delay,
     };
-

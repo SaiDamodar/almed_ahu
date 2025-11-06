@@ -90,6 +90,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                           );
                           final status = provider.getStatus(widget.ahuId);
                           final isOnline = status == 'online';
+                          final isSystemRunning = provider.getState(widget.ahuId)?.run ?? false;
 
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -101,6 +102,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                               ),
                               Row(
                                 children: [
+                                  // Connection Status
                                   Container(
                                     width: 6,
                                     height: 6,
@@ -117,6 +119,47 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                                     style: Theme.of(
                                       context,
                                     ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  // System Running Status
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: isSystemRunning
+                                          ? const Color(0xFF10B981).withOpacity(0.15)
+                                          : Colors.grey.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: isSystemRunning
+                                            ? const Color(0xFF10B981)
+                                            : Colors.grey.shade400,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          isSystemRunning ? Icons.power_rounded : Icons.power_off_rounded,
+                                          size: 14,
+                                          color: isSystemRunning
+                                              ? const Color(0xFF10B981)
+                                              : Colors.grey.shade600,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          isSystemRunning ? 'RUNNING' : 'STOPPED',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: isSystemRunning
+                                                ? const Color(0xFF10B981)
+                                                : Colors.grey.shade600,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
@@ -655,94 +698,95 @@ class _ComponentStatus extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 20),
-              // 2-column grid layout
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.5,
-                children: [
-                  Consumer<AppProvider>(
-                    builder: (context, provider, child) {
-                      final isAdmin = provider.currentRole == UserRole.admin;
-                      return GestureDetector(
-                        onTap: isAdmin
-                            ? () => showDialog(
-                                context: context,
-                                builder: (context) => MotorTimingDialog(
-                                  ahuId: ahuId,
-                                  motorLabel: 'Motor 1 & 2 Timing',
-                                ),
-                              )
-                            : null,
-                        child: _StatusIndicator(
-                          icon: Icons.water_rounded,
-                          label: 'Motor 1 (Drain)',
-                          isActive: data.state?.m1 ?? false,
-                          color: const Color(0xFF3B82F6),
-                          isClickable: isAdmin,
-                        ),
-                      );
-                    },
-                  ),
-                  Consumer<AppProvider>(
-                    builder: (context, provider, child) {
-                      final isAdmin = provider.currentRole == UserRole.admin;
-                      return GestureDetector(
-                        onTap: isAdmin
-                            ? () => showDialog(
-                                context: context,
-                                builder: (context) => MotorTimingDialog(
-                                  ahuId: ahuId,
-                                  motorLabel: 'Motor 1 & 2 Timing',
-                                ),
-                              )
-                            : null,
-                        child: _StatusIndicator(
-                          icon: Icons.cleaning_services_rounded,
-                          label: 'Motor 2 (Filter)',
-                          isActive: data.state?.m2 ?? false,
-                          color: const Color(0xFF60A5FA),
-                          isClickable: isAdmin,
-                        ),
-                      );
-                    },
-                  ),
-                  _StatusIndicator(
-                    icon: Icons.ac_unit_rounded,
-                    label: 'Compressor',
-                    isActive: data.state?.cp ?? false,
-                    color: const Color(0xFF2563EB),
-                  ),
-                  _StatusIndicator(
-                    icon: Icons.whatshot_rounded,
-                    label: 'Heater',
-                    isActive: data.state?.heater ?? false,
-                    color: const Color(0xFF1E40AF),
-                  ),
-                  Consumer<AppProvider>(
-                    builder: (context, provider, child) {
-                      final isSystemRunning = data.state?.run ?? false;
-                      final isOnline = provider.getStatus(ahuId) == 'online';
-                      return GestureDetector(
-                        onTap: (isOnline && isSystemRunning)
-                            ? () {
-                                provider.toggleFanSpeed(ahuId);
-                              }
-                            : null,
-                        child: _StatusIndicator(
-                          icon: Icons.air_rounded,
-                          label: _getFanLabel(data.state?.fanSpeed ?? 0),
-                          isActive: data.state?.fan ?? false,
-                          color: const Color(0xFF10B981),
-                          isClickable: (isOnline && isSystemRunning),
-                        ),
-                      );
-                    },
-                  ),
-                ],
+              // Horizontal scrollable component status
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    Consumer<AppProvider>(
+                      builder: (context, provider, child) {
+                        final isAdmin = provider.currentRole == UserRole.admin;
+                        return GestureDetector(
+                          onTap: isAdmin
+                              ? () => showDialog(
+                                  context: context,
+                                  builder: (context) => MotorTimingDialog(
+                                    ahuId: ahuId,
+                                    motorLabel: 'Motor 1 & 2 Timing',
+                                  ),
+                                )
+                              : null,
+                          child: _StatusIndicator(
+                            icon: Icons.water_rounded,
+                            label: 'Motor 1 (Drain)',
+                            isActive: data.state?.m1 ?? false,
+                            color: const Color(0xFF3B82F6),
+                            isClickable: isAdmin,
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    Consumer<AppProvider>(
+                      builder: (context, provider, child) {
+                        final isAdmin = provider.currentRole == UserRole.admin;
+                        return GestureDetector(
+                          onTap: isAdmin
+                              ? () => showDialog(
+                                  context: context,
+                                  builder: (context) => MotorTimingDialog(
+                                    ahuId: ahuId,
+                                    motorLabel: 'Motor 1 & 2 Timing',
+                                  ),
+                                )
+                              : null,
+                          child: _StatusIndicator(
+                            icon: Icons.cleaning_services_rounded,
+                            label: 'Motor 2 (Filter)',
+                            isActive: data.state?.m2 ?? false,
+                            color: const Color(0xFF60A5FA),
+                            isClickable: isAdmin,
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    _StatusIndicator(
+                      icon: Icons.ac_unit_rounded,
+                      label: 'Compressor',
+                      isActive: data.state?.cp ?? false,
+                      color: const Color(0xFF2563EB),
+                    ),
+                    const SizedBox(width: 12),
+                    _StatusIndicator(
+                      icon: Icons.whatshot_rounded,
+                      label: 'Heater',
+                      isActive: data.state?.heater ?? false,
+                      color: const Color(0xFF1E40AF),
+                    ),
+                    const SizedBox(width: 12),
+                    Consumer<AppProvider>(
+                      builder: (context, provider, child) {
+                        final isSystemRunning = data.state?.run ?? false;
+                        final isOnline = provider.getStatus(ahuId) == 'online';
+                        return GestureDetector(
+                          onTap: (isOnline && isSystemRunning)
+                              ? () {
+                                  provider.toggleFanSpeed(ahuId);
+                                }
+                              : null,
+                          child: _StatusIndicator(
+                            icon: Icons.air_rounded,
+                            label: _getFanLabel(data.state?.fanSpeed ?? 0),
+                            isActive: data.state?.fan ?? false,
+                            color: const Color(0xFF10B981),
+                            isClickable: (isOnline && isSystemRunning),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -789,6 +833,7 @@ class _StatusIndicator extends StatelessWidget {
     return MouseRegion(
       cursor: isClickable ? SystemMouseCursors.click : SystemMouseCursors.basic,
       child: Container(
+        width: 120, // Fixed width for horizontal layout
         decoration: BoxDecoration(
           gradient: isActive
               ? LinearGradient(
@@ -1084,6 +1129,210 @@ class _SensorData {
 
   @override
   int get hashCode => telemetry.hashCode ^ state.hashCode;
+}
+
+class _FanControl extends StatelessWidget {
+  final String ahuId;
+
+  const _FanControl({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, _FanData>(
+      selector: (_, provider) => _FanData(
+        state: provider.getState(ahuId),
+        isOnline: provider.getStatus(ahuId) == 'online',
+      ),
+      builder: (context, data, child) {
+        final currentSpeed = data.state?.fanSpeed ?? 0;
+        final isFanOn = data.state?.fan ?? false;
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.air_rounded, color: const Color(0xFF10B981), size: 28),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Fan Control',
+                    style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 18),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Current: ',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    Text(
+                      _getFanSpeedLabel(currentSpeed),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF10B981),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'OFF',
+                      speed: 0,
+                      isSelected: currentSpeed == 0,
+                      color: Colors.grey,
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 0);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'LOW',
+                      speed: 1,
+                      isSelected: currentSpeed == 1,
+                      color: const Color(0xFF6EE7B7),
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 1);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'MID',
+                      speed: 2,
+                      isSelected: currentSpeed == 2,
+                      color: const Color(0xFF34D399),
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 2);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _FanSpeedButton(
+                      label: 'HIGH',
+                      speed: 3,
+                      isSelected: currentSpeed == 3,
+                      color: const Color(0xFF10B981),
+                      isEnabled: data.isOnline,
+                      onPressed: () {
+                        final provider = Provider.of<AppProvider>(context, listen: false);
+                        provider.setFanSpeed(ahuId, 3);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _getFanSpeedLabel(int speed) {
+    switch (speed) {
+      case 0:
+        return 'OFF';
+      case 1:
+        return 'LOW (5V)';
+      case 2:
+        return 'MED (7V)';
+      case 3:
+        return 'HIGH (9V)';
+      default:
+        return 'UNKNOWN';
+    }
+  }
+}
+
+class _FanSpeedButton extends StatelessWidget {
+  final String label;
+  final int speed;
+  final bool isSelected;
+  final Color color;
+  final bool isEnabled;
+  final VoidCallback onPressed;
+
+  const _FanSpeedButton({
+    required this.label,
+    required this.speed,
+    required this.isSelected,
+    required this.color,
+    required this.isEnabled,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: isEnabled && !isSelected ? onPressed : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? color : Colors.grey.shade200,
+        foregroundColor: isSelected ? Colors.white : Colors.grey.shade700,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 16),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class _FanData {
+  final state;
+  final bool isOnline;
+
+  _FanData({required this.state, required this.isOnline});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _FanData &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          isOnline == other.isOnline;
+
+  @override
+  int get hashCode => state.hashCode ^ isOnline.hashCode;
 }
 
 class _ComponentData {

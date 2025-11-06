@@ -238,7 +238,7 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  /// Set fan speed (1=LOW, 2=MID, 3=HIGH) - OFF mode removed
+  /// Set fan speed (0=OFF, 1=LOW, 2=MED, 3=HIGH)
   void setFanSpeed(String ahuId, int speed) {
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {

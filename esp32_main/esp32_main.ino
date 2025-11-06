@@ -1,11 +1,12 @@
 #include <WiFi.h>
-#include <WiFiClientSecure.h>  // ADD: For HiveMQ Cloud TLS connection
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
 // These are DEFAULT values - can be changed via MQTT provisioning from Admin UI
@@ -42,13 +43,12 @@ const float HUM_JUMP_MAX  = 18.0; // ignore RH jumps   > 18 %
 const float TEMP_FAIL_THRESHOLD = 5.0;  // < 5°C indicates sensor failure
 const float HUM_FAIL_THRESHOLD = 10.0;  // < 10% indicates sensor failure
 
-// ---------- L298N / Motors ----------
-#define IN1 25
-#define IN2 26
-#define ENA 33
-#define IN3 27
-#define IN4 14
-#define ENB 32
+// ---------- 5-Channel Relay Module (Active LOW control: LOW=ON, HIGH=OFF) ----------
+#define PIN_MOTOR1  32   // Relay IN1 - Motor 1 (12V DC)
+#define PIN_MOTOR2  33   // Relay IN2 - Motor 2 (12V DC)
+#define PIN_HEAT    19   // Relay IN3 - Heater (220V AC)
+#define PIN_CP      23   // Relay IN4 - CP Compressor (220V AC)
+#define PIN_SYSTEM  18   // Relay IN5 - System Master (220V AC)
 
 bool runState = false, m1Active = false, m2Active = false, shuttingDown = false;
 unsigned long m1StopAt = 0, m2StopAt = 0, m2NextAt = 0;
@@ -65,9 +65,7 @@ const unsigned long CMD_DEBOUNCE_MS = 500;  // Ignore duplicate commands within 
 bool shutdownM2Pending = false;
 bool shutdownStarted = false;             // NEW: prevents re-starting M1 during shutdown
 
-// ---------- Relays (open-drain drive) ----------
-// CP = compressor (temperature control)
-#define PIN_CP 23
+// ---------- Temperature & Humidity Control ----------
 bool   cpOn = false;
 float  tempSet = 22.0;               // °C
 const float TEMP_DEADBAND = 1.0;     // °C
@@ -75,8 +73,6 @@ const unsigned long CP_MIN_OFF_MS = 5000;  // test timings
 const unsigned long CP_MIN_ON_MS  = 3000;
 unsigned long cpLastOnAt  = 0, cpLastOffAt = 0;
 
-// HEATER = dehumidifier effect (humidity control)
-#define PIN_HEAT 19
 bool   heatOn = false;
 float  humSet = 55.0;                // %RH
 const float HUM_DEADBAND = 3.0;      // %RH
@@ -84,6 +80,7 @@ const unsigned long HEAT_MIN_OFF_MS = 5000; // test timings
 const unsigned long HEAT_MIN_ON_MS  = 3000;
 unsigned long heatLastOnAt  = 0, heatLastOffAt = 0;
 
+<<<<<<< HEAD
 // ========== FAN CONTROL (3 LM2596 + 3 Relay Method) ==========
 // Each relay connects one LM2596 output to the fan
 #define PIN_FAN_RELAY_LOW  18  // Relay #1: Connects LM2596 #1 (5V) to fan
@@ -114,6 +111,22 @@ const float TEMP_FAN_MID = 26.0;   // °C - Switch to MID at this temp
 const float TEMP_FAN_HIGH = 28.0;  // °C - Switch to HIGH at this temp
 const float HUM_FAN_THRESHOLD = 65.0;  // %RH - Turn on fan if humidity high
 const unsigned long FAN_MANUAL_MODE_TIMEOUT = 300000;  // Manual mode expires after 5 minutes (0 = never expire)
+=======
+// ---------- PWM Fan Control (D2 -> 0-10V Converter) ----------
+#define PIN_FAN_PWM 2
+enum FanSpeed { FAN_OFF = 0, FAN_LOW = 1, FAN_MED = 2, FAN_HIGH = 3 };
+FanSpeed fanSpeed = FAN_OFF;
+
+// PWM duty cycles for fan speeds (0-10V output)
+const int FAN_PWM_OFF  = 0;    // 0% = 0V
+const int FAN_PWM_LOW  = 128;  // 50% = 5V
+const int FAN_PWM_MED  = 179;  // 70% = 7V
+const int FAN_PWM_HIGH = 230;  // 90% = 9V
+
+// PWM configuration (ESP32 Arduino Core 3.x compatible)
+const int FAN_PWM_FREQ = 25000;  // 25 kHz
+const int FAN_PWM_RESOLUTION = 8; // 8-bit (0-255)
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
 
 // ---------- Ring buffers for logs (last 10) ----------
 const int LOG_MAX = 10;
@@ -127,22 +140,14 @@ String renderNewestFirst(String buf[], int head, int cnt){
   String out; for (int i=0;i<cnt;i++){ int idx=head-i; if(idx<0) idx+=LOG_MAX; out += buf[idx] + "<br>"; } return out;
 }
 
-// ========== MQTT LOCAL (Priority 1: Raspberry Pi) ==========
-WiFiClient espNetLocal;
-PubSubClient mqttLocal(espNetLocal);
+// ---------- MQTT (Local Pi only) ----------
+WiFiClient espNet;
+PubSubClient mqtt(espNet);
 
-const char* MQTT_USER_LOCAL = "almed";
-const char* MQTT_PASS_LOCAL = "Almed1234$";
-const uint16_t MQTT_PORT_LOCAL = 1883;
-
-// ========== MQTT CLOUD (Priority 2: HiveMQ Cloud) ==========
-WiFiClientSecure espNetCloud;
-PubSubClient mqttCloud(espNetCloud);
-
-const char* MQTT_USER_CLOUD = "almed";
-const char* MQTT_PASS_CLOUD = "AlMed123456";  // CHANGE THIS to your HiveMQ password
-const uint16_t MQTT_PORT_CLOUD = 8883;
-String mqttHostCloud = "ec1158fe4e0941df85f0a7bf133bf117.s1.eu.hivemq.cloud";  // CHANGE THIS to your HiveMQ cluster URL
+const char* MQTT_USER = "almed";
+const char* MQTT_PASS = "Almed1234$";
+const uint16_t MQTT_PORT = 1883;
+unsigned long lastMqttAttempt = 0;
 
 const char* ORG  = "almed";
 const char* SITE = "hospitalA";
@@ -161,13 +166,11 @@ String tProvBroker()      { return baseTopic()+"/provision/broker"; }
 String tProvMotorTimings(){ return baseTopic()+"/provision/motor_timings"; }
 String tProvAck()         { return baseTopic()+"/provision/ack"; }
 
-unsigned long lastMqttAttempt = 0;
-
 // ---------- Preferences ----------
 Preferences prefs;
 // Wi-Fi creds + broker host (in prefs)
 String w1_ssid, w1_pass, w2_ssid, w2_pass;
-String mqttHostLocal = "10.42.0.1";  // default is Pi hotspot IP (can be changed to "mqtt-broker.local")
+String mqttHost = "10.42.0.1";  // default is Pi hotspot IP (can be changed to "mqtt-broker.local")
 
 // ---------- Watchdog & State Recovery ----------
 unsigned long lastLoopTime = 0;
@@ -183,6 +186,7 @@ void saveSystemState(){
   prefs.putBool("cpOn", cpOn);
   prefs.putBool("heatOn", heatOn);
   prefs.putBool("shuttingDown", shuttingDown);
+  prefs.putInt("fanSpeed", (int)fanSpeed);
   prefs.putULong("saveTime", millis());
 }
 
@@ -194,6 +198,7 @@ void restoreSystemState(){
     bool wasCpOn = prefs.getBool("cpOn", false);
     bool wasHeatOn = prefs.getBool("heatOn", false);
     bool wasShuttingDown = prefs.getBool("shuttingDown", false);
+    int savedFanSpd = prefs.getInt("fanSpeed", 0);
     
     if (wasRunning && !wasShuttingDown) {
       // CRITICAL: Set flag to delay motor start until WiFi is connected
@@ -207,10 +212,16 @@ void restoreSystemState(){
       cpWrite(cpOn);
       heatWrite(heatOn);
       
+      // Restore fan speed
+      if (savedFanSpd >= 0 && savedFanSpd <= 3) {
+        setFanSpeed((FanSpeed)savedFanSpd);
+      }
+      
       Serial.println("⚠️ WATCHDOG RECOVERY: State restored, waiting for WiFi before starting motors");
       Serial.print("  CP: "); Serial.print(cpOn ? "ON" : "OFF");
       Serial.print(" | Heater: "); Serial.print(heatOn ? "ON" : "OFF");
-      Serial.println("\n  Motors: DELAYED until WiFi connected (safety)");
+      Serial.print(" | Fan: "); Serial.println(savedFanSpd);
+      Serial.println("  Motors: DELAYED until WiFi connected (safety)");
     }
   }
 }
@@ -220,18 +231,24 @@ void clearSystemState(){
   prefs.putBool("cpOn", false);
   prefs.putBool("heatOn", false);
   prefs.putBool("shuttingDown", false);
+  prefs.putInt("fanSpeed", 0);
   prefs.putULong("saveTime", 0);
 }
 
 // ---------- Logging ----------
 void mqttPublishLog(const char* level, const String& msg){
+<<<<<<< HEAD
   // Publish logs to both brokers (only cloud when NOT on PiSpot)
+=======
+  if(!mqtt.connected()) return;
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
   StaticJsonDocument<240> doc;
   doc["ts"]  = millis();
   doc["lvl"] = level;
   doc["msg"] = msg;
   char buf[280];
   size_t n = serializeJson(doc, buf, sizeof(buf));
+<<<<<<< HEAD
   
   // Publish to LOCAL broker (always when connected - RPI bridge forwards to cloud)
   if(mqttLocal.connected()) {
@@ -241,14 +258,39 @@ void mqttPublishLog(const char* level, const String& msg){
   if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
   }
+=======
+  mqtt.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
 }
 void motorLogMsg(const String& s){ Serial.println(s); pushMotorHTML(s); mqttPublishLog("INFO", s); }
 
-// ---------- Motor helpers ----------
-void m1_start(){ digitalWrite(IN1,HIGH); digitalWrite(IN2,LOW); digitalWrite(ENA,HIGH); m1Active=true;  motorLogMsg("Motor-1 ON (Drain)"); }
-void m1_stop (){ digitalWrite(ENA,LOW);  digitalWrite(IN1,LOW);  digitalWrite(IN2,LOW);  m1Active=false; motorLogMsg("Motor-1 OFF"); }
-void m2_start(){ digitalWrite(IN3,HIGH); digitalWrite(IN4,LOW); digitalWrite(ENB,HIGH); m2Active=true;  motorLogMsg("Motor-2 ON (Filter Clean)"); }
-void m2_stop (){ digitalWrite(ENB,LOW);  digitalWrite(IN3,LOW);  digitalWrite(IN4,LOW);  m2Active=false; motorLogMsg("Motor-2 OFF"); }
+// ---------- Relay Control Helpers (Active LOW: LOW=ON, HIGH=OFF) ----------
+inline void systemWrite(bool on){ digitalWrite(PIN_SYSTEM, on ? LOW : HIGH); }
+inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? LOW : HIGH); }
+inline void heatWrite(bool on){ digitalWrite(PIN_HEAT, on ? LOW : HIGH); }
+
+// ---------- Motor helpers (Active LOW relay control) ----------
+void m1_start(){ digitalWrite(PIN_MOTOR1, LOW); m1Active=true; motorLogMsg("Motor-1 ON (Drain)"); }
+void m1_stop (){ digitalWrite(PIN_MOTOR1, HIGH);  m1Active=false; motorLogMsg("Motor-1 OFF"); }
+void m2_start(){ digitalWrite(PIN_MOTOR2, LOW); m2Active=true; motorLogMsg("Motor-2 ON (Filter Clean)"); }
+void m2_stop (){ digitalWrite(PIN_MOTOR2, HIGH);  m2Active=false; motorLogMsg("Motor-2 OFF"); }
+
+// ---------- Fan Control (PWM to Voltage) ----------
+void setFanSpeed(FanSpeed speed){
+  fanSpeed = speed;
+  int pwmValue = FAN_PWM_OFF;
+  String speedName = "OFF";
+  
+  switch(speed){
+    case FAN_LOW:  pwmValue = FAN_PWM_LOW;  speedName = "LOW (5V)";  break;
+    case FAN_MED:  pwmValue = FAN_PWM_MED;  speedName = "MED (7V)";  break;
+    case FAN_HIGH: pwmValue = FAN_PWM_HIGH; speedName = "HIGH (9V)"; break;
+    default:       pwmValue = FAN_PWM_OFF;  speedName = "OFF"; break;
+  }
+  
+  ledcWrite(PIN_FAN_PWM, pwmValue);  // ESP32 3.x: write directly to pin
+  motorLogMsg("Fan speed: " + speedName);
+}
 
 // Emergency stop ALL motors (called on WiFi/system failure)
 void emergencyStopMotors(){
@@ -256,23 +298,9 @@ void emergencyStopMotors(){
   if (m2Active) { m2_stop(); Serial.println("⚠️ EMERGENCY: Motor-2 stopped (WiFi/system failure)"); }
   if (cpOn) { cpWrite(false); cpOn=false; Serial.println("⚠️ EMERGENCY: CP stopped"); }
   if (heatOn) { heatWrite(false); heatOn=false; Serial.println("⚠️ EMERGENCY: Heater stopped"); }
-  // Emergency: Turn OFF all fan relays
-  emergencyStopFan();
+  if (fanSpeed != FAN_OFF) { setFanSpeed(FAN_OFF); Serial.println("⚠️ EMERGENCY: Fan stopped"); }
+  systemWrite(false); // Turn off system relay
 }
-
-// Emergency: turn fan OFF (system failure)
-void emergencyStopFan() {
-  digitalWrite(PIN_FAN_RELAY_LOW, HIGH);   // Relay OFF
-  digitalWrite(PIN_FAN_RELAY_MID, HIGH);   // Relay OFF
-  digitalWrite(PIN_FAN_RELAY_HIGH, HIGH); // Relay OFF
-  fanSpeed = FAN_OFF;
-  fanOn = false;
-  Serial.println("⚠️ EMERGENCY: Fan turned OFF");
-}
-
-// ---------- Relay writers (open-drain: LOW=ON, HIGH=OFF) ----------
-inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? LOW : HIGH); }
-inline void heatWrite(bool on){ digitalWrite(PIN_HEAT, on ? LOW : HIGH); }
 
 // ---------- Controllers (gated by runState) ----------
 void controlCP(float t){
@@ -323,6 +351,7 @@ void controlHeater(float h){
   }
 }
 
+<<<<<<< HEAD
 // ========== FAN CONTROL FUNCTIONS (3 LM2596 + 3 Relay) ==========
 // Set fan speed - only ONE relay ON at a time
 // Each relay connects one LM2596 output (5V, 9V, or 12V) to the fan
@@ -450,11 +479,18 @@ void controlFan(float temp, float hum) {
   }
 }
 
+=======
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
 // ---------- System control ----------
 void startSystem(){
   if (shuttingDown) return;
   if (!runState){
     runState = true;
+    systemWrite(true); // Turn on system relay (master power)
+    
+    // Start fan at default speed (can be changed via MQTT)
+    if (fanSpeed == FAN_OFF) setFanSpeed(FAN_LOW);
+    
     // Boot sequence: Motor-1 first, then Motor-2 after delay, then periodic every M2_INTERVAL
     if (!m1Active){ 
       m1_start(); 
@@ -476,11 +512,15 @@ void stopSystem(){
   shuttingDown = true;
   shutdownStarted = false;   // NEW: ensure we start M1 post-drain only once
   shutdownM2Pending = false;
+<<<<<<< HEAD
   // Turn fan OFF when system stops
   if (fanSpeed != FAN_OFF) {
     setFanSpeed(FAN_OFF);
     motorLogMsg("Fan: Turned OFF - system stopped");
   }
+=======
+  setFanSpeed(FAN_OFF); // Turn off fan
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
   clearSystemState(); // Clear saved state on intentional stop
   motorLogMsg("[RUN] STOP requested → Shutdown Drain");
 }
@@ -489,7 +529,8 @@ void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
 
 // ---------- Telemetry / State ----------
 void publishTelemetry(){
-  StaticJsonDocument<512> doc;
+  if(!mqtt.connected()) return;
+  StaticJsonDocument<384> doc;
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
   doc["m1"]  = m1Active;
@@ -497,13 +538,14 @@ void publishTelemetry(){
   doc["run"] = runState;
   doc["cp"]  = cpOn;
   doc["heater"] = heatOn;
-  doc["fan"] = fanOn;
-  doc["fanSpeed"] = (int)fanSpeed;  // 0=OFF, 1=LOW, 2=MID, 3=HIGH
+  doc["fan"] = (fanSpeed != FAN_OFF); // Dashboard expects bool for fan on/off
+  doc["fanSpeed"] = (int)fanSpeed; // Dashboard expects fanSpeed for 0=OFF, 1=LOW, 2=MED, 3=HIGH
   doc["tempSet"] = tempSet;
   doc["humSet"]  = humSet;
   doc["ts"]  = millis();
-  char buf[576];
+  char buf[448];
   size_t n = serializeJson(doc, buf, sizeof(buf));
+<<<<<<< HEAD
   
   // Publish to LOCAL broker (always when connected - RPI bridge forwards to cloud)
   if(mqttLocal.connected()) {
@@ -513,13 +555,18 @@ void publishTelemetry(){
   if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
   }
+=======
+  mqtt.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
 }
 
 void publishState(){
-  StaticJsonDocument<640> doc;
+  if(!mqtt.connected()) return;
+  StaticJsonDocument<512> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["heater"]=heatOn;
-  doc["fan"]=fanOn; doc["fanSpeed"]=(int)fanSpeed;
+  doc["fan"]=(fanSpeed != FAN_OFF); // Dashboard expects bool
+  doc["fanSpeed"]=(int)fanSpeed; // Dashboard expects fanSpeed for 0=OFF, 1=LOW, 2=MED, 3=HIGH
   doc["tempSet"]=tempSet; doc["humSet"]=humSet;
   
   // Publish current motor timings (in seconds)
@@ -529,8 +576,9 @@ void publishState(){
   doc["m2_run"] = M2_RUN_TIME / 1000UL;
   doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
   doc["ip"]=WiFi.localIP().toString();
-  char buf[640];
+  char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
+<<<<<<< HEAD
   
   // Publish to LOCAL broker (retained - RPI bridge forwards to cloud)
   if(mqttLocal.connected()) {
@@ -540,6 +588,9 @@ void publishState(){
   if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
   }
+=======
+  mqtt.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true); // retained
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
 }
 
 // ---------- Sensor read (with glitch filter) ----------
@@ -617,7 +668,7 @@ void readSensorIfDue(){
 enum WifiNet { NET_PRIMARY = 0, NET_SECONDARY = 1 };
 WifiNet currentTry = NET_PRIMARY;
 unsigned long lastWifiAttemptAt = 0;
-const unsigned long WIFI_TRY_WINDOW_MS = 5000;   // try each SSID up to 5s (faster with 7s watchdog)
+const unsigned long WIFI_TRY_WINDOW_MS = 15000;   // try each SSID up to 5s (faster with 7s watchdog)
 const unsigned long WIFI_BACKOFF_MS    = 5000;   // wait 5s between rotations (reduced hotspot hammering)
 
 // WiFi event handler to catch association errors immediately
@@ -732,6 +783,7 @@ void rotateWifiIfNeeded(){
 
 // ================================ MQTT ======================================
 void publishStatusOnline(){
+<<<<<<< HEAD
   // Publish to LOCAL broker (always when connected)
   if(mqttLocal.connected()) {
     mqttLocal.publish(tStatus().c_str(), "online", true);
@@ -740,6 +792,10 @@ void publishStatusOnline(){
   if (!isOnPiSpot() && mqttCloud.connected()) {
     mqttCloud.publish(tStatus().c_str(), "online", true);
   }
+=======
+  if(!mqtt.connected()) return;
+  mqtt.publish(tStatus().c_str(), "online", true); // retained
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
 }
 
 void handleProvisioning(const char* topic, const byte* payload, unsigned int len){
@@ -763,15 +819,14 @@ void handleProvisioning(const char* topic, const byte* payload, unsigned int len
     motorLogMsg("Provision: Wi-Fi credentials saved");
     StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="wifi saved";
     char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    if(mqttLocal.connected()) mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
   }
   else if (t == tProvBroker()){
-    if (doc.containsKey("host")) { mqttHostLocal = String((const char*)doc["host"]); prefs.putString("mqtt_host", mqttHostLocal); }
-    if (doc.containsKey("port")) { uint16_t port = (uint16_t)doc["port"].as<uint16_t>(); prefs.putUShort("mqtt_port", port); }
-    motorLogMsg("Provision: Broker saved: " + mqttHostLocal);
+    if (doc.containsKey("host")) { mqttHost = String((const char*)doc["host"]); prefs.putString("mqtt_host", mqttHost); }
+    motorLogMsg("Provision: Broker saved: " + mqttHost);
     StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="broker saved";
     char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    if(mqttLocal.connected()) mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
   }
   else if (t == tProvMotorTimings()){
     // Motor timing provisioning (Admin only)
@@ -784,7 +839,7 @@ void handleProvisioning(const char* topic, const byte* payload, unsigned int len
     motorLogMsg("Provision: Motor timings saved - M1:" + String(M1_START_RUN/1000) + "s M2:" + String(M2_RUN_TIME/1000) + "s Interval:" + String(M2_INTERVAL/1000) + "s");
     StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="motor timings saved";
     char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    if(mqttLocal.connected()) mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
   }
 }
 
@@ -833,6 +888,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
       publishState();
     }
   }
+<<<<<<< HEAD
   
   // ========== FAN CONTROL COMMANDS ==========
   // Toggle fan speed: LOW → MID → HIGH → LOW (cycles through speeds)
@@ -924,36 +980,48 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len){
       fanManualMode = true;
       fanManualModeUntil = 0;  // Never expire
       motorLogMsg("Fan: Manual mode enabled (automatic control disabled)");
+=======
+  if (doc.containsKey("fan")){
+    // Fan control: 0=OFF, 1=LOW, 2=MED, 3=HIGH
+    int fanCmd = doc["fan"];
+    if (fanCmd >= 0 && fanCmd <= 3){
+      if (!runState && fanCmd != 0){
+        motorLogMsg("Fan control rejected: system not running");
+      } else {
+        setFanSpeed((FanSpeed)fanCmd);
+        prefs.putInt("fanSpeed", fanCmd);
+        publishState();
+      }
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
     }
   }
 }
 
-// ========== LOCAL MQTT CONNECTION (Priority 1) ==========
-void ensureMqttLocal(){
-  if(mqttLocal.connected()) return;
+void ensureMqtt(){
+  if(mqtt.connected()) return;
   if (WiFi.status()!=WL_CONNECTED) return;
 
   unsigned long now = millis();
-  static unsigned long lastLocalAttempt = 0;
-  if(now - lastLocalAttempt < 2000) return;
-  lastLocalAttempt = now;
+  if(now - lastMqttAttempt < 2000) return;
+  lastMqttAttempt = now;
 
-  mqttLocal.setServer(mqttHostLocal.c_str(), MQTT_PORT_LOCAL);
-  mqttLocal.setCallback(onMqttMessage);
+  mqtt.setServer(mqttHost.c_str(), MQTT_PORT);
+  mqtt.setCallback(onMqttMessage);
 
-  String clientId = String(AHU)+"_local_"+String((uint32_t)ESP.getEfuseMac(), HEX);
-  bool ok = mqttLocal.connect(clientId.c_str(),
-                         MQTT_USER_LOCAL, MQTT_PASS_LOCAL,
+  String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
+  bool ok = mqtt.connect(clientId.c_str(),
+                         MQTT_USER, MQTT_PASS,
                          tStatus().c_str(), 1, true, "offline");
   if(ok){
-    mqttLocal.subscribe(tCmd().c_str(), 1);
-    mqttLocal.subscribe(tProvWifi().c_str(), 1);
-    mqttLocal.subscribe(tProvBroker().c_str(), 1);
-    mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
-    motorLogMsg("✓ LOCAL MQTT connected (" + mqttHostLocal + ":" + String(MQTT_PORT_LOCAL) + ")");
     publishStatusOnline();
+    mqtt.subscribe(tCmd().c_str(), 1);
+    mqtt.subscribe(tProvWifi().c_str(), 1);
+    mqtt.subscribe(tProvBroker().c_str(), 1);
+    mqtt.subscribe(tProvMotorTimings().c_str(), 1);
+    motorLogMsg("MQTT connected to " + mqttHost + ":" + String(MQTT_PORT));
     publishState();
   }else{
+<<<<<<< HEAD
     Serial.print("✗ LOCAL MQTT connect failed, rc=");
     Serial.println(mqttLocal.state());
   }
@@ -1005,6 +1073,9 @@ void ensureMqttCloud(){
   }else{
     Serial.print("✗ CLOUD MQTT connect failed, rc=");
     Serial.println(mqttCloud.state());
+=======
+    motorLogMsg("MQTT connect failed");
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
   }
 }
 
@@ -1027,6 +1098,14 @@ void handleSerial(){
         float hs = serialBuf.substring(4).toFloat();
         if (hs>=10 && hs<=90){ humSet=hs; prefs.putFloat("humSet",humSet); motorLogMsg("Hum set via Serial: "+String(humSet,1)+"%"); publishState(); }
       }
+      else if (serialBuf.startsWith("fan ")){      // fan speed
+        String fanCmd = serialBuf.substring(4);
+        if (fanCmd == "off" || fanCmd == "0") { setFanSpeed(FAN_OFF); prefs.putInt("fanSpeed", 0); publishState(); }
+        else if (fanCmd == "low" || fanCmd == "1") { setFanSpeed(FAN_LOW); prefs.putInt("fanSpeed", 1); publishState(); }
+        else if (fanCmd == "med" || fanCmd == "2") { setFanSpeed(FAN_MED); prefs.putInt("fanSpeed", 2); publishState(); }
+        else if (fanCmd == "high" || fanCmd == "3") { setFanSpeed(FAN_HIGH); prefs.putInt("fanSpeed", 3); publishState(); }
+        else motorLogMsg("Fan cmd format: fan [off|low|med|high]");
+      }
       else if (serialBuf.length()) motorLogMsg("Unknown cmd: " + serialBuf);
       mqttPublishLog("INFO", String("> ") + serialBuf);
       serialBuf = "";
@@ -1039,13 +1118,16 @@ void handleSerial(){
 
 // ---------- Setup ----------
 void setup(){
+  // Disable brownout detector (prevents resets during motor operations)
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  
   Serial.begin(115200);
   delay(500); // Allow serial to stabilize
   
   // ========== WATCHDOG INITIALIZATION ==========
   Serial.println("\n========================================");
   Serial.println("   ALMED AHU Controller v2.0");
-  Serial.println("   Watchdog Protection Enabled");
+  Serial.println("   Dual MQTT (Local + Cloud)");
   Serial.println("========================================");
   
   // Configure watchdog timer (7 seconds timeout)
@@ -1063,20 +1145,25 @@ void setup(){
   // Feed watchdog immediately
   esp_task_wdt_reset();
 
-  pinMode(IN1,OUTPUT); pinMode(IN2,OUTPUT); pinMode(ENA,OUTPUT);
-  pinMode(IN3,OUTPUT); pinMode(IN4,OUTPUT); pinMode(ENB,OUTPUT);
-  digitalWrite(ENA,LOW); digitalWrite(ENB,LOW);
-  digitalWrite(IN1,LOW); digitalWrite(IN2,LOW);
-  digitalWrite(IN3,LOW); digitalWrite(IN4,LOW);
-
-  // Relays: open-drain so ESP32 only sinks current (safe for 5V-pulled IN)
-  pinMode(PIN_CP, OUTPUT_OPEN_DRAIN);
-  pinMode(PIN_HEAT, OUTPUT_OPEN_DRAIN);
-  digitalWrite(PIN_CP, HIGH);    // OFF at boot
-  digitalWrite(PIN_HEAT, HIGH);  // OFF at boot
+  // ========== RELAY MODULE INITIALIZATION (5-channel, Active LOW) ==========
+  pinMode(PIN_MOTOR1, OUTPUT);
+  pinMode(PIN_MOTOR2, OUTPUT);
+  pinMode(PIN_HEAT, OUTPUT);
+  pinMode(PIN_CP, OUTPUT);
+  pinMode(PIN_SYSTEM, OUTPUT);
+  
+  // All relays OFF at boot (HIGH = OFF for Active LOW relay)
+  digitalWrite(PIN_MOTOR1, HIGH);
+  digitalWrite(PIN_MOTOR2, HIGH);
+  digitalWrite(PIN_HEAT, HIGH);
+  digitalWrite(PIN_CP, HIGH);
+  digitalWrite(PIN_SYSTEM, HIGH);
+  
   cpLastOffAt = millis();
   heatLastOffAt = millis();
+  Serial.println("✓ 5-channel relay module initialized (Active LOW, all OFF)");
   
+<<<<<<< HEAD
   // ========== FAN CONTROL PIN SETUP (3 LM2596 + 3 Relay) ==========
   // NOTE: Relays are ACTIVE LOW (LOW = relay ON, HIGH = relay OFF)
   pinMode(PIN_FAN_RELAY_LOW, OUTPUT);
@@ -1097,6 +1184,12 @@ void setup(){
   Serial.println("  Fan Relay MID:  GPIO 13 (LM2596 #2: 9V)");
   Serial.println("  Fan Relay HIGH: GPIO 4  (LM2596 #3: 12V)");
   Serial.println("  Relay Logic: LOW = ON, HIGH = OFF (ACTIVE LOW)");
+=======
+  // ========== PWM FAN CONTROL INITIALIZATION (ESP32 3.x API) ==========
+  ledcAttach(PIN_FAN_PWM, FAN_PWM_FREQ, FAN_PWM_RESOLUTION); // Attach pin with freq & resolution
+  ledcWrite(PIN_FAN_PWM, FAN_PWM_OFF); // Fan OFF at boot
+  Serial.println("✓ PWM fan control initialized (25 kHz, 8-bit, ESP32 3.x)");
+>>>>>>> 169229d5d5d3cd2d2731b5fa77fa1b7d9474f07b
   
   esp_task_wdt_reset(); // Feed watchdog
 
@@ -1118,6 +1211,10 @@ void setup(){
   if (sp>=1 && sp<=100) tempSet = sp;
   float hs = prefs.getFloat("humSet", humSet);
   if (hs>=10 && hs<=90) humSet = hs;
+  
+  // Load saved fan speed
+  int savedFan = prefs.getInt("fanSpeed", 0);
+  if (savedFan >= 0 && savedFan <= 3) fanSpeed = (FanSpeed)savedFan;
 
   // Load Wi-Fi creds (primary defaults on first boot)
   w1_ssid = prefs.getString("w1_ssid", DEFAULT_W1_SSID);
@@ -1125,8 +1222,8 @@ void setup(){
   w2_ssid = prefs.getString("w2_ssid", String(""));   // empty until provisioned
   w2_pass = prefs.getString("w2_pass", String(""));
 
-  // Load broker host for LOCAL broker
-  mqttHostLocal = prefs.getString("mqtt_host", String("10.42.0.1")); // you can later provision "mqtt-broker.local"
+  // Load broker host (port is fixed for local/cloud)
+  mqttHost = prefs.getString("mqtt_host", String("10.42.0.1")); // Pi hotspot IP
   
   // Load motor timings (if previously provisioned)
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
@@ -1147,12 +1244,6 @@ void setup(){
   // Register WiFi event handler for immediate association error detection
   WiFi.onEvent(WiFiEvent);
   Serial.println("✓ WiFi event handler registered");
-  
-  // ========== MQTT BROKER CONFIGURATION ==========
-  // Configure TLS for CLOUD broker (HiveMQ)
-  espNetCloud.setInsecure();  // Skip certificate validation (for simplicity)
-  Serial.println("✓ Local MQTT configured (Raspberry Pi:" + String(MQTT_PORT_LOCAL) + ")");
-  Serial.println("✓ Cloud MQTT configured (HiveMQ:" + String(MQTT_PORT_CLOUD) + " TLS)");
   
   // ========== STATE RECOVERY (after watchdog reset) ==========
   Serial.println("\n--- Checking for previous state ---");
@@ -1181,7 +1272,7 @@ void loop(){
   
   // Check for loop hang (should never take more than LOOP_TIMEOUT_MS)
   if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
-    Serial.println("⚠️ CRITICAL: Loop timeout detected (>5s)!");
+    Serial.println("⚠️ CRITICAL: Loop timeout detected (>15s)!");
     motorLogMsg("ERROR: Loop hang detected - forcing reset");
     emergencyStopMotors(); // STOP ALL MOTORS before reset
     saveSystemState(); // Save state before reset
@@ -1202,7 +1293,7 @@ void loop(){
 
   // ========== PENDING RECOVERY START (after WiFi connected) ==========
   // If we're waiting to start motors after watchdog recovery, do it now that WiFi is stable
-  if (pendingRecoveryStart && WiFi.status() == WL_CONNECTED && mqttLocal.connected()) {
+  if (pendingRecoveryStart && WiFi.status() == WL_CONNECTED && mqtt.connected()) {
     pendingRecoveryStart = false;
     runState = true;
     // Start motor sequence (M1 will start in the running sequence below)
@@ -1210,16 +1301,8 @@ void loop(){
     Serial.println("  System recovered and running safely");
   }
 
-  // ========== MQTT MAINTENANCE (Priority 1: Local, Priority 2: Cloud) ==========
-  if (WiFi.status()==WL_CONNECTED){ 
-    // LOCAL MQTT (Priority 1)
-    ensureMqttLocal();
-    if(mqttLocal.connected()) mqttLocal.loop();
-    
-    // CLOUD MQTT (Priority 2) 
-    ensureMqttCloud();
-    if(mqttCloud.connected()) mqttCloud.loop();
-  }
+  // MQTT maintenance
+  if (WiFi.status()==WL_CONNECTED){ ensureMqtt(); if(mqtt.connected()) mqtt.loop(); }
 
   // Sensors + telemetry
   handleSerial();
@@ -1228,7 +1311,6 @@ void loop(){
   // Always evaluate controls using filtered readings (but gated by runState)
   controlCP(filtTempC);
   controlHeater(filtHum);
-  controlFan(filtTempC, filtHum);
 
   // =================== SHUTDOWN SEQUENCE ===================
   if (shuttingDown){
@@ -1261,6 +1343,7 @@ void loop(){
     // Finish shutdown after M2 completes
     if (shutdownM2Pending && m2Active && now >= m2StopAt){
       m2_stop();
+      systemWrite(false); // Turn off system relay (master power)
       shuttingDown = false;
       shutdownStarted = false;
       shutdownM2Pending = false;

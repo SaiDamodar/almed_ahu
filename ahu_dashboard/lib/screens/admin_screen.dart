@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
+import 'login_screen_enhanced.dart';
 
 /// Admin screen for WiFi provisioning and advanced settings
 class AdminScreen extends StatefulWidget {
@@ -128,7 +129,10 @@ class _AdminScreenState extends State<AdminScreen> {
                       child: IconButton(
                         icon: const Icon(Icons.logout_rounded),
                         onPressed: () {
-                          Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                            (route) => false,
+                          );
                         },
                         tooltip: 'Logout',
                       ),
