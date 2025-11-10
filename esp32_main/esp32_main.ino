@@ -1,24 +1,45 @@
-#include <WiFi.h>
+#include <pgmspace.h>
 #include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include "WiFi.h"
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
-#include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
-// ========================= AWS IoT CORE CONFIG (from working test) =========================
-const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com";
-const char AWS_IOT_CLIENT_ID[] = "AHU_ESP1_CTRL";
-const char AWS_IOT_SUBSCRIBE_TOPIC[] = "esp32/sub";
+#define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
+#define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-// Amazon Root CA 1
+#define THINGNAME "AHU_ESP2" // Unique identifier for your device, change this
+
+const char WIFI_SSID[] = "PiSpot"; // Your WiFi SSID
+const char WIFI_PASSWORD[] = "12345678"; // Your WiFi password
+const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint, change this
+
+// ============ DEFAULT WiFi ============
+#define DEFAULT_W1_SSID "PiSpot"
+#define DEFAULT_W1_PASS "12345678"
+
+// ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
+unsigned long M1_START_RUN = 10UL * 1000UL;
+unsigned long M1_POST_RUN  = 10UL * 1000UL;
+unsigned long M2_INTERVAL  = 30UL * 1000UL;
+unsigned long M2_RUN_TIME  = 10UL * 1000UL;
+unsigned long M2_DELAY_AFTER_M1_STOP = 5UL * 1000UL;
+
+// ========================= WATCHDOG CONFIGURATION =========================
+const unsigned long WDT_TIMEOUT = 7;
+const unsigned long LOOP_TIMEOUT_MS = 5000;
+const unsigned long WIFI_FAIL_RESET_MS = 15000;
+
+// Amazon Root CA 1, necessary for secure communication
 static const char AWS_CERT_CA[] PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
-ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9nMRkwFwYDVQQDExBBbWF6
+ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6
 b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL
 MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv
 b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj
@@ -38,11 +59,10 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 -----END CERTIFICATE-----
 )EOF";
 
-// Device certificate
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
 MIIDWTCCAkGgAwIBAgIUXOzilRCb264lti1+7sI3sD5G1HgwDQYJKoZIhvcNAQEL
-BQawTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
+BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
 SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI1MTExMDA3MTUx
 MloXDTQ5MTIzMTIzNTk1OVowHjEcMBoGA1UEAwwTQVdTIElvVCBDZXJ0aWZpY2F0
 ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANT18Bh97ffPkFW6E5UX
@@ -62,7 +82,6 @@ l9aPPczam3kajFLLq1bnT4oVADSnVGsuP7JKYYOkvQeYJlWF38pL/zXCi2KG
 -----END CERTIFICATE-----
 )KEY";
 
-// Private key
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
 MIIEogIBAAKCAQEA1PXwGH3t98+QVboTlRcx33SvolZdQyj6EzlE5Whb/Vz/BiIe
@@ -93,21 +112,22 @@ WcX63pf6TfPPd7gCgSaH74iCe0kuyNLeJUCz0VWAR9kb9uw02iQ=
 -----END RSA PRIVATE KEY-----
 )KEY";
 
-// ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
-unsigned long M1_START_RUN = 10UL * 1000UL;
-unsigned long M1_POST_RUN  = 10UL * 1000UL;
-unsigned long M2_INTERVAL  = 30UL * 1000UL;
-unsigned long M2_RUN_TIME  = 10UL * 1000UL;
-unsigned long M2_DELAY_AFTER_M1_STOP = 5UL * 1000UL;
+// ========== AWS IoT MQTT (Cloud) ==========
+WiFiClientSecure net = WiFiClientSecure();
+PubSubClient client(net);
 
-// ========================= WATCHDOG CONFIGURATION =========================
-const unsigned long WDT_TIMEOUT = 7;
-const unsigned long LOOP_TIMEOUT_MS = 5000;
-const unsigned long WIFI_FAIL_RESET_MS = 15000;
+// ========== Local MQTT Broker (Raspberry Pi) ==========
+WiFiClient espNet;
+PubSubClient mqttLocal(espNet);
 
-// ============ DEFAULT WiFi ============
-#define DEFAULT_W1_SSID "PiSpot"
-#define DEFAULT_W1_PASS "12345678"
+const char* MQTT_USER = "almed";
+const char* MQTT_PASS = "Almed1234$";
+const uint16_t MQTT_PORT = 1883;
+String mqttHost = "10.42.0.1";
+unsigned long lastMqttAttempt = 0;
+
+// MQTT buffer size for large messages
+const int MQTT_BUFFER_SIZE = 512;
 
 // ---------- SHT45 ----------
 Adafruit_SHT4x sht4;
@@ -170,20 +190,7 @@ String motorBuf[LOG_MAX]; int motorHead = -1; int motorCount = 0;
 void pushTempHTML(const String& line)  { tempHead  = (tempHead  + 1) % LOG_MAX; tempBuf[tempHead]  = line; if (tempCount  < LOG_MAX) tempCount++; }
 void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; motorBuf[motorHead] = line; if (motorCount < LOG_MAX) motorCount++; }
 
-// ---------- MQTT (Local Pi + AWS IoT) ----------
-WiFiClient espNet;
-PubSubClient mqtt(espNet);
-
-const char* MQTT_USER = "almed";
-const char* MQTT_PASS = "Almed1234$";
-const uint16_t MQTT_PORT = 1883;
-unsigned long lastMqttAttempt = 0;
-
-// AWS IoT MQTT client (using exact working pattern from test)
-WiFiClientSecure awsNet = WiFiClientSecure();
-PubSubClient awsMqtt(awsNet);
-bool awsMqttConnected = false;
-
+// ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
 const char* SITE = "hospitalA";
 const char* ROOM = "icu1";
@@ -195,15 +202,14 @@ String tLog()             { return baseTopic()+"/log"; }
 String tState()           { return baseTopic()+"/state"; }
 String tCmd()             { return baseTopic()+"/cmd"; }
 String tStatus()          { return baseTopic()+"/status"; }
-String tProvWifi()        { return baseTopic()+"/provision/wifi"; }
-String tProvBroker()      { return baseTopic()+"/provision/broker"; }
 String tProvMotorTimings(){ return baseTopic()+"/provision/motor_timings"; }
 String tProvAck()         { return baseTopic()+"/provision/ack"; }
+String tProvWifi()        { return baseTopic()+"/provision/wifi"; }
+String tProvBroker()      { return baseTopic()+"/provision/broker"; }
 
 // ---------- Preferences ----------
 Preferences prefs;
 String w1_ssid, w1_pass, w2_ssid, w2_pass;
-String mqttHost = "10.42.0.1";
 
 // ---------- Watchdog & State Recovery ----------
 unsigned long lastLoopTime = 0;
@@ -262,34 +268,11 @@ void clearSystemState(){
   prefs.putULong("saveTime", 0);
 }
 
-// ---------- Logging ----------
-void mqttPublishLog(const char* level, const String& msg){
-  if(!mqtt.connected()) return;
-  StaticJsonDocument<240> doc;
-  doc["ts"]  = millis();
-  doc["lvl"] = level;
-  doc["msg"] = msg;
-  char buf[280];
-  size_t n = serializeJson(doc, buf, sizeof(buf));
-  mqtt.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
-}
-void motorLogMsg(const String& s){ Serial.println(s); pushMotorHTML(s); mqttPublishLog("INFO", s); }
-
-// ---------- AWS IoT Message Handler (exact pattern from working test) ----------
-void awsMessageHandler(char* topic, byte* payload, unsigned int length) {
-  Serial.print("[AWS] Incoming message on topic [");
-  Serial.print(topic);
-  Serial.print("]: ");
-  
-  String received_msg = "";
-  for (int i = 0; i < length; i++) {
-    received_msg += (char)payload[i];
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-  
-  // Process AWS commands here if needed
-  motorLogMsg("[AWS] Received: " + received_msg);
+// ---------- Logging (Simplified - Serial only to avoid MQTT overload) ----------
+void motorLogMsg(const String& s){ 
+  Serial.println(s); 
+  pushMotorHTML(s);
+  // MQTT logging disabled to keep connection stable
 }
 
 // ---------- Relay Control (Active LOW: LOW=ON, HIGH=OFF) ----------
@@ -409,7 +392,6 @@ void startSystem(){
       m2ScheduledAfterM1 = false;
     }
     motorLogMsg("[RUN] STARTED - System is now running");
-    publishState();
   } else {
     motorLogMsg("[RUN] Already running");
   }
@@ -430,15 +412,16 @@ void stopSystem(){
   setFanSpeed(FAN_OFF);
   clearSystemState();
   motorLogMsg("[RUN] STOP requested → Entering shutdown mode");
-  publishState();
 }
 
 void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
 
-// ---------- Telemetry / State ----------
-void publishTelemetry(){
-  if(!mqtt.connected()) return;
-  StaticJsonDocument<384> doc;
+// ---------- Telemetry / State (Published separately to AWS and Local) ----------
+void publishTelemetryAWS(){
+  if(!client.connected()) return;
+  
+  StaticJsonDocument<512> doc;
+  doc["type"] = "telemetry";
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
   doc["m1"]  = m1Active;
@@ -450,15 +433,53 @@ void publishTelemetry(){
   doc["fanSpeed"] = (int)fanSpeed;
   doc["tempSet"] = tempSet;
   doc["humSet"]  = humSet;
+  doc["ip"]=WiFi.localIP().toString();
+  doc["thing"]=THINGNAME;
   doc["ts"]  = millis();
-  char buf[448];
+  
+  char buf[512];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  mqtt.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+  
+  bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
+  if (success) {
+    Serial.println("✓ Telemetry → AWS (esp32/pub)");
+  }
 }
 
-void publishState(){
-  if(!mqtt.connected()) return;
+void publishTelemetryLocal(){
+  if(!mqttLocal.connected()) return;
+  
   StaticJsonDocument<512> doc;
+  doc["type"] = "telemetry";
+  if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
+  if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
+  doc["m1"]  = m1Active;
+  doc["m2"]  = m2Active;
+  doc["run"] = runState;
+  doc["cp"]  = cpOn;
+  doc["heater"] = heatOn;
+  doc["fan"] = (fanSpeed != FAN_OFF);
+  doc["fanSpeed"] = (int)fanSpeed;
+  doc["tempSet"] = tempSet;
+  doc["humSet"]  = humSet;
+  doc["ip"]=WiFi.localIP().toString();
+  doc["thing"]=THINGNAME;
+  doc["ts"]  = millis();
+  
+  char buf[512];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  
+  bool success = mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+  if (success) {
+    Serial.println("✓ Telemetry → Local (" + tTelemetry() + ")");
+  }
+}
+
+void publishStateAWS(){
+  if(!client.connected()) return;
+  
+  StaticJsonDocument<512> doc;
+  doc["type"] = "state";
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["heater"]=heatOn;
   doc["fan"]=(fanSpeed != FAN_OFF);
@@ -471,9 +492,45 @@ void publishState(){
   doc["m2_run"] = M2_RUN_TIME / 1000UL;
   doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
   doc["ip"]=WiFi.localIP().toString();
-  char buf[384];
+  doc["thing"]=THINGNAME;
+  doc["ts"]  = millis();
+  
+  char buf[512];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  mqtt.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
+  
+  bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
+  if (success) {
+    Serial.println("✓ State → AWS (esp32/pub)");
+  }
+}
+
+void publishStateLocal(){
+  if(!mqttLocal.connected()) return;
+  
+  StaticJsonDocument<512> doc;
+  doc["type"] = "state";
+  doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
+  doc["cp"]=cpOn; doc["heater"]=heatOn;
+  doc["fan"]=(fanSpeed != FAN_OFF);
+  doc["fanSpeed"]=(int)fanSpeed;
+  doc["tempSet"]=tempSet; doc["humSet"]=humSet;
+  
+  doc["m1_start"] = M1_START_RUN / 1000UL;
+  doc["m1_post"] = M1_POST_RUN / 1000UL;
+  doc["m2_interval"] = M2_INTERVAL / 1000UL;
+  doc["m2_run"] = M2_RUN_TIME / 1000UL;
+  doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
+  doc["ip"]=WiFi.localIP().toString();
+  doc["thing"]=THINGNAME;
+  doc["ts"]  = millis();
+  
+  char buf[512];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  
+  bool success = mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
+  if (success) {
+    Serial.println("✓ State → Local (" + tState() + ")");
+  }
 }
 
 // ---------- Sensor Read ----------
@@ -529,276 +586,11 @@ void readSensorIfDue(){
     String line = "Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + " °C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%";
     Serial.println(line);
     pushTempHTML("Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + "&deg;C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%");
-    mqttPublishLog("INFO", line);
-    publishTelemetry();
+    // Don't publish telemetry here, it will be published on a separate timer
 
   } else {
     Serial.println("SHT45 read failed");
     pushTempHTML("SHT45 read failed");
-    mqttPublishLog("WARN", "SHT45 read failed");
-  }
-}
-
-// =========================== WiFi ===========================
-enum WifiNet { NET_PRIMARY = 0, NET_SECONDARY = 1 };
-WifiNet currentTry = NET_PRIMARY;
-unsigned long lastWifiAttemptAt = 0;
-const unsigned long WIFI_TRY_WINDOW_MS = 15000;
-const unsigned long WIFI_BACKOFF_MS    = 5000;
-
-void WiFiEvent(WiFiEvent_t event) {
-  switch(event) {
-    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      if (WiFi.status() == WL_CONNECT_FAILED) {
-        wifiAssociationRefused = true;
-        Serial.println("⚠️ WiFi Association REFUSED");
-      }
-      break;
-    default:
-      break;
-  }
-}
-
-bool tryConnectWiFiOnce(const char* ssid, const char* pass, unsigned long windowMs){
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true, true);
-  delay(50);
-  WiFi.begin(ssid, pass);
-  unsigned long t0 = millis();
-  while (WiFi.status()!=WL_CONNECTED && millis()-t0<windowMs){
-    delay(250);
-    esp_task_wdt_reset();
-  }
-  
-  if (WiFi.status() == WL_CONNECT_FAILED || WiFi.status() == WL_DISCONNECTED) {
-    consecutiveWifiFailures++;
-    if (consecutiveWifiFailures >= 3) {
-      Serial.println("⚠️ WiFi association failed multiple times");
-      motorLogMsg("WARN: WiFi association error");
-    }
-  } else if (WiFi.status() == WL_CONNECTED) {
-    consecutiveWifiFailures = 0;
-  }
-  
-  return WiFi.status()==WL_CONNECTED;
-}
-
-void rotateWifiIfNeeded(){
-  if (WiFi.status()==WL_CONNECTED) {
-    if (wifiWasFailing) {
-      wifiWasFailing = false;
-      wifiFailStartTime = 0;
-      consecutiveWifiFailures = 0;
-      wifiAssociationRefused = false;
-    }
-    return;
-  }
-  
-  if (wifiAssociationRefused) {
-    Serial.println("⚠️ WiFi Association Error - IMMEDIATE RESET");
-    motorLogMsg("ERROR: WiFi association refused - resetting ESP32");
-    emergencyStopMotors();
-    saveSystemState();
-    delay(100);
-    ESP.restart();
-  }
-  
-  unsigned long now = millis();
-  if (!wifiWasFailing) {
-    wifiWasFailing = true;
-    wifiFailStartTime = now;
-  }
-  
-  if (wifiWasFailing && (now - wifiFailStartTime > WIFI_FAIL_RESET_MS)) {
-    Serial.println("⚠️ WiFi failed for 15s - resetting");
-    motorLogMsg("ERROR: WiFi failure timeout - resetting ESP32");
-    emergencyStopMotors();
-    saveSystemState();
-    delay(100);
-    esp_task_wdt_config_t quick_reset = {
-      .timeout_ms = 1000,
-      .idle_core_mask = 0,
-      .trigger_panic = true
-    };
-    esp_task_wdt_init(&quick_reset);
-    esp_task_wdt_add(NULL);
-    while(1);
-  }
-  
-  if (now - lastWifiAttemptAt < WIFI_BACKOFF_MS) return;
-  lastWifiAttemptAt = now;
-
-  if (currentTry == NET_PRIMARY){
-    if (w1_ssid.length()){
-      motorLogMsg("Wi-Fi: trying PRIMARY: " + w1_ssid);
-      if (tryConnectWiFiOnce(w1_ssid.c_str(), w1_pass.c_str(), WIFI_TRY_WINDOW_MS)){
-        motorLogMsg("Wi-Fi connected (PRIMARY), IP: " + WiFi.localIP().toString());
-        return;
-      }
-    }
-    currentTry = NET_SECONDARY;
-  } else {
-    if (w2_ssid.length()){
-      motorLogMsg("Wi-Fi: trying SECONDARY: " + w2_ssid);
-      if (tryConnectWiFiOnce(w2_ssid.c_str(), w2_pass.c_str(), WIFI_TRY_WINDOW_MS)){
-        motorLogMsg("Wi-Fi connected (SECONDARY), IP: " + WiFi.localIP().toString());
-        return;
-      }
-    }
-    currentTry = NET_PRIMARY;
-  }
-}
-
-// ================================ MQTT ======================================
-void publishStatusOnline(){
-  if(!mqtt.connected()) return;
-  mqtt.publish(tStatus().c_str(), "online", true);
-}
-
-void handleProvisioning(const char* topic, const byte* payload, unsigned int len){
-  String t = String(topic);
-  StaticJsonDocument<320> doc;
-  if (deserializeJson(doc, payload, len)) return;
-
-  if (t == tProvWifi()){
-    if (doc.containsKey("primary")){
-      w1_ssid = String((const char*)doc["primary"]["ssid"]) ;
-      w1_pass = String((const char*)doc["primary"]["pass"]) ;
-      prefs.putString("w1_ssid", w1_ssid);
-      prefs.putString("w1_pass", w1_pass);
-    }
-    if (doc.containsKey("secondary")){
-      w2_ssid = String((const char*)doc["secondary"]["ssid"]);
-      w2_pass = String((const char*)doc["secondary"]["pass"]);
-      prefs.putString("w2_ssid", w2_ssid);
-      prefs.putString("w2_pass", w2_pass);
-    }
-    motorLogMsg("Provision: Wi-Fi saved");
-    StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="wifi saved";
-    char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
-  }
-  else if (t == tProvBroker()){
-    if (doc.containsKey("host")) { mqttHost = String((const char*)doc["host"]); prefs.putString("mqtt_host", mqttHost); }
-    motorLogMsg("Provision: Broker saved: " + mqttHost);
-    StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="broker saved";
-    char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
-  }
-  else if (t == tProvMotorTimings()){
-    if (doc.containsKey("m1_start")) { M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL; prefs.putULong("m1_start", M1_START_RUN); }
-    if (doc.containsKey("m1_post")) { M1_POST_RUN = doc["m1_post"].as<unsigned long>() * 1000UL; prefs.putULong("m1_post", M1_POST_RUN); }
-    if (doc.containsKey("m2_interval")) { M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL; prefs.putULong("m2_interval", M2_INTERVAL); }
-    if (doc.containsKey("m2_run")) { M2_RUN_TIME = doc["m2_run"].as<unsigned long>() * 1000UL; prefs.putULong("m2_run", M2_RUN_TIME); }
-    if (doc.containsKey("m2_delay")) { M2_DELAY_AFTER_M1_STOP = doc["m2_delay"].as<unsigned long>() * 1000UL; prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); }
-    
-    motorLogMsg("Provision: Motor timings saved");
-    StaticJsonDocument<96> ack; ack["ok"]=true; ack["msg"]="motor timings saved";
-    char buf[128]; size_t n = serializeJson(ack, buf, sizeof(buf));
-    mqtt.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
-  }
-}
-
-void onMqttMessage(char* topic, byte* payload, unsigned int len){
-  String tStr(topic);
-  if (tStr == tProvWifi() || tStr == tProvBroker() || tStr == tProvMotorTimings()){
-    handleProvisioning(topic, payload, len);
-    return;
-  }
-
-  if (tStr != tCmd()) return;
-
-  StaticJsonDocument<256> doc;
-  if (deserializeJson(doc, payload, len)) return;
-
-  // Debug: Show what we received
-  String cmdStr;
-  serializeJson(doc, cmdStr);
-  motorLogMsg("MQTT CMD: " + cmdStr);
-
-  if (doc.containsKey("start") && doc["start"] == true)  { motorLogMsg("→ START"); startSystem(); }
-  else if (doc.containsKey("stop") && doc["stop"] == true)   { motorLogMsg("→ STOP"); stopSystem(); }
-  else if (doc.containsKey("toggle") && doc["toggle"] == true) { motorLogMsg("→ TOGGLE"); toggleSystem(); }
-
-  if (doc.containsKey("setpoint")){
-    float sp = doc["setpoint"];
-    if (sp >= 1 && sp <= 100){
-      tempSet = sp; prefs.putFloat("tempSet", tempSet);
-      motorLogMsg("Temp setpoint: " + String(tempSet,1) + "C");
-      publishState();
-    }
-  }
-  if (doc.containsKey("humset")){
-    float hs = doc["humset"];
-    if (hs >= 10 && hs <= 90){
-      humSet = hs; prefs.putFloat("humSet", humSet);
-      motorLogMsg("Hum setpoint: " + String(humSet,1) + "%");
-      publishState();
-    }
-  }
-  if (doc.containsKey("fan")){
-    int fanCmd = doc["fan"];
-    motorLogMsg("Fan CMD: " + String(fanCmd));
-    if (fanCmd >= 0 && fanCmd <= 3){
-      if (!runState && fanCmd != 0){
-        motorLogMsg("→ Fan rejected: system not running");
-      } else {
-        motorLogMsg("→ Fan speed: " + String(fanCmd));
-        setFanSpeed((FanSpeed)fanCmd);
-        prefs.putInt("fanSpeed", fanCmd);
-        publishState();
-      }
-    } else {
-      motorLogMsg("→ Invalid fan speed: " + String(fanCmd));
-    }
-  }
-  
-  // Handle fanToggle (cycle through LOW → MED → HIGH → LOW, skip OFF when running)
-  if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
-    if (!runState){
-      motorLogMsg("Fan toggle rejected: system not running");
-    } else {
-      FanSpeed newSpeed;
-      switch(fanSpeed){
-        case FAN_OFF:
-        case FAN_LOW:  newSpeed = FAN_MED;  break;
-        case FAN_MED:  newSpeed = FAN_HIGH; break;
-        case FAN_HIGH: newSpeed = FAN_LOW;  break;
-        default:       newSpeed = FAN_LOW;  break;
-      }
-      motorLogMsg("Fan toggle: " + String((int)fanSpeed) + " → " + String((int)newSpeed));
-      setFanSpeed(newSpeed);
-      prefs.putInt("fanSpeed", (int)newSpeed);
-      publishState();
-    }
-  }
-}
-
-void ensureMqtt(){
-  if(mqtt.connected()) return;
-  if (WiFi.status()!=WL_CONNECTED) return;
-
-  unsigned long now = millis();
-  if(now - lastMqttAttempt < 2000) return;
-  lastMqttAttempt = now;
-
-  mqtt.setServer(mqttHost.c_str(), MQTT_PORT);
-  mqtt.setCallback(onMqttMessage);
-
-  String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
-  bool ok = mqtt.connect(clientId.c_str(),
-                         MQTT_USER, MQTT_PASS,
-                         tStatus().c_str(), 1, true, "offline");
-  if(ok){
-    publishStatusOnline();
-    mqtt.subscribe(tCmd().c_str(), 1);
-    mqtt.subscribe(tProvWifi().c_str(), 1);
-    mqtt.subscribe(tProvBroker().c_str(), 1);
-    mqtt.subscribe(tProvMotorTimings().c_str(), 1);
-    motorLogMsg("MQTT connected: " + mqttHost);
-    publishState();
-  }else{
-    motorLogMsg("MQTT connect failed");
   }
 }
 
@@ -815,18 +607,50 @@ void handleSerial(){
       else if (serialBuf == "toggle") toggleSystem();
       else if (serialBuf.startsWith("set ")){
         float sp = serialBuf.substring(4).toFloat();
-        if (sp>=1 && sp<=100){ tempSet=sp; prefs.putFloat("tempSet",tempSet); motorLogMsg("Temp set: "+String(tempSet,1)+"C"); publishState(); }
+        if (sp>=1 && sp<=100){ 
+          tempSet=sp; 
+          prefs.putFloat("tempSet",tempSet); 
+          motorLogMsg("Temp set: "+String(tempSet,1)+"C"); 
+          if(client.connected()) publishStateAWS();
+          if(mqttLocal.connected()) publishStateLocal();
+        }
       }
       else if (serialBuf.startsWith("hum ")){
         float hs = serialBuf.substring(4).toFloat();
-        if (hs>=10 && hs<=90){ humSet=hs; prefs.putFloat("humSet",humSet); motorLogMsg("Hum set: "+String(humSet,1)+"%"); publishState(); }
+        if (hs>=10 && hs<=90){ 
+          humSet=hs; 
+          prefs.putFloat("humSet",humSet); 
+          motorLogMsg("Hum set: "+String(humSet,1)+"%"); 
+          if(client.connected()) publishStateAWS();
+          if(mqttLocal.connected()) publishStateLocal();
+        }
       }
       else if (serialBuf.startsWith("fan ")){
         String fanCmd = serialBuf.substring(4);
-        if (fanCmd == "off" || fanCmd == "0") { setFanSpeed(FAN_OFF); prefs.putInt("fanSpeed", 0); publishState(); }
-        else if (fanCmd == "low" || fanCmd == "1") { setFanSpeed(FAN_LOW); prefs.putInt("fanSpeed", 1); publishState(); }
-        else if (fanCmd == "med" || fanCmd == "2") { setFanSpeed(FAN_MED); prefs.putInt("fanSpeed", 2); publishState(); }
-        else if (fanCmd == "high" || fanCmd == "3") { setFanSpeed(FAN_HIGH); prefs.putInt("fanSpeed", 3); publishState(); }
+        if (fanCmd == "off" || fanCmd == "0") { 
+          setFanSpeed(FAN_OFF); 
+          prefs.putInt("fanSpeed", 0); 
+          if(client.connected()) publishStateAWS();
+          if(mqttLocal.connected()) publishStateLocal();
+        }
+        else if (fanCmd == "low" || fanCmd == "1") { 
+          setFanSpeed(FAN_LOW); 
+          prefs.putInt("fanSpeed", 1); 
+          if(client.connected()) publishStateAWS();
+          if(mqttLocal.connected()) publishStateLocal();
+        }
+        else if (fanCmd == "med" || fanCmd == "2") { 
+          setFanSpeed(FAN_MED); 
+          prefs.putInt("fanSpeed", 2); 
+          if(client.connected()) publishStateAWS();
+          if(mqttLocal.connected()) publishStateLocal();
+        }
+        else if (fanCmd == "high" || fanCmd == "3") { 
+          setFanSpeed(FAN_HIGH); 
+          prefs.putInt("fanSpeed", 3); 
+          if(client.connected()) publishStateAWS();
+          if(mqttLocal.connected()) publishStateLocal();
+        }
       }
       else if (serialBuf.length()) motorLogMsg("Unknown cmd: " + serialBuf);
       serialBuf = "";
@@ -837,8 +661,350 @@ void handleSerial(){
   }
 }
 
-// ---------- Setup ----------
-void setup(){
+// Function to handle incoming MQTT messages
+void messageHandler(char* topic, byte* payload, unsigned int length) 
+{
+  // Print raw message to Serial
+  Serial.println("\n========================================");
+  Serial.print("📩 AWS Message Received from: ");
+  Serial.println(topic);
+  Serial.print("  Payload: ");
+  for (unsigned int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+  Serial.println("========================================\n");
+
+  // Parse JSON command
+  StaticJsonDocument<320> doc;
+  if (deserializeJson(doc, payload, length)) {
+    Serial.println("❌ JSON parse failed");
+    return;
+  }
+
+  // Show what we received
+  String cmdStr;
+  serializeJson(doc, cmdStr);
+  Serial.println("📝 Command: " + cmdStr);
+  
+  // Handle motor timing provisioning
+  if (doc.containsKey("m1_start")) { 
+    M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL; 
+    prefs.putULong("m1_start", M1_START_RUN); 
+    Serial.println("✓ M1 start time updated: " + String(M1_START_RUN/1000) + "s");
+  }
+  if (doc.containsKey("m1_post")) { 
+    M1_POST_RUN = doc["m1_post"].as<unsigned long>() * 1000UL; 
+    prefs.putULong("m1_post", M1_POST_RUN); 
+    Serial.println("✓ M1 post time updated: " + String(M1_POST_RUN/1000) + "s");
+  }
+  if (doc.containsKey("m2_interval")) { 
+    M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL; 
+    prefs.putULong("m2_interval", M2_INTERVAL); 
+    Serial.println("✓ M2 interval updated: " + String(M2_INTERVAL/1000) + "s");
+  }
+  if (doc.containsKey("m2_run")) { 
+    M2_RUN_TIME = doc["m2_run"].as<unsigned long>() * 1000UL; 
+    prefs.putULong("m2_run", M2_RUN_TIME); 
+    Serial.println("✓ M2 run time updated: " + String(M2_RUN_TIME/1000) + "s");
+  }
+  if (doc.containsKey("m2_delay")) { 
+    M2_DELAY_AFTER_M1_STOP = doc["m2_delay"].as<unsigned long>() * 1000UL; 
+    prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); 
+    Serial.println("✓ M2 delay updated: " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
+  }
+
+  bool stateChanged = false;
+  
+  if (doc.containsKey("start") && doc["start"] == true)  { 
+    Serial.println("→ START"); 
+    startSystem(); 
+    stateChanged = true;
+  }
+  else if (doc.containsKey("stop") && doc["stop"] == true)   { 
+    Serial.println("→ STOP"); 
+    stopSystem(); 
+    stateChanged = true;
+  }
+  else if (doc.containsKey("toggle") && doc["toggle"] == true) { 
+    Serial.println("→ TOGGLE"); 
+    toggleSystem(); 
+    stateChanged = true;
+  }
+
+  if (doc.containsKey("setpoint")){
+    float sp = doc["setpoint"];
+    if (sp >= 1 && sp <= 100){
+      tempSet = sp; prefs.putFloat("tempSet", tempSet);
+      Serial.println("✓ Temp setpoint: " + String(tempSet,1) + "°C");
+      stateChanged = true;
+    }
+  }
+  if (doc.containsKey("humset")){
+    float hs = doc["humset"];
+    if (hs >= 10 && hs <= 90){
+      humSet = hs; prefs.putFloat("humSet", humSet);
+      Serial.println("✓ Humidity setpoint: " + String(humSet,1) + "%");
+      stateChanged = true;
+    }
+  }
+  if (doc.containsKey("fan")){
+    int fanCmd = doc["fan"];
+    if (fanCmd >= 0 && fanCmd <= 3){
+      if (!runState && fanCmd != 0){
+        Serial.println("❌ Fan rejected: system not running");
+      } else {
+        Serial.println("✓ Fan speed: " + String(fanCmd));
+        setFanSpeed((FanSpeed)fanCmd);
+        prefs.putInt("fanSpeed", fanCmd);
+        stateChanged = true;
+      }
+    } else {
+      Serial.println("❌ Invalid fan speed: " + String(fanCmd));
+    }
+  }
+  
+  // Handle fanToggle
+  if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
+    if (!runState){
+      Serial.println("❌ Fan toggle rejected: system not running");
+    } else {
+      FanSpeed newSpeed;
+      switch(fanSpeed){
+        case FAN_OFF:
+        case FAN_LOW:  newSpeed = FAN_MED;  break;
+        case FAN_MED:  newSpeed = FAN_HIGH; break;
+        case FAN_HIGH: newSpeed = FAN_LOW;  break;
+        default:       newSpeed = FAN_LOW;  break;
+      }
+      Serial.println("✓ Fan toggle: " + String((int)fanSpeed) + " → " + String((int)newSpeed));
+      setFanSpeed(newSpeed);
+      prefs.putInt("fanSpeed", (int)newSpeed);
+      stateChanged = true;
+    }
+  }
+  
+  // Send updated state immediately after AWS command
+  if (stateChanged) {
+    Serial.println("📤 Sending updated state...");
+    if (client.connected()) {
+      publishStateAWS();
+      publishTelemetryAWS();
+    }
+    if (mqttLocal.connected()) {
+      publishStateLocal();
+      publishTelemetryLocal();
+    }
+  }
+}
+
+void publishStatusOnline(){
+  if(!client.connected()) {
+    Serial.println("❌ Cannot publish status - not connected");
+    return;
+  }
+  
+  StaticJsonDocument<128> doc;
+  doc["type"] = "status";
+  doc["status"] = "online";
+  doc["thing"] = THINGNAME;
+  doc["ip"] = WiFi.localIP().toString();
+  
+  char buf[128];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  
+  bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
+  if (success) {
+    Serial.println("✓ Status 'online' sent to esp32/pub (AWS)");
+  } else {
+    Serial.println("❌ Status publish failed!");
+  }
+}
+
+// ========== Local MQTT Functions ==========
+void publishStatusOnlineLocal(){
+  if(!mqttLocal.connected()) {
+    Serial.println("❌ Local MQTT not connected - cannot publish status");
+    return;
+  }
+  bool success = mqttLocal.publish(tStatus().c_str(), "online", true);
+  if (success) {
+    Serial.println("✓ Status 'online' sent to Local MQTT: " + tStatus());
+  } else {
+    Serial.println("❌ Failed to publish status to Local MQTT");
+  }
+}
+
+void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
+  Serial.println("\n========================================");
+  Serial.print("📩 Local MQTT Message from: ");
+  Serial.println(topic);
+  Serial.print("  Payload: ");
+  for (unsigned int i = 0; i < len; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+  Serial.println("========================================\n");
+  
+  String tStr(topic);
+  StaticJsonDocument<320> doc;
+  if (deserializeJson(doc, payload, len)) return;
+
+  // Handle provisioning
+  if (tStr == tProvWifi()){
+    if (doc.containsKey("primary")){
+      w1_ssid = String((const char*)doc["primary"]["ssid"]);
+      w1_pass = String((const char*)doc["primary"]["pass"]);
+      prefs.putString("w1_ssid", w1_ssid);
+      prefs.putString("w1_pass", w1_pass);
+      Serial.println("✓ Primary WiFi saved: " + w1_ssid);
+    }
+    if (doc.containsKey("secondary")){
+      w2_ssid = String((const char*)doc["secondary"]["ssid"]);
+      w2_pass = String((const char*)doc["secondary"]["pass"]);
+      prefs.putString("w2_ssid", w2_ssid);
+      prefs.putString("w2_pass", w2_pass);
+      Serial.println("✓ Secondary WiFi saved: " + w2_ssid);
+    }
+    motorLogMsg("Provision: Wi-Fi saved");
+    // Send ACK
+    StaticJsonDocument<96> ack; 
+    ack["ok"] = true; 
+    ack["msg"] = "wifi saved";
+    char buf[128]; 
+    size_t n = serializeJson(ack, buf, sizeof(buf));
+    mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    Serial.println("✓ ACK sent to: " + tProvAck());
+    return;
+  }
+  else if (tStr == tProvBroker()){
+    if (doc.containsKey("host")) { 
+      mqttHost = String((const char*)doc["host"]); 
+      prefs.putString("mqtt_host", mqttHost); 
+      motorLogMsg("Provision: Broker saved: " + mqttHost);
+      Serial.println("✓ Broker host updated: " + mqttHost);
+    }
+    // Send ACK
+    StaticJsonDocument<96> ack; 
+    ack["ok"] = true; 
+    ack["msg"] = "broker saved";
+    char buf[128]; 
+    size_t n = serializeJson(ack, buf, sizeof(buf));
+    mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    Serial.println("✓ ACK sent to: " + tProvAck());
+    return;
+  }
+  else if (tStr == tProvMotorTimings()){
+    if (doc.containsKey("m1_start")) { M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL; prefs.putULong("m1_start", M1_START_RUN); }
+    if (doc.containsKey("m1_post")) { M1_POST_RUN = doc["m1_post"].as<unsigned long>() * 1000UL; prefs.putULong("m1_post", M1_POST_RUN); }
+    if (doc.containsKey("m2_interval")) { M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL; prefs.putULong("m2_interval", M2_INTERVAL); }
+    if (doc.containsKey("m2_run")) { M2_RUN_TIME = doc["m2_run"].as<unsigned long>() * 1000UL; prefs.putULong("m2_run", M2_RUN_TIME); }
+    if (doc.containsKey("m2_delay")) { M2_DELAY_AFTER_M1_STOP = doc["m2_delay"].as<unsigned long>() * 1000UL; prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); }
+    motorLogMsg("Provision: Motor timings saved");
+    Serial.println("✓ Motor timings saved (Local)");
+    // Send ACK
+    StaticJsonDocument<96> ack; 
+    ack["ok"] = true; 
+    ack["msg"] = "motor timings saved";
+    char buf[128]; 
+    size_t n = serializeJson(ack, buf, sizeof(buf));
+    mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
+    Serial.println("✓ ACK sent to: " + tProvAck());
+    return;
+  }
+
+  if (tStr != tCmd()) return;
+
+  // Handle commands (same as AWS)
+  bool stateChanged = false;
+  
+  if (doc.containsKey("start") && doc["start"] == true)  { Serial.println("→ START (Local)"); startSystem(); stateChanged = true; }
+  else if (doc.containsKey("stop") && doc["stop"] == true)   { Serial.println("→ STOP (Local)"); stopSystem(); stateChanged = true; }
+  else if (doc.containsKey("toggle") && doc["toggle"] == true) { Serial.println("→ TOGGLE (Local)"); toggleSystem(); stateChanged = true; }
+
+  if (doc.containsKey("setpoint")){
+    float sp = doc["setpoint"];
+    if (sp >= 1 && sp <= 100){ tempSet = sp; prefs.putFloat("tempSet", tempSet); Serial.println("✓ Temp setpoint: " + String(tempSet,1) + "°C (Local)"); stateChanged = true; }
+  }
+  if (doc.containsKey("humset")){
+    float hs = doc["humset"];
+    if (hs >= 10 && hs <= 90){ humSet = hs; prefs.putFloat("humSet", humSet); Serial.println("✓ Humidity setpoint: " + String(humSet,1) + "% (Local)"); stateChanged = true; }
+  }
+  if (doc.containsKey("fan")){
+    int fanCmd = doc["fan"];
+    if (fanCmd >= 0 && fanCmd <= 3){
+      if (!runState && fanCmd != 0){ Serial.println("❌ Fan rejected (Local)"); }
+      else { Serial.println("✓ Fan speed: " + String(fanCmd) + " (Local)"); setFanSpeed((FanSpeed)fanCmd); prefs.putInt("fanSpeed", fanCmd); stateChanged = true; }
+    }
+  }
+  
+  // Handle fanToggle (cycle through LOW → MED → HIGH → LOW, skip OFF when running)
+  if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
+    if (!runState){
+      Serial.println("❌ Fan toggle rejected: system not running (Local)");
+    } else {
+      FanSpeed newSpeed;
+      switch(fanSpeed){
+        case FAN_OFF:
+        case FAN_LOW:  newSpeed = FAN_MED;  break;
+        case FAN_MED:  newSpeed = FAN_HIGH; break;
+        case FAN_HIGH: newSpeed = FAN_LOW;  break;
+        default:       newSpeed = FAN_LOW;  break;
+      }
+      Serial.println("✓ Fan toggle (Local): " + String((int)fanSpeed) + " → " + String((int)newSpeed));
+      setFanSpeed(newSpeed);
+      prefs.putInt("fanSpeed", (int)newSpeed);
+      stateChanged = true;
+    }
+  }
+  
+  if (stateChanged) {
+    Serial.println("📤 Sending updated state...");
+    if (client.connected()) {
+      publishStateAWS();
+      publishTelemetryAWS();
+    }
+    if (mqttLocal.connected()) {
+      publishStateLocal();
+      publishTelemetryLocal();
+    }
+  }
+}
+
+void ensureMqtt(){
+  if(mqttLocal.connected()) return;
+  if (WiFi.status()!=WL_CONNECTED) return;
+
+  unsigned long now = millis();
+  if(now - lastMqttAttempt < 2000) return;
+  lastMqttAttempt = now;
+
+  mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
+  mqttLocal.setCallback(onMqttMessageLocal);
+
+  String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
+  bool ok = mqttLocal.connect(clientId.c_str(),
+                         MQTT_USER, MQTT_PASS,
+                         tStatus().c_str(), 1, true, "offline");
+  if(ok){
+    publishStatusOnlineLocal();
+    mqttLocal.subscribe(tCmd().c_str(), 1);
+    mqttLocal.subscribe(tProvWifi().c_str(), 1);
+    mqttLocal.subscribe(tProvBroker().c_str(), 1);
+    mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
+    Serial.println("✓ Local MQTT connected: " + mqttHost);
+    
+    // Publish initial state to local MQTT
+    publishStateLocal();
+    publishTelemetryLocal();
+  }else{
+    Serial.println("✗ Local MQTT connect failed");
+  }
+}
+
+
+void setup()
+{
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   
   Serial.begin(115200);
@@ -846,7 +1012,7 @@ void setup(){
   
   Serial.println("\n========================================");
   Serial.println("   ALMED AHU Controller v2.0");
-  Serial.println("   Local MQTT Only");
+  Serial.println("   AWS IoT Cloud Edition");
   Serial.println("========================================");
   
   esp_task_wdt_config_t wdt_config = {
@@ -906,13 +1072,6 @@ void setup(){
   
   int savedFan = prefs.getInt("fanSpeed", 0);
   if (savedFan >= 0 && savedFan <= 3) fanSpeed = (FanSpeed)savedFan;
-
-  w1_ssid = prefs.getString("w1_ssid", DEFAULT_W1_SSID);
-  w1_pass = prefs.getString("w1_pass", DEFAULT_W1_PASS);
-  w2_ssid = prefs.getString("w2_ssid", String(""));
-  w2_pass = prefs.getString("w2_pass", String(""));
-
-  mqttHost = prefs.getString("mqtt_host", String("10.42.0.1"));
   
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
   M1_POST_RUN = prefs.getULong("m1_post", M1_POST_RUN);
@@ -920,34 +1079,127 @@ void setup(){
   M2_RUN_TIME = prefs.getULong("m2_run", M2_RUN_TIME);
   M2_DELAY_AFTER_M1_STOP = prefs.getULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
   
+  // Load WiFi credentials
+  w1_ssid = prefs.getString("w1_ssid", DEFAULT_W1_SSID);
+  w1_pass = prefs.getString("w1_pass", DEFAULT_W1_PASS);
+  w2_ssid = prefs.getString("w2_ssid", String(""));
+  w2_pass = prefs.getString("w2_pass", String(""));
+  
+  // Load Local MQTT broker host
+  mqttHost = prefs.getString("mqtt_host", String("10.42.0.1"));
+  
   esp_task_wdt_reset();
-  
-  WiFi.onEvent(WiFiEvent);
-  Serial.println("✓ WiFi event handler registered");
-  
-  // AWS IoT Setup (exact pattern from working test)
-  Serial.println("\n--- Setting up AWS IoT ---");
-  awsNet.setCACert(AWS_CERT_CA);
-  awsNet.setCertificate(AWS_CERT_CRT);
-  awsNet.setPrivateKey(AWS_CERT_PRIVATE);
-  awsMqtt.setServer(AWS_IOT_ENDPOINT, 8883);
-  awsMqtt.setCallback(awsMessageHandler);
-  Serial.println("✓ AWS IoT client configured");
   
   Serial.println("\n--- Checking for previous state ---");
   restoreSystemState();
   
-  Serial.println("\n✓ Boot complete. Ready.");
+  Serial.println("\n✓ Preferences loaded");
   Serial.println("  Temp setpoint: " + String(tempSet, 1) + "°C");
   Serial.println("  Humidity setpoint: " + String(humSet, 1) + "%");
-  Serial.println("========================================\n");
+  
+  esp_task_wdt_reset();
 
-  lastWifiAttemptAt = 0;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  Serial.println("\nConnecting to Wi-Fi");
+
+  // Wait for connection with watchdog reset
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+    esp_task_wdt_reset();
+  }
+
+  Serial.println("\n✓ WiFi connected");
+  Serial.println("  IP: " + WiFi.localIP().toString());
+
+  // Configure WiFiClientSecure to use the AWS IoT device credentials
+  net.setCACert(AWS_CERT_CA);
+  net.setCertificate(AWS_CERT_CRT);
+  net.setPrivateKey(AWS_CERT_PRIVATE);
+
+  // Connect to the MQTT broker on the AWS endpoint
+  client.setServer(AWS_IOT_ENDPOINT, 8883);
+  
+  // Set MQTT buffer size (important for AWS IoT)
+  client.setBufferSize(MQTT_BUFFER_SIZE);
+  
+  // Set keep-alive to 60 seconds (AWS IoT default is 1200s, but 60s is safer)
+  client.setKeepAlive(60);
+  
+  // Set socket timeout
+  client.setSocketTimeout(15);
+
+  // Set the function to handle messages
+  client.setCallback(messageHandler);
+
+  Serial.println("\nConnecting to AWS IoT");
+
+  // Attempt to connect to AWS IoT with watchdog reset
+  Serial.print("Connecting");
+  int attempts = 0;
+  while (!client.connected() && attempts < 50)
+  {
+    // Simple connection with clean session
+    if (client.connect(THINGNAME)) {
+      Serial.println(" Connected!");
+      break;
+    }
+    Serial.print(".");
+    delay(200);
+    esp_task_wdt_reset();
+    attempts++;
+  }
+
+  // Check if connection was successful
+  if (!client.connected())
+  {
+    Serial.println("\nAWS IoT Connection Failed!");
+    return;
+  }
+
+  // Subscribe to command topic (receive)
+  client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+  
+  Serial.println("\n✅ Topic Configuration:");
+  Serial.println("  📥 Subscribe (receive commands): " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+  Serial.println("  📤 Publish (send telemetry):    " + String(AWS_IOT_PUBLISH_TOPIC));
+
+  // Send initial status to AWS
+  Serial.println("\n📤 Sending initial status to AWS IoT...");
+  publishStatusOnline();
+  publishStateAWS();
+  publishTelemetryAWS();
+  Serial.println("✓ Initial data sent!");
+
+  Serial.println("\n✓ AWS IoT Connected!");
+  Serial.println("  Endpoint: " + String(AWS_IOT_ENDPOINT));
+  Serial.println("  Thing Name: " + String(THINGNAME));
+  Serial.println("\n📡 MQTT Configuration:");
+  Serial.println("  ☁️  AWS IoT (Cloud):");
+  Serial.println("      📥 Subscribe: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+  Serial.println("      📤 Publish:   " + String(AWS_IOT_PUBLISH_TOPIC));
+  Serial.println("  🏠 Local MQTT (Pi): " + mqttHost);
+  Serial.println("      📥 Subscribe: " + tCmd());
+  Serial.println("      📤 Publish:   " + tTelemetry() + ", " + tState());
+  Serial.println("\n📊 Publishing Schedule:");
+  Serial.println("  - AWS IoT: Every 5 seconds");
+  Serial.println("  - Local MQTT: Every 2 seconds");
+  Serial.println("========================================\n");
+  
+  if (pendingRecoveryStart && client.connected()) {
+    pendingRecoveryStart = false;
+    runState = true;
+    motorLogMsg("⚠️ RECOVERY START: System recovered and running");
+  }
+
   lastLoopTime = millis();
 }
 
-// ---------- Loop ----------
-void loop(){
+void loop()
+{
   unsigned long now = millis();
   
   esp_task_wdt_reset();
@@ -968,45 +1220,77 @@ void loop(){
     lastStateSave = now;
   }
 
-  if (WiFi.status()!=WL_CONNECTED) rotateWifiIfNeeded();
-
-  if (pendingRecoveryStart && WiFi.status() == WL_CONNECTED && mqtt.connected()) {
-    pendingRecoveryStart = false;
-    runState = true;
-    motorLogMsg("⚠️ RECOVERY START: Motors starting now");
-    Serial.println("  System recovered and running");
+  // ========== AWS IoT MQTT (Cloud) ==========
+  // Keep the AWS MQTT connection alive - MUST call this every loop
+  if (client.connected()) {
+    client.loop();
   }
-
-  if (WiFi.status()==WL_CONNECTED){ 
-    ensureMqtt(); 
-    if(mqtt.connected()) mqtt.loop(); 
-    
-    // AWS IoT connection (exact pattern from working test)
-    if (!awsMqtt.connected() && !awsMqttConnected) {
-      Serial.println("[AWS] Connecting to AWS IOT");
-      while (!awsMqtt.connect(AWS_IOT_CLIENT_ID)) {
-        Serial.print(".");
-        delay(100);
-      }
-      if (awsMqtt.connected()) {
-        awsMqtt.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-        Serial.println("[AWS] AWS IoT Connected!");
-        motorLogMsg("[AWS] Connected to AWS IoT Core");
-        awsMqttConnected = true;
+  
+  // Simple reconnection logic for AWS - only try if disconnected
+  if (!client.connected()) {
+    static unsigned long lastReconnectAttempt = 0;
+    if (now - lastReconnectAttempt > 15000) { // Wait 15 seconds between attempts
+      lastReconnectAttempt = now;
+      Serial.println("⚠️ AWS IoT disconnected, reconnecting...");
+      esp_task_wdt_reset();
+      
+      if (client.connect(THINGNAME)) {
+        Serial.println("✓ AWS IoT reconnected");
+        // Resubscribe to command topic
+        client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+        Serial.println("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+        // Send status on reconnection
+        publishStatusOnline();
+        publishStateAWS();
+        publishTelemetryAWS();
       } else {
-        Serial.println("[AWS] AWS IoT Timeout!");
+        Serial.print("✗ AWS reconnection failed, state: ");
+        Serial.println(client.state());
       }
     }
-    
-    if(awsMqtt.connected()) {
-      awsMqtt.loop();
-    } else {
-      awsMqttConnected = false;
+  }
+
+  // ========== Local MQTT (Raspberry Pi) ==========
+  // Ensure local MQTT connection and handle messages
+  if (WiFi.status() == WL_CONNECTED) {
+    ensureMqtt();
+    if (mqttLocal.connected()) {
+      mqttLocal.loop();
     }
   }
 
   handleSerial();
   readSensorIfDue();
+
+  // Publish to AWS every 5 seconds
+  static unsigned long lastAWS = 0;
+  if (client.connected() && (now - lastAWS >= 5000)) {
+    lastAWS = now;
+    publishTelemetryAWS();
+    publishStateAWS();
+  }
+  
+  // Publish to Local MQTT every 2 seconds (everything: telemetry, state, status)
+  static unsigned long lastLocal = 0;
+  if (mqttLocal.connected()) {
+    unsigned long timeSinceLastPublish = now - lastLocal;
+    if (timeSinceLastPublish >= 2000) {
+      lastLocal = now;
+      Serial.print("📤 [Local MQTT] Publishing all data every 2s (elapsed: ");
+      Serial.print(timeSinceLastPublish);
+      Serial.println("ms)...");
+      publishTelemetryLocal();
+      publishStateLocal();
+      publishStatusOnlineLocal();
+      Serial.println("✓ [Local MQTT] All data published!");
+    }
+  } else {
+    // Reset timer if disconnected to publish immediately on reconnect
+    if (lastLocal != 0) {
+      Serial.println("⚠️ [Local MQTT] Disconnected - resetting timer");
+      lastLocal = 0;
+    }
+  }
 
   controlCP(filtTempC);
   controlHeater(filtHum);
@@ -1020,7 +1304,6 @@ void loop(){
       m1StopAt = now + M1_POST_RUN;
       shutdownStarted = true;
       motorLogMsg("[SHUTDOWN] M1 post-drain (" + String(M1_POST_RUN/1000) + "s)");
-      publishState();
     }
 
     if (shutdownStarted && m1Active && now >= m1StopAt){
@@ -1028,14 +1311,12 @@ void loop(){
       shutdownM2Pending = true;
       m2StartAt = now + M2_DELAY_AFTER_M1_STOP;
       motorLogMsg("[SHUTDOWN] M1 done, M2 in " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
-      publishState();
     }
 
     if (shutdownM2Pending && !m2Active && now >= m2StartAt){
       m2_start();
       m2StopAt = now + M2_RUN_TIME;
       motorLogMsg("[SHUTDOWN] M2 final clean (" + String(M2_RUN_TIME/1000) + "s)");
-      publishState();
     }
 
     if (shutdownM2Pending && m2Active && now >= m2StopAt){
@@ -1046,7 +1327,6 @@ void loop(){
       shutdownM2Pending = false;
       clearSystemState();
       motorLogMsg("[SHUTDOWN] Complete - System OFF");
-      publishState();
     }
     delay(5);
     return;
@@ -1061,7 +1341,6 @@ void loop(){
       m2ScheduledAfterM1 = true; 
       m2StartAt = now + M2_DELAY_AFTER_M1_STOP;
       motorLogMsg("[RUN] M1 boot done, M2 in " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
-      publishState(); 
     }
 
     // First M2 run after M1
@@ -1071,7 +1350,6 @@ void loop(){
       m2NextAt = now + M2_INTERVAL;
       m2ScheduledAfterM1 = false;
       motorLogMsg("[RUN] First M2 cycle (" + String(M2_RUN_TIME/1000) + "s), next in " + String(M2_INTERVAL/1000) + "s");
-      publishState();
     }
 
     // Periodic M2 runs
@@ -1080,14 +1358,12 @@ void loop(){
       m2StopAt = now + M2_RUN_TIME;
       m2NextAt = now + M2_INTERVAL;
       motorLogMsg("[RUN] Periodic M2 (" + String(M2_RUN_TIME/1000) + "s)");
-      publishState();
     }
   }
 
   // Stop M2 when time is up (both run and shutdown modes)
   if (m2Active && now >= m2StopAt) { 
     m2_stop(); 
-    publishState(); 
   }
 
   delay(5);
