@@ -1,5 +1,4 @@
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 #include <PubSubClient.h>
@@ -9,16 +8,26 @@
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
-// ========================= AWS IoT CORE CONFIG (from working test) =========================
-const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com";
-const char AWS_IOT_CLIENT_ID[] = "AHU_ESP1_CTRL";
-const char AWS_IOT_SUBSCRIBE_TOPIC[] = "esp32/sub";
+// ================== AWS IoT (AHU_AWS sequence) INTEGRATION START ==================
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
 
-// Amazon Root CA 1
+// Keep original WiFi connect logic from ESP32 main.
+// Use the existing WiFi connection; do NOT override SSID/PASS here.
+
+// AHU_AWS properties (kept identical)
+#define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
+#define THINGNAME "AHU_ESP2" // Unique identifier for your device, change this
+
+#ifndef AWS_IOT_PORT
+#define AWS_IOT_PORT 8883
+#endif
+
+// Device certificates (from AHU_AWS)
 static const char AWS_CERT_CA[] PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
-ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9nMRkwFwYDVQQDExBBbWF6
+ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6
 b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL
 MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv
 b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj
@@ -37,12 +46,10 @@ o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU
 rqXRfboQnoZsG4q5WTP468SQvvG5
 -----END CERTIFICATE-----
 )EOF";
-
-// Device certificate
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
 MIIDWTCCAkGgAwIBAgIUXOzilRCb264lti1+7sI3sD5G1HgwDQYJKoZIhvcNAQEL
-BQawTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
+BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
 SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI1MTExMDA3MTUx
 MloXDTQ5MTIzMTIzNTk1OVowHjEcMBoGA1UEAwwTQVdTIElvVCBDZXJ0aWZpY2F0
 ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANT18Bh97ffPkFW6E5UX
@@ -62,7 +69,6 @@ l9aPPczam3kajFLLq1bnT4oVADSnVGsuP7JKYYOkvQeYJlWF38pL/zXCi2KG
 -----END CERTIFICATE-----
 )KEY";
 
-// Private key
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
 MIIEogIBAAKCAQEA1PXwGH3t98+QVboTlRcx33SvolZdQyj6EzlE5Whb/Vz/BiIe
@@ -92,6 +98,266 @@ iCgc/U13OUqN5j16arDYakNNtoM/gvBV7fRqXoHqCpAQEAuq/NZjJnTKO1O5BBmp
 WcX63pf6TfPPd7gCgSaH74iCe0kuyNLeJUCz0VWAR9kb9uw02iQ=
 -----END RSA PRIVATE KEY-----
 )KEY";
+
+#define lamp1 19 // GPIO pin for lamp 1
+#define lamp2 21 // GPIO pin for lamp 2
+#define lamp3 22 // GPIO pin for lamp 3
+#define lamp4 23 // GPIO pin for lamp 4
+
+WiFiClientSecure net = WiFiClientSecure();
+PubSubClient client(net);
+
+// Function to handle incoming MQTT messages
+void messageHandler(char* topic, byte* payload, unsigned int length) 
+{
+  Serial.print("Incoming message on topic [");
+  Serial.print(topic);
+  Serial.print("]: ");
+
+  // Construct message from payload
+  String received_msg = "";
+  for (int i = 0; i < length; i++) 
+  {
+    received_msg += (char)payload[i];
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+
+  // Control the lamps based on the received message
+  // Check for commands and actuate corresponding lamp
+  if (received_msg == "ON1") 
+  {
+    digitalWrite(lamp1, HIGH); // Turn on lamp 1
+    Serial.println("Lamp1 turned on");
+  }
+  else if (received_msg == "OFF1") 
+  {
+    digitalWrite(lamp1, LOW); // Turn off lamp 1
+    Serial.println("Lamp1 turned off");
+  }
+  
+  // Repeat for other lamps...
+  else if (received_msg == "ON2") 
+  {
+    digitalWrite(lamp2, HIGH);
+    Serial.println("Lamp2 turned on");
+  }
+  else if (received_msg == "OFF2") 
+  {
+    digitalWrite(lamp2, LOW);
+    Serial.println("Lamp2 turned off");
+  }
+  
+  else if (received_msg == "ON3") 
+  {
+    digitalWrite(lamp3, HIGH);
+    Serial.println("Lamp3 turned on");
+  }
+  else if (received_msg == "OFF3") 
+  {
+    digitalWrite(lamp3, LOW);
+    Serial.println("Lamp3 turned off");
+  }
+  
+  else if (received_msg == "ON4") 
+  {
+    digitalWrite(lamp4, HIGH);
+    Serial.println("Lamp4 turned on");
+  }
+  else if (received_msg == "OFF4") 
+  {
+    digitalWrite(lamp4, LOW);
+    Serial.println("Lamp4 turned off");
+  }
+}
+
+
+void setup()
+{
+  Serial.begin(115200); // Start serial communication
+
+  // Initialize GPIO pins for lamps as outputs and set them off
+  pinMode(lamp1, OUTPUT);
+  pinMode(lamp2, OUTPUT);
+  pinMode(lamp3, OUTPUT);
+  pinMode(lamp4, OUTPUT);
+
+  digitalWrite(lamp1, LOW);
+  digitalWrite(lamp2, LOW);
+  digitalWrite(lamp3, LOW);
+  digitalWrite(lamp4, LOW);
+
+  WiFi.mode(WIFI_STA); // Set WiFi to station mode
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD); // Connect to WiFi network
+
+  Serial.println("Connecting to Wi-Fi");
+
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+
+  // Configure WiFiClientSecure to use the AWS IoT device credentials
+  net.setCACert(AWS_CERT_CA);
+  net.setCertificate(AWS_CERT_CRT);
+  net.setPrivateKey(AWS_CERT_PRIVATE);
+
+  // Connect to the MQTT broker on the AWS endpoint
+  client.setServer(AWS_IOT_ENDPOINT, 8883);
+
+  // Set the function to handle messages
+  client.setCallback(messageHandler);
+
+  Serial.println("Connecting to AWS IOT");
+
+  // Attempt to connect to AWS IoT
+  while (!client.connect(THINGNAME))
+  {
+    Serial.print(".");
+    delay(100);
+  }
+
+  // Check if connection was successful
+  if (!client.connected())
+  {
+    Serial.println("AWS IoT Timeout!");
+    return;
+  }
+
+  // Subscribe to the MQTT topic for receiving commands
+  client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+
+  Serial.println("AWS IoT Connected!");
+
+  awsInit(); // AHU_AWS → initialize AWS IoT after WiFi
+}
+
+void loop()
+{
+  awsTick(); // AHU_AWS → service AWS MQTT
+
+  // Keep the MQTT connection alive
+  client.loop();
+  delay(1000);
+}
+static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
+-----BEGIN RSA PRIVATE KEY-----
+MIIEogIBAAKCAQEA1PXwGH3t98+QVboTlRcx33SvolZdQyj6EzlE5Whb/Vz/BiIe
+Sq1YZSGjocg8jInzKAAlmDl7JC2TL1r4UTTMf6HKc/QuXY6Fd0pq2gF/LIjH7hub
+ksQl3LCBUpMPTNz4loj/hS5fy6WpG7LG9YqYLkTg2cSFAOvX+VIX1wSgzSqiJuxA
+Rg3jAIL66/goJ8p5xZtMWcsDKY7fGQ2S1GNh7g6YyfcWfkSRcSPfCPk/nB7LM0pa
+ay9L3MnIFIKKtCWk2u3LNsphv/NlvT4e7zJvuAN7shEV0CzVxYbkaj1dPVLDTYwH
+dXfe9uLGp06Tvb5Zv4cC+131RWi2+tP7PgVxhQIDAQABAoIBAFAIAOvjX2vSuEZP
+QI62AcsdOegDFtdnbduNmSOxfWiQ61Itvj6IOIEBDFJ/Qqn6KcQtkfNMHsfwzLBu
+OoWiFvwcHE5JRKdqKSQ0dkVpbJaa7K/B9kxIpIX0WxViKMzU+iLwZz5wuBV7Mzsy
+i2y5Ygl5XxrXrLg06ZxLyqPGnHudS0X8WToIjnL9k5TFOAbH0jSQNT3v4HonvPQo
+OSRw5gQkMspzD5inJQPXpMvgtW3RF6JRXTxrAjRZgxjWlt/PTPO6yD5xb5M8NlaE
+v2Ru1QMuVoQYBIgB4ldyWa834sbwfc8K8K1EPPX+VAXikBH+zpgiy29LGCJRAwtc
+7HTkL/0CgYEA9knqMiNXR9Swore6TW1182HshQikUgoCZtaVnFe1eGTRCVNw7owe
+H5wKuE35pJk4uT3GtJ68sm3wAbGXXlHCQE8rqwkdC9bCYULnt90vZy7GMTIE45HZ
+1mO+x/1fqzPtwbrUxtoJ+V7ZKPETPwBrwsj8ziTmAiWoCv5kaEyQQB8CgYEA3Vua
+gWdj74Z1keYhgurPf95CATjL0i/gNxFn6TeRSsjHPkxF4KTxwnidHtX3Xr1wXGim
+wPC17UTxqqvzsHMUYM2+Z6L1cLiZvncKqR+63IbVryymJj+L4bacxAF/c2nEaucj
++ql+W+YbFAcCgZBrtNuFa0rWSztZDDuiGjHyidsCgYB83wUK3rhGByR3m8etsi33
+dFLDMJp/reuB0JKSbjXoENWbcN71U72CMU+OGprURYtpAFVbBpCNtwfVFAG3JKTk
+jj+JvFkpw31SauWpZ0+9dQ2vq7im2TAlbvUv2NtEplOJwfxXxf0AnoJkK7aiXshE
+PjtPGY400Hre+BRYfVk16QKBgDz/3VgDsdpz5zpJfLqjEoNeMDo9+Iz3fIYwWb4+
+/d7p7V4RjsAVNDovGr1AoWaONcSBYlKRAtFbym0J7aGWVOtIR0wv8AscE+IU0+8/
+OzNCROh9GVw47sdIl3K8Ju8bGnGLOLL+uj+A7b1bISmrLsMsK1whx2P7+tIQLN+j
+G/85AoGAWMaF0/o55an3Nz5z5O4ZZDkHbUKWHB9t2bkzY0/fUJwitRE5sAb3ObNd
+iCgc/U13OUqN5j16arDYakNNtoM/gvBV7fRqXoHqCpAQEAuq/NZjJnTKO1O5BBmp
+WcX63pf6TfPPd7gCgSaH74iCe0kuyNLeJUCz0VWAR9kb9uw02iQ=
+-----END RSA PRIVATE KEY-----
+)KEY";
+
+// GPIOs used by AHU_AWS (guarded so we don't redefine if main already has them)
+#ifndef AHU_AWS_PINS_DEFINED
+#define AHU_AWS_PINS_DEFINED
+#define lamp1 19
+#define lamp2 21
+#define lamp3 22
+#define lamp4 23
+#endif
+
+WiFiClientSecure awsNet;
+PubSubClient awsClient(awsNet);
+
+// Forward decls
+void messageHandlerAWS(char* topic, byte* payload, unsigned int length);
+bool awsEnsureConnected();
+
+// Initialize AWS MQTT after WiFi is up
+void awsInit()
+{
+  awsNet.setCACert(AWS_CERT_CA);
+  awsNet.setCertificate(AWS_CERT_CRT);
+  awsNet.setPrivateKey(AWS_CERT_PRIVATE);
+
+  awsClient.setServer(AWS_IOT_ENDPOINT, AWS_IOT_PORT);
+  awsClient.setCallback(messageHandlerAWS);
+
+  // configure AHU_AWS GPIOs
+  #ifdef lamp1
+  pinMode(lamp1, OUTPUT);
+  #endif
+  #ifdef lamp2
+  pinMode(lamp2, OUTPUT);
+  #endif
+  #ifdef lamp3
+  pinMode(lamp3, OUTPUT);
+  #endif
+  #ifdef lamp4
+  pinMode(lamp4, OUTPUT);
+  #endif
+
+  awsEnsureConnected();
+}
+
+// Keep connection alive (call this in loop())
+void awsTick()
+{
+  if (!awsClient.connected())
+  {
+    awsEnsureConnected();
+  }
+  awsClient.loop();
+}
+
+bool awsEnsureConnected()
+{
+  if (awsClient.connected()) return true;
+
+  // Use existing WiFi connection state from main
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  // Build client id from THINGNAME if present
+  String clientId = String(THINGNAME);
+  if (awsClient.connect(clientId.c_str()))
+  {
+    awsClient.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+    return true;
+  }
+  return false;
+}
+
+// Original AHU_AWS message handler, renamed:
+void messageHandlerAWS(char* topic, byte* payload, unsigned int length) 
+{
+  Serial.print("Incoming message on topic [");
+  Serial.print(topic);
+  Serial.print("]: ");
+
+  // Construct message from payload
+  String received_msg = "";
+  for (int i = 0; i < length; i++) 
+  {
+    received_msg += (char)payload[i];
+    Serial.print((char)payload[i]);
+  }
+  
+// ================== AWS IoT (AHU_AWS sequence) INTEGRATION END ==================
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
 unsigned long M1_START_RUN = 10UL * 1000UL;
@@ -170,7 +436,7 @@ String motorBuf[LOG_MAX]; int motorHead = -1; int motorCount = 0;
 void pushTempHTML(const String& line)  { tempHead  = (tempHead  + 1) % LOG_MAX; tempBuf[tempHead]  = line; if (tempCount  < LOG_MAX) tempCount++; }
 void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; motorBuf[motorHead] = line; if (motorCount < LOG_MAX) motorCount++; }
 
-// ---------- MQTT (Local Pi + AWS IoT) ----------
+// ---------- MQTT (Local Pi only) ----------
 WiFiClient espNet;
 PubSubClient mqtt(espNet);
 
@@ -178,11 +444,6 @@ const char* MQTT_USER = "almed";
 const char* MQTT_PASS = "Almed1234$";
 const uint16_t MQTT_PORT = 1883;
 unsigned long lastMqttAttempt = 0;
-
-// AWS IoT MQTT client (using exact working pattern from test)
-WiFiClientSecure awsNet = WiFiClientSecure();
-PubSubClient awsMqtt(awsNet);
-bool awsMqttConnected = false;
 
 const char* ORG  = "almed";
 const char* SITE = "hospitalA";
@@ -274,23 +535,6 @@ void mqttPublishLog(const char* level, const String& msg){
   mqtt.publish(tLog().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
 }
 void motorLogMsg(const String& s){ Serial.println(s); pushMotorHTML(s); mqttPublishLog("INFO", s); }
-
-// ---------- AWS IoT Message Handler (exact pattern from working test) ----------
-void awsMessageHandler(char* topic, byte* payload, unsigned int length) {
-  Serial.print("[AWS] Incoming message on topic [");
-  Serial.print(topic);
-  Serial.print("]: ");
-  
-  String received_msg = "";
-  for (int i = 0; i < length; i++) {
-    received_msg += (char)payload[i];
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-  
-  // Process AWS commands here if needed
-  motorLogMsg("[AWS] Received: " + received_msg);
-}
 
 // ---------- Relay Control (Active LOW: LOW=ON, HIGH=OFF) ----------
 inline void systemWrite(bool on){ digitalWrite(PIN_SYSTEM, on ? LOW : HIGH); }
@@ -925,15 +1169,6 @@ void setup(){
   WiFi.onEvent(WiFiEvent);
   Serial.println("✓ WiFi event handler registered");
   
-  // AWS IoT Setup (exact pattern from working test)
-  Serial.println("\n--- Setting up AWS IoT ---");
-  awsNet.setCACert(AWS_CERT_CA);
-  awsNet.setCertificate(AWS_CERT_CRT);
-  awsNet.setPrivateKey(AWS_CERT_PRIVATE);
-  awsMqtt.setServer(AWS_IOT_ENDPOINT, 8883);
-  awsMqtt.setCallback(awsMessageHandler);
-  Serial.println("✓ AWS IoT client configured");
-  
   Serial.println("\n--- Checking for previous state ---");
   restoreSystemState();
   
@@ -977,33 +1212,7 @@ void loop(){
     Serial.println("  System recovered and running");
   }
 
-  if (WiFi.status()==WL_CONNECTED){ 
-    ensureMqtt(); 
-    if(mqtt.connected()) mqtt.loop(); 
-    
-    // AWS IoT connection (exact pattern from working test)
-    if (!awsMqtt.connected() && !awsMqttConnected) {
-      Serial.println("[AWS] Connecting to AWS IOT");
-      while (!awsMqtt.connect(AWS_IOT_CLIENT_ID)) {
-        Serial.print(".");
-        delay(100);
-      }
-      if (awsMqtt.connected()) {
-        awsMqtt.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-        Serial.println("[AWS] AWS IoT Connected!");
-        motorLogMsg("[AWS] Connected to AWS IoT Core");
-        awsMqttConnected = true;
-      } else {
-        Serial.println("[AWS] AWS IoT Timeout!");
-      }
-    }
-    
-    if(awsMqtt.connected()) {
-      awsMqtt.loop();
-    } else {
-      awsMqttConnected = false;
-    }
-  }
+  if (WiFi.status()==WL_CONNECTED){ ensureMqtt(); if(mqtt.connected()) mqtt.loop(); }
 
   handleSerial();
   readSensorIfDue();
