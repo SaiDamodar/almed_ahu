@@ -392,6 +392,7 @@ void startSystem(){
       m2ScheduledAfterM1 = false;
     }
     motorLogMsg("[RUN] STARTED - System is now running");
+    publishStateLocal();  // Dashboard-compatible: publish state on start
   } else {
     motorLogMsg("[RUN] Already running");
   }
@@ -412,6 +413,7 @@ void stopSystem(){
   setFanSpeed(FAN_OFF);
   clearSystemState();
   motorLogMsg("[RUN] STOP requested → Entering shutdown mode");
+  publishStateLocal();  // Dashboard-compatible: publish state on stop
 }
 
 void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
@@ -449,8 +451,8 @@ void publishTelemetryAWS(){
 void publishTelemetryLocal(){
   if(!mqttLocal.connected()) return;
   
-  StaticJsonDocument<512> doc;
-  doc["type"] = "telemetry";
+  // Dashboard-compatible format (exact match to original backup)
+  StaticJsonDocument<384> doc;
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
   doc["m1"]  = m1Active;
@@ -462,17 +464,11 @@ void publishTelemetryLocal(){
   doc["fanSpeed"] = (int)fanSpeed;
   doc["tempSet"] = tempSet;
   doc["humSet"]  = humSet;
-  doc["ip"]=WiFi.localIP().toString();
-  doc["thing"]=THINGNAME;
   doc["ts"]  = millis();
   
-  char buf[512];
+  char buf[448];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
-  bool success = mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
-  if (success) {
-    Serial.println("✓ Telemetry → Local (" + tTelemetry() + ")");
-  }
+  mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
 }
 
 void publishStateAWS(){
@@ -507,8 +503,8 @@ void publishStateAWS(){
 void publishStateLocal(){
   if(!mqttLocal.connected()) return;
   
+  // Dashboard-compatible format (exact match to original backup)
   StaticJsonDocument<512> doc;
-  doc["type"] = "state";
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["heater"]=heatOn;
   doc["fan"]=(fanSpeed != FAN_OFF);
@@ -521,16 +517,9 @@ void publishStateLocal(){
   doc["m2_run"] = M2_RUN_TIME / 1000UL;
   doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
   doc["ip"]=WiFi.localIP().toString();
-  doc["thing"]=THINGNAME;
-  doc["ts"]  = millis();
-  
-  char buf[512];
+  char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
-  bool success = mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
-  if (success) {
-    Serial.println("✓ State → Local (" + tState() + ")");
-  }
+  mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
 }
 
 // ---------- Sensor Read ----------
@@ -586,7 +575,9 @@ void readSensorIfDue(){
     String line = "Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + " °C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%";
     Serial.println(line);
     pushTempHTML("Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + "&deg;C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%");
-    // Don't publish telemetry here, it will be published on a separate timer
+    
+    // Publish telemetry to local MQTT (dashboard-compatible)
+    publishTelemetryLocal();
 
   } else {
     Serial.println("SHT45 read failed");
