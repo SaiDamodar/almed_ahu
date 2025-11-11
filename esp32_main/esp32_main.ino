@@ -15,7 +15,7 @@
 
 #define THINGNAME "AHU_ESP2" // Unique identifier for your device, change this
 
-const char WIFI_SSID[] = "PiSpot"; // Your WiFi SSID
+const char WIFI_SSID[] = "ez"; // Your WiFi SSID
 const char WIFI_PASSWORD[] = "12345678"; // Your WiFi password
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint, change this
 
@@ -585,7 +585,9 @@ void readSensorIfDue(){
   }
 }
 
-// ---------- Serial Commands ----------
+// ---------- Serial Commands (Standalone Control) ----------
+// NOTE: System works completely standalone via Serial Monitor
+// Future: Push button will replace Serial commands (see PUSH_BUTTON_DIAGRAM.md)
 String serialBuf;
 void handleSerial(){
   while (Serial.available()){
@@ -593,9 +595,9 @@ void handleSerial(){
     if (ch == '\r' || ch == '\n'){
       serialBuf.trim();
       serialBuf.toLowerCase();
-      if (serialBuf == "start")  startSystem();
-      else if (serialBuf == "stop")   stopSystem();
-      else if (serialBuf == "toggle") toggleSystem();
+      if (serialBuf == "start")  startSystem();  // Standalone: works without WiFi/MQTT
+      else if (serialBuf == "stop")   stopSystem();  // Standalone: works without WiFi/MQTT
+      else if (serialBuf == "toggle") toggleSystem();  // Standalone: works without WiFi/MQTT
       else if (serialBuf.startsWith("set ")){
         float sp = serialBuf.substring(4).toFloat();
         if (sp>=1 && sp<=100){ 
@@ -816,8 +818,8 @@ void publishStatusOnline(){
 void publishStatusOnlineLocal(){
   if(!mqttLocal.connected()) {
     Serial.println("❌ Local MQTT not connected - cannot publish status");
-    return;
-  }
+        return;
+      }
   bool success = mqttLocal.publish(tStatus().c_str(), "online", true);
   if (success) {
     Serial.println("✓ Status 'online' sent to Local MQTT: " + tStatus());
@@ -872,7 +874,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     if (doc.containsKey("host")) { 
       mqttHost = String((const char*)doc["host"]); 
       prefs.putString("mqtt_host", mqttHost); 
-      motorLogMsg("Provision: Broker saved: " + mqttHost);
+    motorLogMsg("Provision: Broker saved: " + mqttHost);
       Serial.println("✓ Broker host updated: " + mqttHost);
     }
     // Send ACK
@@ -933,7 +935,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
     if (!runState){
       Serial.println("❌ Fan toggle rejected: system not running (Local)");
-    } else {
+      } else {
       FanSpeed newSpeed;
       switch(fanSpeed){
         case FAN_OFF:
@@ -1063,7 +1065,7 @@ void setup()
   
   int savedFan = prefs.getInt("fanSpeed", 0);
   if (savedFan >= 0 && savedFan <= 3) fanSpeed = (FanSpeed)savedFan;
-  
+
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
   M1_POST_RUN = prefs.getULong("m1_post", M1_POST_RUN);
   M2_INTERVAL = prefs.getULong("m2_interval", M2_INTERVAL);
@@ -1090,21 +1092,16 @@ void setup()
   
   esp_task_wdt_reset();
 
+  // ========== STANDALONE MODE: Non-blocking WiFi ==========
+  // Start WiFi connection but don't wait - system works without it
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  Serial.println("\nConnecting to Wi-Fi");
-
-  // Wait for connection with watchdog reset
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-    esp_task_wdt_reset();
-  }
-
-  Serial.println("\n✓ WiFi connected");
-  Serial.println("  IP: " + WiFi.localIP().toString());
+  WiFi.setAutoReconnect(true);  // Auto-reconnect on disconnect
+  WiFi.persistent(true);         // Save WiFi credentials to flash
+  
+  Serial.println("\n📡 WiFi: Starting connection (non-blocking)");
+  Serial.println("  ⚠️  System will work standalone even without WiFi");
+  Serial.println("  ⚠️  WiFi will reconnect automatically in background");
 
   // Configure WiFiClientSecure to use the AWS IoT device credentials
   net.setCACert(AWS_CERT_CA);
@@ -1126,64 +1123,28 @@ void setup()
   // Set the function to handle messages
   client.setCallback(messageHandler);
 
-  Serial.println("\nConnecting to AWS IoT");
+  Serial.println("\n☁️  AWS IoT: Configuration ready (will connect when WiFi available)");
+  Serial.println("  ⚠️  System works standalone - MQTT is optional");
 
-  // Attempt to connect to AWS IoT with watchdog reset
-  Serial.print("Connecting");
-  int attempts = 0;
-  while (!client.connected() && attempts < 50)
-  {
-    // Simple connection with clean session
-    if (client.connect(THINGNAME)) {
-      Serial.println(" Connected!");
-      break;
-    }
-    Serial.print(".");
-    delay(200);
-    esp_task_wdt_reset();
-    attempts++;
-  }
-
-  // Check if connection was successful
-  if (!client.connected())
-  {
-    Serial.println("\nAWS IoT Connection Failed!");
-    return;
-  }
-
-  // Subscribe to command topic (receive)
-  client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-  
-  Serial.println("\n✅ Topic Configuration:");
-  Serial.println("  📥 Subscribe (receive commands): " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-  Serial.println("  📤 Publish (send telemetry):    " + String(AWS_IOT_PUBLISH_TOPIC));
-
-  // Send initial status to AWS
-  Serial.println("\n📤 Sending initial status to AWS IoT...");
-  publishStatusOnline();
-  publishStateAWS();
-  publishTelemetryAWS();
-  Serial.println("✓ Initial data sent!");
-
-  Serial.println("\n✓ AWS IoT Connected!");
-  Serial.println("  Endpoint: " + String(AWS_IOT_ENDPOINT));
-  Serial.println("  Thing Name: " + String(THINGNAME));
-  Serial.println("\n📡 MQTT Configuration:");
+  Serial.println("\n📡 MQTT Configuration (Optional):");
   Serial.println("  ☁️  AWS IoT (Cloud):");
   Serial.println("      📥 Subscribe: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
   Serial.println("      📤 Publish:   " + String(AWS_IOT_PUBLISH_TOPIC));
   Serial.println("  🏠 Local MQTT (Pi): " + mqttHost);
   Serial.println("      📥 Subscribe: " + tCmd());
   Serial.println("      📤 Publish:   " + tTelemetry() + ", " + tState());
-  Serial.println("\n📊 Publishing Schedule:");
-  Serial.println("  - AWS IoT: Every 5 seconds");
-  Serial.println("  - Local MQTT: Every 2 seconds");
+  Serial.println("\n✅ STANDALONE MODE ENABLED");
+  Serial.println("  - System works without WiFi/MQTT");
+  Serial.println("  - Control via Serial Monitor: 'start' / 'stop'");
+  Serial.println("  - WiFi/MQTT reconnect automatically in background");
+  Serial.println("  - System state preserved during reconnections");
   Serial.println("========================================\n");
-  
-  if (pendingRecoveryStart && client.connected()) {
+
+  // Restore system state if needed (standalone mode)
+  if (pendingRecoveryStart) {
     pendingRecoveryStart = false;
     runState = true;
-    motorLogMsg("⚠️ RECOVERY START: System recovered and running");
+    motorLogMsg("⚠️ RECOVERY START: System recovered and running (standalone mode)");
   }
 
   lastLoopTime = millis();
@@ -1211,14 +1172,49 @@ void loop()
     lastStateSave = now;
   }
 
-  // ========== AWS IoT MQTT (Cloud) ==========
+  // ========== STANDALONE MODE: WiFi Reconnection (Non-blocking) ==========
+  static unsigned long lastWifiCheck = 0;
+  static bool wifiWasConnected = false;
+  
+  if (now - lastWifiCheck > 2000) {  // Check WiFi status every 2 seconds
+    lastWifiCheck = now;
+    bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+    
+    if (wifiConnected && !wifiWasConnected) {
+      // WiFi just connected
+      Serial.println("\n✓ WiFi Connected!");
+      Serial.println("  IP: " + WiFi.localIP().toString());
+      motorLogMsg("WiFi: Connected - " + WiFi.localIP().toString());
+      wifiWasConnected = true;
+    } 
+    else if (!wifiConnected && wifiWasConnected) {
+      // WiFi just disconnected
+      Serial.println("\n⚠️ WiFi Disconnected (system continues running)");
+      motorLogMsg("WiFi: Disconnected - system continues standalone");
+      wifiWasConnected = false;
+    }
+    else if (!wifiConnected && !wifiWasConnected) {
+      // WiFi still disconnected - try to reconnect (non-blocking)
+      static unsigned long lastWifiReconnectAttempt = 0;
+      if (now - lastWifiReconnectAttempt > 10000) {  // Try every 10 seconds
+        lastWifiReconnectAttempt = now;
+        Serial.print("📡 Attempting WiFi reconnection...");
+        WiFi.disconnect();
+        delay(100);
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        // Don't wait - just start the connection attempt
+      }
+    }
+  }
+
+  // ========== AWS IoT MQTT (Cloud) - Only if WiFi connected ==========
   // Keep the AWS MQTT connection alive - MUST call this every loop
   if (client.connected()) {
     client.loop();
   }
   
-  // Simple reconnection logic for AWS - only try if disconnected
-  if (!client.connected()) {
+  // Simple reconnection logic for AWS - only try if WiFi connected and MQTT disconnected
+  if (WiFi.status() == WL_CONNECTED && !client.connected()) {
     static unsigned long lastReconnectAttempt = 0;
     if (now - lastReconnectAttempt > 15000) { // Wait 15 seconds between attempts
       lastReconnectAttempt = now;
@@ -1241,8 +1237,8 @@ void loop()
     }
   }
 
-  // ========== Local MQTT (Raspberry Pi) ==========
-  // Ensure local MQTT connection and handle messages
+  // ========== Local MQTT (Raspberry Pi) - Only if WiFi connected ==========
+  // Ensure local MQTT connection and handle messages (non-blocking)
   if (WiFi.status() == WL_CONNECTED) {
     ensureMqtt();
     if (mqttLocal.connected()) {
