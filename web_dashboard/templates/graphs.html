@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graphs & Analytics - ALMED</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .chart-wrapper {
+            height: 300px;
+            margin-bottom: 24px;
+        }
+        .time-range-selector {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .time-range-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: transparent;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .time-range-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <div class="top-bar">
+        <div style="display: flex; align-items: center;">
+            <span class="brand">ALMED</span>
+            <div class="brand-divider"></div>
+            <button class="icon-button" onclick="window.history.back()">←</button>
+            <div style="margin-left: 16px;">
+                <h1 style="font-size: 22px; font-weight: 600; margin: 0;">Graphs & Analytics</h1>
+                <div style="font-size: 14px; color: var(--on-surface-variant); margin-top: 4px;" id="device-info">
+                    AHU {{ device_id }}
+                </div>
+            </div>
+        </div>
+        <div class="top-bar-actions">
+            <a href="/ahu/{{ device_id }}" class="btn btn-outline">← Control</a>
+            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()">☀️</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <!-- Time Range Selector -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="time-range-selector">
+                <button class="time-range-btn active" data-hours="1" onclick="setTimeRange(1)">1 Hour</button>
+                <button class="time-range-btn" data-hours="6" onclick="setTimeRange(6)">6 Hours</button>
+                <button class="time-range-btn" data-hours="24" onclick="setTimeRange(24)">24 Hours</button>
+                <button class="time-range-btn" data-hours="168" onclick="setTimeRange(168)">7 Days</button>
+            </div>
+        </div>
+
+        <!-- Temperature Chart -->
+        <div class="chart-container">
+            <h2 class="chart-title">Temperature</h2>
+            <div class="chart-wrapper">
+                <canvas id="temp-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Humidity Chart -->
+        <div class="chart-container">
+            <h2 class="chart-title">Humidity</h2>
+            <div class="chart-wrapper">
+                <canvas id="hum-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Motor Cycles Chart -->
+        <div class="chart-container">
+            <h2 class="chart-title">Motor Cycles</h2>
+            <div class="chart-wrapper">
+                <canvas id="motor-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- System Status Chart -->
+        <div class="chart-container">
+            <h2 class="chart-title">System Status</h2>
+            <div class="chart-wrapper">
+                <canvas id="status-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+    <script>
+        const deviceId = '{{ device_id }}';
+        let currentHours = 24;
+
+        async function loadCharts() {
+            try {
+                const response = await api.getTelemetry(deviceId, currentHours);
+                if (response.success && response.data) {
+                    const data = response.data;
+                    
+                    // Create charts
+                    charts.createTemperatureChart('temp-chart', data);
+                    charts.createHumidityChart('hum-chart', data);
+                    charts.createMotorCyclesChart('motor-chart', data);
+                    charts.createSystemStatusChart('status-chart', data);
+                } else {
+                    console.error('No data available');
+                }
+            } catch (error) {
+                console.error('Error loading charts:', error);
+            }
+        }
+
+        function setTimeRange(hours) {
+            currentHours = hours;
+            
+            // Update button states
+            document.querySelectorAll('.time-range-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
+            });
+            
+            // Reload charts
+            loadCharts();
+        }
+
+        // Load charts on page load
+        loadCharts();
+        
+        // Refresh charts every 30 seconds
+        setInterval(loadCharts, 30000);
+    </script>
+</body>
+</html>
+

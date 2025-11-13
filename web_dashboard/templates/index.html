@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ALMED AHU Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <div class="top-bar">
+        <div style="display: flex; align-items: center;">
+            <span class="brand">ALMED</span>
+            <div class="brand-divider"></div>
+            <h1 style="font-size: 28px; font-weight: 600; margin: 0;">Dashboard</h1>
+        </div>
+        <div class="top-bar-actions">
+            <div id="connection-status" class="status-indicator">
+                <div class="status-dot"></div>
+                <span>Disconnected</span>
+            </div>
+            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()">☀️</button>
+            <a href="/settings" class="icon-button">⚙️</a>
+            <a href="/hospitals" class="icon-button">🏥</a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <div id="devices-container" class="grid" style="justify-content: center; padding: 20px;">
+            <div class="loading">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        // Load devices
+        async function loadDevices() {
+            const container = document.getElementById('devices-container');
+            
+            try {
+                const response = await api.getDevices();
+                
+                if (!response.success || !response.hospitals) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🏥</div>
+                            <div class="empty-state-text">No devices found</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Flatten all devices
+                const allDevices = [];
+                for (const [hospital, rooms] of Object.entries(response.hospitals)) {
+                    for (const [room, devices] of Object.entries(rooms)) {
+                        allDevices.push(...devices);
+                    }
+                }
+
+                if (allDevices.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🏥</div>
+                            <div class="empty-state-text">No devices found</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Render device cards
+                container.innerHTML = allDevices.map(device => `
+                    <div class="card ahu-card" onclick="window.location.href='/ahu/${device.id}'">
+                        <div class="ahu-header">
+                            <div>
+                                <div class="ahu-name">${device.name}</div>
+                                <div class="ahu-location">${device.room.toUpperCase()} • ${device.site}</div>
+                            </div>
+                            <div class="status-badge offline" id="status-${device.id}">
+                                <div class="status-badge-dot"></div>
+                                <span>Offline</span>
+                            </div>
+                        </div>
+                        <div class="sensor-grid">
+                            <div class="sensor-display temperature" id="temp-${device.id}">
+                                <div class="sensor-icon">🌡️</div>
+                                <div class="sensor-value">
+                                    <span>--</span>
+                                    <span class="sensor-unit">°C</span>
+                                </div>
+                            </div>
+                            <div class="sensor-display humidity" id="hum-${device.id}">
+                                <div class="sensor-icon">💧</div>
+                                <div class="sensor-value">
+                                    <span>--</span>
+                                    <span class="sensor-unit">%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="status-chips" id="chips-${device.id}">
+                            <div class="status-chip">STOPPED</div>
+                        </div>
+                    </div>
+                `).join('');
+
+                // Load status for each device
+                allDevices.forEach(device => {
+                    loadDeviceStatus(device.id);
+                });
+
+                // Refresh status every 5 seconds
+                setInterval(() => {
+                    allDevices.forEach(device => {
+                        loadDeviceStatus(device.id);
+                    });
+                }, 5000);
+
+            } catch (error) {
+                console.error('Error loading devices:', error);
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">⚠️</div>
+                        <div class="empty-state-text">Error loading devices: ${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        async function loadDeviceStatus(deviceId) {
+            try {
+                const response = await api.getDeviceStatus(deviceId);
+                if (response.success && response.data) {
+                    const data = response.data;
+                    const telemetry = data.telemetry || {};
+                    const state = data.state || {};
+                    
+                    // Update status badge
+                    const statusBadge = document.getElementById(`status-${deviceId}`);
+                    if (statusBadge) {
+                        const isOnline = data.status === 'online';
+                        statusBadge.className = `status-badge ${isOnline ? 'online' : 'offline'}`;
+                        statusBadge.innerHTML = `
+                            <div class="status-badge-dot"></div>
+                            <span>${isOnline ? 'Online' : 'Offline'}</span>
+                        `;
+                    }
+
+                    // Update temperature
+                    const tempEl = document.querySelector(`#temp-${deviceId} .sensor-value span`);
+                    if (tempEl && telemetry.temp !== undefined) {
+                        tempEl.textContent = telemetry.temp.toFixed(1);
+                    }
+
+                    // Update humidity
+                    const humEl = document.querySelector(`#hum-${deviceId} .sensor-value span`);
+                    if (humEl && telemetry.hum !== undefined) {
+                        humEl.textContent = telemetry.hum.toFixed(1);
+                    }
+
+                    // Update status chips
+                    const chipsEl = document.getElementById(`chips-${deviceId}`);
+                    if (chipsEl) {
+                        chipsEl.innerHTML = `
+                            <div class="status-chip ${state.run ? 'active' : ''}">Running</div>
+                            <div class="status-chip ${state.cp ? 'active' : ''}">CP</div>
+                            <div class="status-chip ${state.heater ? 'active' : ''}">Heater</div>
+                            <div class="status-chip ${state.fan ? 'active' : ''}">${getFanLabel(state.fanSpeed || 0)}</div>
+                        `;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error loading status for ${deviceId}:`, error);
+            }
+        }
+
+        // Load on page load
+        loadDevices();
+    </script>
+</body>
+</html>
+

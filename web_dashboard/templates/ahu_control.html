@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AHU Control - ALMED</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .sensor-control {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.08));
+            border: 1.5px solid rgba(59, 130, 246, 0.3);
+            border-radius: 24px;
+            padding: 20px;
+            text-align: center;
+        }
+        .sensor-control.humidity {
+            background: linear-gradient(135deg, rgba(96, 165, 250, 0.15), rgba(96, 165, 250, 0.08));
+            border-color: rgba(96, 165, 250, 0.3);
+        }
+        .sensor-icon-large {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+        .sensor-actual {
+            font-size: 48px;
+            font-weight: bold;
+            color: #3B82F6;
+            margin: 16px 0;
+        }
+        .sensor-setpoint {
+            margin-top: 20px;
+            padding: 14px;
+            background: rgba(59, 130, 246, 0.2);
+            border-radius: 16px;
+        }
+        .setpoint-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .setpoint-value {
+            font-size: 24px;
+            font-weight: bold;
+            min-width: 60px;
+        }
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            border: none;
+            background: rgba(59, 130, 246, 0.2);
+            color: #3B82F6;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-icon:hover {
+            background: rgba(59, 130, 246, 0.3);
+        }
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        .component-card {
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+        }
+        .component-status {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 12px 0;
+        }
+        .component-status.on {
+            color: var(--success);
+        }
+        .component-status.off {
+            color: var(--on-surface-variant);
+        }
+        .fan-speed-selector {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .fan-speed-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 12px;
+            border: 1.5px solid var(--border);
+            background: transparent;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .fan-speed-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <div class="top-bar">
+        <div style="display: flex; align-items: center;">
+            <span class="brand">ALMED</span>
+            <div class="brand-divider"></div>
+            <button class="icon-button" onclick="window.history.back()">←</button>
+            <div style="margin-left: 16px;">
+                <h1 style="font-size: 22px; font-weight: 600; margin: 0;" id="device-name">AHU Control</h1>
+                <div id="device-status" style="display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 14px;">
+                    <div class="status-dot"></div>
+                    <span>Offline</span>
+                </div>
+            </div>
+        </div>
+        <div class="top-bar-actions">
+            <a href="/graphs/{{ device_id }}" class="btn btn-outline">📊 Graphs</a>
+            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()">☀️</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <!-- System Control -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2 class="card-title">System Control</h2>
+                    <p style="color: var(--on-surface-variant); margin-top: 4px;">Start or stop the AHU system</p>
+                </div>
+                <button id="system-toggle" class="btn btn-success" onclick="toggleSystem()">
+                    ▶ Start
+                </button>
+            </div>
+        </div>
+
+        <!-- Sensor Controls -->
+        <div class="grid grid-2" style="margin-bottom: 24px;">
+            <div class="sensor-control temperature">
+                <div class="sensor-icon-large">🌡️</div>
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 16px; letter-spacing: 0.5px;">TEMPERATURE</div>
+                <div class="sensor-actual" id="temp-actual">--</div>
+                <div style="font-size: 10px; font-weight: bold; color: #3B82F6; letter-spacing: 1.2px; margin-bottom: 20px;">ACTUAL</div>
+                <div class="sensor-setpoint">
+                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">SETPOINT</div>
+                    <div class="setpoint-controls">
+                        <button class="btn-icon" onclick="adjustSetpoint('temp', -1)">−</button>
+                        <div class="setpoint-value" id="temp-setpoint">22.0</div>
+                        <button class="btn-icon" onclick="adjustSetpoint('temp', 1)">+</button>
+                    </div>
+                    <div style="font-size: 11px; color: var(--on-surface-variant); margin-top: 8px;">15°C - 30°C</div>
+                </div>
+            </div>
+            <div class="sensor-control humidity">
+                <div class="sensor-icon-large">💧</div>
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 16px; letter-spacing: 0.5px;">HUMIDITY</div>
+                <div class="sensor-actual" style="color: #60A5FA;" id="hum-actual">--</div>
+                <div style="font-size: 10px; font-weight: bold; color: #60A5FA; letter-spacing: 1.2px; margin-bottom: 20px;">ACTUAL</div>
+                <div class="sensor-setpoint" style="background: rgba(96, 165, 250, 0.2);">
+                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">SETPOINT</div>
+                    <div class="setpoint-controls">
+                        <button class="btn-icon" onclick="adjustSetpoint('hum', -1)">−</button>
+                        <div class="setpoint-value" id="hum-setpoint">55.0</div>
+                        <button class="btn-icon" onclick="adjustSetpoint('hum', 1)">+</button>
+                    </div>
+                    <div style="font-size: 11px; color: var(--on-surface-variant); margin-top: 8px;">30% - 80%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Component Status -->
+        <div class="card">
+            <h2 class="card-title">Component Status</h2>
+            <div class="component-grid">
+                <div class="component-card">
+                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">COMPRESSOR</div>
+                    <div class="component-status off" id="cp-status">OFF</div>
+                </div>
+                <div class="component-card">
+                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">HEATER</div>
+                    <div class="component-status off" id="heater-status">OFF</div>
+                </div>
+                <div class="component-card">
+                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">MOTOR 1</div>
+                    <div class="component-status off" id="m1-status">OFF</div>
+                </div>
+                <div class="component-card">
+                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">MOTOR 2</div>
+                    <div class="component-status off" id="m2-status">OFF</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fan Control -->
+        <div class="card" style="margin-top: 24px;">
+            <h2 class="card-title">Fan Speed</h2>
+            <div class="fan-speed-selector">
+                <button class="fan-speed-btn" data-speed="0" onclick="setFanSpeed(0)" id="fan-off-btn" style="display: none;">OFF</button>
+                <button class="fan-speed-btn" data-speed="1" onclick="setFanSpeed(1)">LOW</button>
+                <button class="fan-speed-btn" data-speed="2" onclick="setFanSpeed(2)">MED</button>
+                <button class="fan-speed-btn" data-speed="3" onclick="setFanSpeed(3)">HIGH</button>
+            </div>
+            <p style="margin-top: 12px; font-size: 12px; color: var(--on-surface-variant);">
+                Fan can only be turned off when system is stopped
+            </p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        const deviceId = '{{ device_id }}';
+        let deviceData = {};
+        let isRunning = false;
+        
+        // Optimistic state - stores pending changes until confirmed
+        let optimisticState = {
+            tempSet: null,
+            humSet: null,
+            fanSpeed: null,
+            lastUpdate: 0
+        };
+
+        async function loadDeviceData() {
+            try {
+                const response = await api.getDeviceStatus(deviceId);
+                if (response.success && response.data) {
+                    deviceData = response.data;
+                    
+                    // Don't auto-clear optimistic state here - let the confirmation intervals handle it
+                    // This prevents clearing optimistic state when old data arrives from DynamoDB
+                    
+                    // Only clear if it's been too long (30 seconds) without confirmation
+                    const now = Date.now();
+                    if (now - optimisticState.lastUpdate > 30000) {
+                        console.warn('Clearing optimistic state due to timeout');
+                        optimisticState = { tempSet: null, humSet: null, fanSpeed: null, lastUpdate: 0 };
+                    }
+                    
+                    updateUI();
+                }
+            } catch (error) {
+                console.error('Error loading device data:', error);
+            }
+        }
+
+        // Helper to convert value to boolean (handles 0.0, 1.0, false, true, "0", "1")
+        function toBool(val) {
+            if (val === null || val === undefined) return false;
+            if (typeof val === 'boolean') return val;
+            if (typeof val === 'number') {
+                // Handle both integer and float: 0.0 = false, anything else = true
+                return Math.abs(val) > 0.001;
+            }
+            if (typeof val === 'string') {
+                const lower = val.toLowerCase().trim();
+                return lower === 'true' || lower === '1' || lower === 'yes' || lower === 'on';
+            }
+            return Boolean(val);
+        }
+
+        // Helper to get numeric value
+        function getNum(val, defaultValue = null) {
+            if (val === null || val === undefined) return defaultValue;
+            const num = parseFloat(val);
+            return isNaN(num) ? defaultValue : num;
+        }
+
+        function updateUI() {
+            const telemetry = deviceData.telemetry || {};
+            const state = deviceData.state || {};
+            const status = deviceData.status || 'offline';
+
+            // Update device name and status
+            document.getElementById('device-name').textContent = `AHU ${deviceId.replace('ahu-', '').toUpperCase()}`;
+            const statusEl = document.getElementById('device-status');
+            statusEl.innerHTML = `
+                <div class="status-dot ${status === 'online' ? 'connected' : ''}"></div>
+                <span>${status === 'online' ? 'Online' : 'Offline'}</span>
+            `;
+
+            // Update temperature (handle null/undefined/string values)
+            const temp = getNum(telemetry.temp);
+            if (temp !== null) {
+                document.getElementById('temp-actual').textContent = `${temp.toFixed(1)}°C`;
+            } else {
+                document.getElementById('temp-actual').textContent = '--';
+            }
+            
+            // Get setpoint: optimistic state > state > telemetry
+            const tempSet = optimisticState.tempSet !== null 
+                ? optimisticState.tempSet 
+                : getNum(state.tempSet !== undefined ? state.tempSet : telemetry.tempSet, 22.0);
+            document.getElementById('temp-setpoint').textContent = tempSet.toFixed(1);
+
+            // Update humidity (handle null/undefined/string values)
+            const hum = getNum(telemetry.hum);
+            if (hum !== null) {
+                document.getElementById('hum-actual').textContent = `${hum.toFixed(1)}%`;
+            } else {
+                document.getElementById('hum-actual').textContent = '--';
+            }
+            
+            // Get setpoint: optimistic state > state > telemetry
+            const humSet = optimisticState.humSet !== null 
+                ? optimisticState.humSet 
+                : getNum(state.humSet !== undefined ? state.humSet : telemetry.humSet, 55.0);
+            document.getElementById('hum-setpoint').textContent = humSet.toFixed(1);
+
+            // Update system status - use telemetry first (most recent), then state
+            const runVal = telemetry.run !== undefined ? telemetry.run : state.run;
+            isRunning = toBool(runVal);
+            const toggleBtn = document.getElementById('system-toggle');
+            toggleBtn.className = isRunning ? 'btn btn-danger' : 'btn btn-success';
+            toggleBtn.textContent = isRunning ? '⏹ Stop' : '▶ Start';
+
+            // Update components - use telemetry first (most recent), then state
+            // Telemetry has the current status of motors/components
+            const cpVal = telemetry.cp !== undefined ? telemetry.cp : state.cp;
+            const heaterVal = telemetry.heater !== undefined ? telemetry.heater : state.heater;
+            const m1Val = telemetry.m1 !== undefined ? telemetry.m1 : state.m1;
+            const m2Val = telemetry.m2 !== undefined ? telemetry.m2 : state.m2;
+            
+            // Debug logging
+            if (window.DEBUG) {
+                console.log('Component values:', {
+                    cp: { raw: cpVal, bool: toBool(cpVal) },
+                    heater: { raw: heaterVal, bool: toBool(heaterVal) },
+                    m1: { raw: m1Val, bool: toBool(m1Val) },
+                    m2: { raw: m2Val, bool: toBool(m2Val) }
+                });
+            }
+            
+            updateComponent('cp', toBool(cpVal));
+            updateComponent('heater', toBool(heaterVal));
+            updateComponent('m1', toBool(m1Val));
+            updateComponent('m2', toBool(m2Val));
+
+            // Update fan speed - optimistic state > state > telemetry
+            const fanSpeed = optimisticState.fanSpeed !== null
+                ? optimisticState.fanSpeed
+                : parseInt(state.fanSpeed !== undefined ? state.fanSpeed : telemetry.fanSpeed) || 0;
+            
+            const fanSpeedBtns = document.querySelectorAll('.fan-speed-btn');
+            fanSpeedBtns.forEach(btn => {
+                const btnSpeed = parseInt(btn.dataset.speed);
+                // Hide OFF button if system is running
+                if (btnSpeed === 0) {
+                    btn.style.display = isRunning ? 'none' : 'block';
+                }
+                btn.classList.toggle('active', btnSpeed === fanSpeed);
+            });
+        }
+
+        function updateComponent(name, isOn) {
+            const statusEl = document.getElementById(`${name}-status`);
+            if (statusEl) {
+                statusEl.textContent = isOn ? 'ON' : 'OFF';
+                statusEl.className = `component-status ${isOn ? 'on' : 'off'}`;
+            }
+        }
+
+        async function toggleSystem() {
+            try {
+                if (isRunning) {
+                    await api.stopDevice(deviceId);
+                } else {
+                    await api.startDevice(deviceId);
+                }
+                setTimeout(loadDeviceData, 1000);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function adjustSetpoint(type, delta) {
+            const current = parseFloat(document.getElementById(`${type}-setpoint`).textContent);
+            const newValue = type === 'temp' 
+                ? Math.max(15, Math.min(30, current + delta))
+                : Math.max(30, Math.min(80, current + delta));
+            
+            // Store in optimistic state
+            if (type === 'temp') {
+                optimisticState.tempSet = newValue;
+            } else {
+                optimisticState.humSet = newValue;
+            }
+            optimisticState.lastUpdate = Date.now();
+            
+            // Update UI immediately
+            document.getElementById(`${type}-setpoint`).textContent = newValue.toFixed(1);
+            
+            try {
+                if (type === 'temp') {
+                    await api.setTemperature(deviceId, newValue);
+                } else {
+                    await api.setHumidity(deviceId, newValue);
+                }
+                // Keep checking until we get confirmation (new value matches)
+                // ESP32 publishes every ~5 seconds, so we need to wait longer
+                let attempts = 0;
+                const checkInterval = setInterval(async () => {
+                    attempts++;
+                    await loadDeviceData();
+                    
+                    // Get current value from backend (state or telemetry)
+                    const currentValue = type === 'temp' 
+                        ? getNum(deviceData.state?.tempSet || deviceData.telemetry?.tempSet)
+                        : getNum(deviceData.state?.humSet || deviceData.telemetry?.humSet);
+                    
+                    // Check if confirmed (allow small floating point differences)
+                    const confirmed = currentValue !== null && Math.abs(currentValue - newValue) < 0.1;
+                    
+                    console.log(`[${type}] Attempt ${attempts}: sent=${newValue}, received=${currentValue}, confirmed=${confirmed}`);
+                    
+                    // Wait up to 20 seconds (10 attempts * 2 seconds) for ESP32 to publish
+                    if (confirmed || attempts > 10) {
+                        clearInterval(checkInterval);
+                        if (confirmed) {
+                            console.log(`[${type}] Confirmed! Value updated to ${currentValue}`);
+                        } else {
+                            console.warn(`[${type}] Timeout: Value may not have updated (still showing ${currentValue})`);
+                        }
+                        if (type === 'temp') {
+                            optimisticState.tempSet = null;
+                        } else {
+                            optimisticState.humSet = null;
+                        }
+                    }
+                }, 2000);
+            } catch (error) {
+                alert('Error: ' + error.message);
+                // Clear optimistic state on error
+                if (type === 'temp') {
+                    optimisticState.tempSet = null;
+                } else {
+                    optimisticState.humSet = null;
+                }
+                loadDeviceData();
+            }
+        }
+
+        async function setFanSpeed(speed) {
+            // Don't allow turning fan off if system is running
+            if (speed === 0 && isRunning) {
+                alert('Cannot turn fan off while system is running. Stop the system first.');
+                return;
+            }
+            
+            // Store in optimistic state
+            optimisticState.fanSpeed = speed;
+            optimisticState.lastUpdate = Date.now();
+            
+            // Update UI immediately
+            document.querySelectorAll('.fan-speed-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.speed) === speed);
+            });
+            
+            try {
+                await api.setFanSpeed(deviceId, speed);
+                
+                // Keep checking until we get confirmation
+                // ESP32 publishes every ~5 seconds, so we need to wait longer
+                let attempts = 0;
+                const checkInterval = setInterval(async () => {
+                    attempts++;
+                    await loadDeviceData();
+                    
+                    // Get current value from backend
+                    const currentSpeed = parseInt(deviceData.state?.fanSpeed || deviceData.telemetry?.fanSpeed) || 0;
+                    
+                    // Check if confirmed
+                    const confirmed = currentSpeed === speed;
+                    
+                    console.log(`[fan] Attempt ${attempts}: sent=${speed}, received=${currentSpeed}, confirmed=${confirmed}`);
+                    
+                    // Wait up to 20 seconds (10 attempts * 2 seconds) for ESP32 to publish
+                    if (confirmed || attempts > 10) {
+                        clearInterval(checkInterval);
+                        if (confirmed) {
+                            console.log(`[fan] Confirmed! Fan speed updated to ${currentSpeed}`);
+                        } else {
+                            console.warn(`[fan] Timeout: Fan speed may not have updated (still showing ${currentSpeed})`);
+                        }
+                        optimisticState.fanSpeed = null;
+                    }
+                }, 2000);
+            } catch (error) {
+                alert('Error: ' + error.message);
+                // Clear optimistic state on error
+                optimisticState.fanSpeed = null;
+                loadDeviceData();
+            }
+        }
+
+        // Load data on page load and refresh every 2 seconds
+        loadDeviceData();
+        setInterval(loadDeviceData, 2000);
+    </script>
+</body>
+</html>
+

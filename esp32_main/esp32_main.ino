@@ -1251,7 +1251,7 @@ void loop()
 
   // Publish to AWS every 5 seconds
   static unsigned long lastAWS = 0;
-  if (client.connected() && (now - lastAWS >= 5000)) {
+  if (client.connected() && (now - lastAWS >= 2000)) {
     lastAWS = now;
     publishTelemetryAWS();
     publishStateAWS();

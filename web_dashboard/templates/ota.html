@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTA Updates - ALMED</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <div class="top-bar">
+        <div style="display: flex; align-items: center;">
+            <span class="brand">ALMED</span>
+            <div class="brand-divider"></div>
+            <h1 style="font-size: 28px; font-weight: 600; margin: 0;">OTA Updates</h1>
+        </div>
+        <div class="top-bar-actions">
+            <a href="/" class="icon-button">🏠</a>
+            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()">☀️</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <div class="card" style="max-width: 800px; margin: 40px auto;">
+            <div class="empty-state">
+                <div class="empty-state-icon">📡</div>
+                <div class="empty-state-text" style="font-size: 18px; margin-top: 20px;">
+                    OTA Updates feature coming soon
+                </div>
+                <div class="empty-state-text" style="margin-top: 12px; opacity: 0.7;">
+                    This page will allow you to push firmware updates to ESP32 devices over the air
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+

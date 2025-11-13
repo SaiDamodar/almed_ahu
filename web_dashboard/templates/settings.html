@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Settings - ALMED</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <div class="top-bar">
+        <div style="display: flex; align-items: center;">
+            <span class="brand">ALMED</span>
+            <div class="brand-divider"></div>
+            <h1 style="font-size: 28px; font-weight: 600; margin: 0;">Admin Settings</h1>
+        </div>
+        <div class="top-bar-actions">
+            <a href="/" class="icon-button">🏠</a>
+            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()">☀️</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <div id="settings-container">
+            <div class="loading">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        // Check admin access
+        if (!checkAdminAccess()) {
+            window.location.href = '/';
+        }
+
+        async function loadSettings() {
+            const container = document.getElementById('settings-container');
+            
+            try {
+                // Get devices for selection
+                const devicesResponse = await api.getDevices();
+                
+                if (!devicesResponse.success) {
+                    container.innerHTML = '<div class="empty-state">Error loading devices</div>';
+                    return;
+                }
+
+                // Flatten devices
+                const allDevices = [];
+                for (const [hospital, rooms] of Object.entries(devicesResponse.hospitals || {})) {
+                    for (const [room, devices] of Object.entries(rooms)) {
+                        allDevices.push(...devices);
+                    }
+                }
+
+                container.innerHTML = `
+                    <div class="card" style="max-width: 1000px; margin: 0 auto;">
+                        <h2 class="card-title">Device Selection</h2>
+                        <div class="form-group">
+                            <label class="form-label">Select AHU Unit</label>
+                            <select class="form-input" id="device-select">
+                                <option value="">-- Select Device --</option>
+                                ${allDevices.map(d => `<option value="${d.id}">${d.name} (${d.site}/${d.room})</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="settings-forms" style="display: none;">
+                        <!-- WiFi Provisioning -->
+                        <div class="card" style="margin-top: 24px; max-width: 1000px; margin-left: auto; margin-right: auto;">
+                            <h2 class="card-title">📡 WiFi Provisioning</h2>
+                            <div class="form-group">
+                                <label class="form-label">Primary WiFi SSID (Pi Hotspot)</label>
+                                <input type="text" class="form-input" id="primary-ssid" placeholder="PiSpot">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Primary WiFi Password</label>
+                                <input type="password" class="form-input" id="primary-pass" placeholder="12345678">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Secondary WiFi SSID (Hospital Network)</label>
+                                <input type="text" class="form-input" id="secondary-ssid" placeholder="Hospital-WiFi">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Secondary WiFi Password</label>
+                                <input type="password" class="form-input" id="secondary-pass" placeholder="Password">
+                            </div>
+                            <button class="btn btn-primary" onclick="provisionWifi()">Provision WiFi</button>
+                        </div>
+
+                        <!-- Broker Settings -->
+                        <div class="card" style="margin-top: 24px; max-width: 1000px; margin-left: auto; margin-right: auto;">
+                            <h2 class="card-title">🌐 MQTT Broker Settings</h2>
+                            <div class="form-group">
+                                <label class="form-label">Broker Host</label>
+                                <input type="text" class="form-input" id="broker-host" placeholder="10.42.0.1">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Broker Port</label>
+                                <input type="number" class="form-input" id="broker-port" placeholder="1883" value="1883">
+                            </div>
+                            <button class="btn btn-primary" onclick="provisionBroker()">Provision Broker</button>
+                        </div>
+
+                        <!-- Motor Timings -->
+                        <div class="card" style="margin-top: 24px; max-width: 1000px; margin-left: auto; margin-right: auto;">
+                            <h2 class="card-title">⏱️ Motor Timing Configuration</h2>
+                            <div class="form-group">
+                                <label class="form-label">Motor-1 Start Run Time (seconds)</label>
+                                <input type="number" class="form-input" id="m1-start" value="10" min="1" max="999">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Motor-1 Post Run Time (seconds)</label>
+                                <input type="number" class="form-input" id="m1-post" value="10" min="1" max="999">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Motor-2 Interval (seconds)</label>
+                                <input type="number" class="form-input" id="m2-interval" value="30" min="1" max="999">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Motor-2 Run Time (seconds)</label>
+                                <input type="number" class="form-input" id="m2-run" value="10" min="1" max="999">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Motor-2 Delay After M1 (seconds)</label>
+                                <input type="number" class="form-input" id="m2-delay" value="5" min="1" max="999">
+                            </div>
+                            <div style="display: flex; gap: 12px;">
+                                <button class="btn btn-outline" onclick="resetMotorTimings()">Reset to Defaults</button>
+                                <button class="btn btn-primary" onclick="provisionMotorTimings()">Save Timings</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Show forms when device is selected
+                document.getElementById('device-select').addEventListener('change', (e) => {
+                    document.getElementById('settings-forms').style.display = e.target.value ? 'block' : 'none';
+                });
+
+            } catch (error) {
+                console.error('Error loading settings:', error);
+                container.innerHTML = `<div class="empty-state">Error: ${error.message}</div>`;
+            }
+        }
+
+        function getSelectedDevice() {
+            const select = document.getElementById('device-select');
+            return select ? select.value : null;
+        }
+
+        async function provisionWifi() {
+            const deviceId = getSelectedDevice();
+            if (!deviceId) {
+                alert('Please select a device first');
+                return;
+            }
+
+            const config = {
+                primary: {
+                    ssid: document.getElementById('primary-ssid').value,
+                    pass: document.getElementById('primary-pass').value
+                }
+            };
+
+            const secondarySsid = document.getElementById('secondary-ssid').value;
+            if (secondarySsid) {
+                config.secondary = {
+                    ssid: secondarySsid,
+                    pass: document.getElementById('secondary-pass').value
+                };
+            }
+
+            try {
+                await api.provisionWifi(deviceId, config);
+                alert('WiFi credentials sent successfully');
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function provisionBroker() {
+            const deviceId = getSelectedDevice();
+            if (!deviceId) {
+                alert('Please select a device first');
+                return;
+            }
+
+            const host = document.getElementById('broker-host').value;
+            const port = parseInt(document.getElementById('broker-port').value);
+
+            if (!host) {
+                alert('Please enter broker host');
+                return;
+            }
+
+            try {
+                await api.provisionBroker(deviceId, { host, port });
+                alert('Broker settings sent successfully');
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function provisionMotorTimings() {
+            const deviceId = getSelectedDevice();
+            if (!deviceId) {
+                alert('Please select a device first');
+                return;
+            }
+
+            const timings = {
+                m1_start: parseInt(document.getElementById('m1-start').value),
+                m1_post: parseInt(document.getElementById('m1-post').value),
+                m2_interval: parseInt(document.getElementById('m2-interval').value),
+                m2_run: parseInt(document.getElementById('m2-run').value),
+                m2_delay: parseInt(document.getElementById('m2-delay').value)
+            };
+
+            try {
+                await api.provisionMotorTimings(deviceId, timings);
+                alert('Motor timings sent successfully');
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function resetMotorTimings() {
+            document.getElementById('m1-start').value = 10;
+            document.getElementById('m1-post').value = 10;
+            document.getElementById('m2-interval').value = 30;
+            document.getElementById('m2-run').value = 10;
+            document.getElementById('m2-delay').value = 5;
+        }
+
+        loadSettings();
+    </script>
+</body>
+</html>
+
