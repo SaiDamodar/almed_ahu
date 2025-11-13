@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - ALMED AHU Control</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        {% include 'sidebar.html' %}
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Top Header -->
+            <div class="top-header">
+                <div class="header-left">
+                    <div class="search-box">
+                        <span class="nav-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                        </span>
+                        <input type="text" placeholder="Search...">
+                    </div>
+                </div>
+                <div class="header-right">
+                    <button class="icon-btn" title="Notifications">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Content Container -->
+            <div class="content-container">
+                <h1 class="page-title">Dashboard</h1>
+                <p class="page-subtitle">Welcome back! Here's what's happening</p>
+
+                <!-- Summary Cards -->
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <div class="card-icon devices">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                                </svg>
+                            </div>
+                            <div class="card-trend" id="devices-trend">+12%</div>
+                        </div>
+                        <div class="card-value" id="total-devices">0</div>
+                        <div class="card-label">Total Devices</div>
+                    </div>
+
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <div class="card-icon online">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                </svg>
+                            </div>
+                            <div class="card-trend" id="online-trend">+8%</div>
+                        </div>
+                        <div class="card-value" id="online-devices">0</div>
+                        <div class="card-label">Online Devices</div>
+                    </div>
+
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <div class="card-icon users">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                    <circle cx="9" cy="7" r="4"></circle>
+                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                </svg>
+                            </div>
+                            <div class="card-trend" id="users-trend">+5%</div>
+                        </div>
+                        <div class="card-value" id="total-users">0</div>
+                        <div class="card-label">Total Users</div>
+                    </div>
+
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <div class="card-icon status">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                                </svg>
+                            </div>
+                            <div class="card-trend live" id="status-trend">Live</div>
+                        </div>
+                        <div class="card-value" id="system-status" style="font-size: 18px;">Offline</div>
+                        <div class="card-label">System Status</div>
+                    </div>
+                </div>
+
+                <!-- Device Overview -->
+                <div class="section-card">
+                    <h2 class="section-title">Device Overview</h2>
+                    <div id="device-overview">
+                        <div class="empty-state">
+                            <div class="empty-icon">🖥️</div>
+                            <div class="empty-text">No devices found</div>
+                            <div class="empty-subtext">Connect your first device to get started</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Stats -->
+                <div class="section-card">
+                    <h2 class="section-title">Quick Stats</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card featured">
+                            <div class="stat-icon">🌡️</div>
+                            <div class="stat-value" id="avg-temperature">--</div>
+                            <div class="stat-label">Average Temperature</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">💧</div>
+                            <div class="stat-value" id="avg-humidity">--</div>
+                            <div class="stat-label">Average Humidity</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">📊</div>
+                            <div class="stat-value" id="avg-deviation">--</div>
+                            <div class="stat-label">Avg Setpoint Deviation</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script>
+        async function loadDashboard() {
+            try {
+                const response = await api.getDevices();
+                
+                if (response.success && response.hospitals) {
+                    // Count devices
+                    let totalDevices = 0;
+                    let onlineDevices = 0;
+                    const allDevices = [];
+                    
+                    for (const [hospital, rooms] of Object.entries(response.hospitals)) {
+                        for (const [room, devices] of Object.entries(rooms)) {
+                            allDevices.push(...devices);
+                            totalDevices += devices.length;
+                        }
+                    }
+                    
+                    // Check online status and collect telemetry for each device
+                    let tempSum = 0;
+                    let humSum = 0;
+                    let tempDeviationSum = 0;
+                    let humDeviationSum = 0;
+                    let devicesWithData = 0;
+                    let devicesWithSetpoints = 0;
+                    
+                    for (const device of allDevices) {
+                        try {
+                            const statusResponse = await api.getDeviceStatus(device.id);
+                            if (statusResponse.success && statusResponse.data.status === 'online') {
+                                onlineDevices++;
+                                
+                                // Status endpoint already includes telemetry and state
+                                const telemetry = statusResponse.data.telemetry || {};
+                                const state = statusResponse.data.state || {};
+                                
+                                // Get temperature and humidity from telemetry
+                                const temp = parseFloat(telemetry.temp || telemetry.temperature);
+                                const hum = parseFloat(telemetry.hum || telemetry.humidity);
+                                
+                                // Get setpoints from state (or telemetry as fallback)
+                                const tempSet = parseFloat(state.tempSet || telemetry.tempSet);
+                                const humSet = parseFloat(state.humSet || telemetry.humSet);
+                                
+                                if (!isNaN(temp) && !isNaN(hum)) {
+                                    tempSum += temp;
+                                    humSum += hum;
+                                    devicesWithData++;
+                                    
+                                    // Calculate deviations if setpoints are available
+                                    let hasSetpoints = false;
+                                    if (!isNaN(tempSet)) {
+                                        tempDeviationSum += Math.abs(temp - tempSet);
+                                        hasSetpoints = true;
+                                    }
+                                    if (!isNaN(humSet)) {
+                                        humDeviationSum += Math.abs(hum - humSet);
+                                        hasSetpoints = true;
+                                    }
+                                    
+                                    if (hasSetpoints) {
+                                        devicesWithSetpoints++;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error(`Error checking status for ${device.id}:`, e);
+                        }
+                    }
+                    
+                    // Update summary cards
+                    document.getElementById('total-devices').textContent = totalDevices;
+                    document.getElementById('online-devices').textContent = onlineDevices;
+                    document.getElementById('total-users').textContent = '1'; // Admin user
+                    
+                    // Update system status
+                    const systemStatusEl = document.getElementById('system-status');
+                    const statusTrendEl = document.getElementById('status-trend');
+                    if (onlineDevices > 0) {
+                        systemStatusEl.textContent = 'Online';
+                        systemStatusEl.style.color = 'var(--success)';
+                        statusTrendEl.textContent = 'Live';
+                        statusTrendEl.className = 'card-trend';
+                        statusTrendEl.style.background = 'var(--success-light)';
+                        statusTrendEl.style.color = 'var(--success)';
+                    } else {
+                        systemStatusEl.textContent = 'Offline';
+                        systemStatusEl.style.color = 'var(--error)';
+                    }
+                    
+                    // Update Quick Stats
+                    if (devicesWithData > 0) {
+                        const avgTemp = tempSum / devicesWithData;
+                        const avgHum = humSum / devicesWithData;
+                        
+                        document.getElementById('avg-temperature').textContent = `${avgTemp.toFixed(1)}°C`;
+                        document.getElementById('avg-humidity').textContent = `${avgHum.toFixed(1)}%`;
+                        
+                        // Calculate average deviation (only if we have setpoint data)
+                        if (devicesWithSetpoints > 0) {
+                            const avgTempDev = tempDeviationSum / devicesWithSetpoints;
+                            const avgHumDev = humDeviationSum / devicesWithSetpoints;
+                            const totalDeviation = (avgTempDev + avgHumDev) / 2;
+                            document.getElementById('avg-deviation').textContent = `${totalDeviation.toFixed(1)}`;
+                        } else {
+                            document.getElementById('avg-deviation').textContent = '--';
+                        }
+                    } else {
+                        document.getElementById('avg-temperature').textContent = '--';
+                        document.getElementById('avg-humidity').textContent = '--';
+                        document.getElementById('avg-deviation').textContent = '--';
+                    }
+                    
+                    // Update device overview
+                    if (allDevices.length > 0) {
+                        const overviewHtml = allDevices.slice(0, 5).map(device => `
+                            <div style="padding: 16px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between;">
+                                <div>
+                                    <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">${device.name}</div>
+                                    <div style="font-size: 12px; color: var(--text-secondary);">${device.site} • ${device.room}</div>
+                                </div>
+                                <a href="/ahu/${device.id}" class="btn btn-secondary" style="text-decoration: none;">View</a>
+                            </div>
+                        `).join('');
+                        document.getElementById('device-overview').innerHTML = overviewHtml;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+            }
+        }
+        
+        // Load dashboard on page load
+        loadDashboard();
+        
+        // Refresh every 30 seconds
+        setInterval(loadDashboard, 30000);
+    </script>
+</body>
+</html>
+

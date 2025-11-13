@@ -27,7 +27,8 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expire
 CORS(app, origins=config.CORS_ORIGINS)
 
 # Initialize SocketIO
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Auto-detect async mode (will use threading if eventlet/gevent not available)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # AWS IoT Data Plane client (for publishing)
 iot_data = None
@@ -292,6 +293,20 @@ def login_required(f):
 
 # ==================== Routes ====================
 
+@app.before_request
+def require_login():
+    """Ensure user is logged in before accessing any page (except login, API login, and static files)"""
+    # Allow login page and API login endpoint
+    if request.endpoint in ['login', 'api_login', 'verify_admin', 'static']:
+        return None
+    # Require authentication for all other routes
+    if not session.get('authenticated'):
+        # For API endpoints, return JSON error
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'Authentication required'}), 401
+        # For regular pages, redirect to login
+        return redirect(url_for('login'))
+
 @app.route('/login')
 def login():
     """Login page"""
@@ -309,13 +324,50 @@ def logout():
 @login_required
 def index():
     """Main dashboard"""
-    return render_template('index.html')
+    return render_template('dashboard.html')
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """Dashboard page"""
+    return render_template('dashboard.html')
 
 @app.route('/hospitals')
 @login_required
 def hospitals():
     """Hospitals → Devices view"""
     return render_template('hospitals.html')
+
+@app.route('/devices')
+@login_required
+def devices():
+    """Devices page - Monitor and control all devices"""
+    return render_template('devices_page.html')
+
+@app.route('/users')
+@login_required
+def users():
+    """Users management page"""
+    return render_template('users.html')
+
+@app.route('/reports')
+@login_required
+def reports():
+    """Reports page"""
+    return render_template('reports.html')
+
+@app.route('/calendar')
+@login_required
+def calendar():
+    """Calendar page"""
+    return render_template('calendar.html')
+
+
+@app.route('/profile')
+@login_required
+def profile():
+    """User profile page"""
+    return render_template('profile.html')
 
 @app.route('/ahu/<device_id>')
 @login_required

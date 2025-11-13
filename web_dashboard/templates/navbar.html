@@ -4,7 +4,8 @@
         <span class="brand">ALMED</span>
         <div class="brand-divider"></div>
         <div class="nav-links">
-            <a href="/" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Home</a>
+            <a href="/" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Dashboard</a>
+            <a href="/devices" class="nav-link {% if request.endpoint == 'devices' %}active{% endif %}">Devices</a>
             <a href="/hospitals" class="nav-link {% if request.endpoint == 'hospitals' %}active{% endif %}">Hospitals</a>
         </div>
     </div>

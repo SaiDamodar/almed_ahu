@@ -32,26 +32,44 @@
     </style>
 </head>
 <body>
-    {% include 'navbar.html' %}
-    
-    <!-- Device Header -->
-    <div class="container" style="padding-top: 20px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
-            <div>
-                <button class="icon-button" onclick="window.history.back()" style="margin-right: 16px; font-size: 18px;">←</button>
-                <h1 style="font-size: 28px; font-weight: 600; margin: 0; display: inline-block;">Graphs & Analytics</h1>
-                <div style="font-size: 14px; color: var(--on-surface-variant); margin-top: 8px;" id="device-info">
-                    AHU {{ device_id }}
+    <div class="app-container">
+        {% include 'sidebar.html' %}
+
+        <div class="main-content">
+            <div class="top-header">
+                <div class="header-left">
+                    <button class="icon-btn" onclick="window.history.back()" style="font-size: 18px;">←</button>
+                    <div class="search-box">
+                        <span class="nav-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                        </span>
+                        <input type="text" placeholder="Search...">
+                    </div>
+                </div>
+                <div class="header-right">
+                    <button class="icon-btn" title="Notifications">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                    </button>
                 </div>
             </div>
-            <a href="/ahu/{{ device_id }}" class="btn btn-outline" style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 18px;">←</span> Control</a>
-        </div>
-    </div>
 
-    <!-- Main Content -->
-    <div class="container page-transition">
-        <!-- Time Range Selector -->
-        <div class="card" style="margin-bottom: 24px;">
+            <div class="content-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                    <div>
+                        <h1 class="page-title">Graphs & Analytics</h1>
+                        <p class="page-subtitle" id="device-info">AHU {{ device_id }}</p>
+                    </div>
+                    <a href="/ahu/{{ device_id }}" class="btn btn-secondary" style="text-decoration: none;">← Control</a>
+                </div>
+
+                <!-- Time Range Selector -->
+                <div class="section-card" style="margin-bottom: 24px;">
             <div class="time-range-selector">
                 <button class="time-range-btn active" data-hours="1" onclick="setTimeRange(1)">1 Hour</button>
                 <button class="time-range-btn" data-hours="6" onclick="setTimeRange(6)">6 Hours</button>
@@ -60,35 +78,37 @@
             </div>
         </div>
 
-        <!-- Temperature Chart -->
-        <div class="chart-container">
-            <h2 class="chart-title">Temperature</h2>
-            <div class="chart-wrapper">
-                <canvas id="temp-chart"></canvas>
-            </div>
-        </div>
+                <!-- Temperature Chart -->
+                <div class="section-card" style="margin-bottom: 24px;">
+                    <h2 class="section-title">Temperature</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="temp-chart"></canvas>
+                    </div>
+                </div>
 
-        <!-- Humidity Chart -->
-        <div class="chart-container">
-            <h2 class="chart-title">Humidity</h2>
-            <div class="chart-wrapper">
-                <canvas id="hum-chart"></canvas>
-            </div>
-        </div>
+                <!-- Humidity Chart -->
+                <div class="section-card" style="margin-bottom: 24px;">
+                    <h2 class="section-title">Humidity</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="hum-chart"></canvas>
+                    </div>
+                </div>
 
-        <!-- Motor Cycles Chart -->
-        <div class="chart-container">
-            <h2 class="chart-title">Motor Cycles</h2>
-            <div class="chart-wrapper">
-                <canvas id="motor-chart"></canvas>
-            </div>
-        </div>
+                <!-- Motor Cycles Chart -->
+                <div class="section-card" style="margin-bottom: 24px;">
+                    <h2 class="section-title">Motor Cycles</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="motor-chart"></canvas>
+                    </div>
+                </div>
 
-        <!-- System Status Chart -->
-        <div class="chart-container">
-            <h2 class="chart-title">System Status</h2>
-            <div class="chart-wrapper">
-                <canvas id="status-chart"></canvas>
+                <!-- System Status Chart -->
+                <div class="section-card" style="margin-bottom: 24px;">
+                    <h2 class="section-title">System Status</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="status-chart"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
