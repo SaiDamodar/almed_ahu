@@ -1,8 +1,16 @@
-/* ALMED AHU Web Dashboard - Modern Stylesheet */
-/* Matching Flutter Dashboard Design */
+/* ALMED AHU Web Dashboard - Matching Flutter App Design */
+/* Times New Roman for all text, Vendura only for ALMED brand */
+
+/* Custom Font - Vendura (only for brand) */
+@font-face {
+  font-family: 'Vendura';
+  src: url('../fonts/Vendura-SemiBold-Demo.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+}
 
 :root {
-  /* Light Mode Colors */
+  /* Light Mode Colors - Exact match with Flutter */
   --light-primary: #2563EB;
   --light-secondary: #3B82F6;
   --light-background: #FAFAFA;
@@ -10,7 +18,7 @@
   --light-on-surface: #1F2937;
   --light-on-surface-variant: #6B7280;
   
-  /* Dark Mode Colors */
+  /* Dark Mode Colors - Exact match with Flutter */
   --dark-primary: #3B82F6;
   --dark-secondary: #60A5FA;
   --dark-background: #0F172A;
@@ -33,6 +41,10 @@
   --on-surface: var(--light-on-surface);
   --on-surface-variant: var(--light-on-surface-variant);
   --border: rgba(0, 0, 0, 0.1);
+  --bg-gradient: linear-gradient(135deg, #FFFFFF 0%, #E0F2FE 50%, #BAE6FD 100%);
+  
+  /* Smooth transitions */
+  --transition-speed: 0.3s;
 }
 
 [data-theme="dark"] {
@@ -43,27 +55,41 @@
   --on-surface: var(--dark-on-surface);
   --on-surface-variant: var(--dark-on-surface-variant);
   --border: rgba(255, 255, 255, 0.1);
+  --bg-gradient: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #334155 100%);
 }
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  font-family: 'Times New Roman', Times, serif;
+}
+
+/* Override for brand only */
+.brand {
+  font-family: 'Vendura', Verdana, sans-serif !important;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: linear-gradient(135deg, var(--background) 0%, var(--surface) 100%);
+  background: var(--background);
+  background-image: var(--bg-gradient);
+  background-attachment: fixed;
+  background-size: cover;
   color: var(--on-surface);
   min-height: 100vh;
   line-height: 1.6;
+  transition: background-color var(--transition-speed), color var(--transition-speed), background-image var(--transition-speed);
 }
 
-/* Top Navigation Bar */
+/* Top Navigation Bar - Matching Flutter */
 .top-bar {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 20px;
+  padding: 20px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -71,21 +97,50 @@ body {
   top: 0;
   z-index: 100;
   backdrop-filter: blur(10px);
+  transition: background-color var(--transition-speed), border-color var(--transition-speed);
 }
 
 .brand {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: 1.5px;
   color: var(--on-surface);
-  font-family: 'Verdana', sans-serif;
 }
 
 .brand-divider {
   width: 1px;
-  height: 30px;
+  height: 24px;
   background: var(--border);
-  margin: 0 20px;
+  margin: 0 16px;
+}
+
+.nav-links {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: 16px;
+}
+
+.nav-link {
+  padding: 10px 16px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: var(--on-surface);
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.nav-link:hover {
+  background: var(--background);
+  color: var(--primary);
+}
+
+.nav-link.active {
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--primary);
+  border-color: rgba(37, 99, 235, 0.2);
 }
 
 .top-bar-actions {
@@ -105,6 +160,8 @@ body {
   justify-content: center;
   transition: all 0.2s;
   color: var(--on-surface);
+  width: 40px;
+  height: 40px;
 }
 
 .icon-button:hover {
@@ -120,8 +177,8 @@ body {
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--error);
 }
@@ -137,14 +194,14 @@ body {
   padding: 20px;
 }
 
-/* Cards */
+/* Cards - Matching Flutter card style */
 .card {
   background: var(--surface);
   border-radius: 20px;
   border: 1px solid var(--border);
   padding: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s;
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  transition: all var(--transition-speed);
 }
 
 .card:hover {
@@ -152,24 +209,27 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+[data-theme="dark"] .card {
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+[data-theme="dark"] .card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 .card-title {
   font-size: 22px;
   font-weight: 600;
   color: var(--on-surface);
+  margin-bottom: 8px;
 }
 
-/* AHU Card */
+/* AHU Card - Dashboard View */
 .ahu-card {
-  width: 380px;
+  width: 100%;
   cursor: pointer;
   transition: all 0.3s;
+  border-radius: 12px;
 }
 
 .ahu-card:hover {
@@ -180,12 +240,12 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .ahu-name {
   font-size: 22px;
-  font-weight: 600;
+  font-weight: bold;
   color: var(--on-surface);
   margin-bottom: 4px;
 }
@@ -198,9 +258,9 @@ body {
 
 .status-badge {
   padding: 6px 12px;
-  border-radius: 12px;
+  border-radius: 20px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: bold;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -217,23 +277,23 @@ body {
 }
 
 .status-badge-dot {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: currentColor;
 }
 
-/* Sensor Display */
+/* Sensor Display - Dashboard */
 .sensor-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .sensor-display {
-  padding: 16px;
-  border-radius: 16px;
+  padding: 12px;
+  border-radius: 8px;
   text-align: center;
   background: rgba(59, 130, 246, 0.1);
 }
@@ -247,13 +307,12 @@ body {
 }
 
 .sensor-icon {
-  font-size: 28px;
-  color: var(--temperature);
+  font-size: 32px;
   margin-bottom: 8px;
 }
 
 .sensor-value {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: bold;
   color: var(--temperature);
   display: flex;
@@ -277,18 +336,27 @@ body {
 
 .status-chip {
   padding: 6px 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 12px;
-  font-weight: 600;
-  border: 1.5px solid var(--border);
+  font-weight: bold;
+  border: 1px solid var(--border);
   background: transparent;
   color: var(--on-surface-variant);
+  transition: all 0.2s;
 }
 
 .status-chip.active {
-  background: rgba(59, 130, 246, 0.15);
+  background: rgba(59, 130, 246, 0.2);
   border-color: var(--info);
   color: var(--info);
+}
+
+[data-theme="dark"] .status-chip {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+[data-theme="dark"] .status-chip.active {
+  background: rgba(59, 130, 246, 0.2);
 }
 
 /* Buttons */
@@ -393,88 +461,6 @@ body {
   gap: 20px;
 }
 
-/* Control Panel */
-.control-panel {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.control-group {
-  background: var(--background);
-  padding: 20px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-}
-
-.control-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--on-surface-variant);
-  margin-bottom: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.control-value {
-  font-size: 32px;
-  font-weight: bold;
-  color: var(--on-surface);
-  margin-bottom: 8px;
-}
-
-.control-actions {
-  display: flex;
-  gap: 8px;
-}
-
-/* Forms */
-.form-group {
-  margin-bottom: 20px;
-}
-
-.form-label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--on-surface);
-  margin-bottom: 8px;
-}
-
-.form-input {
-  width: 100%;
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--background);
-  color: var(--on-surface);
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-/* Charts */
-.chart-container {
-  background: var(--surface);
-  border-radius: 20px;
-  padding: 24px;
-  margin-bottom: 24px;
-  border: 1px solid var(--border);
-}
-
-.chart-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--on-surface);
-  margin-bottom: 20px;
-}
-
 /* Loading */
 .loading {
   display: flex;
@@ -514,6 +500,45 @@ body {
   font-size: 16px;
 }
 
+/* Page Transitions */
+.page-transition {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Logout Button */
+.logout-btn {
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--on-surface);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logout-btn:hover {
+  background: var(--error);
+  color: white;
+  border-color: var(--error);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .ahu-card {
@@ -534,4 +559,3 @@ body {
 .mt-20 { margin-top: 20px; }
 .mb-20 { margin-bottom: 20px; }
 .hidden { display: none; }
-

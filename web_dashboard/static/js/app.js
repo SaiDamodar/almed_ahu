@@ -21,8 +21,8 @@ function updateThemeToggle(theme) {
   const toggle = document.getElementById('theme-toggle');
   if (toggle) {
     toggle.innerHTML = theme === 'dark' 
-      ? '<span>🌙</span>' 
-      : '<span>☀️</span>';
+      ? '<span>●</span>' 
+      : '<span>○</span>';
   }
 }
 
@@ -108,7 +108,16 @@ function getFanLabel(speed) {
   }
 }
 
-// Initialize on page load
+// Smooth page transitions
+function smoothNavigate(url) {
+  document.body.style.opacity = '0';
+  document.body.style.transition = 'opacity 0.2s ease-out';
+  setTimeout(() => {
+    window.location.href = url;
+  }, 200);
+}
+
+// Add smooth transitions to all links
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   updateConnectionStatus();
@@ -121,6 +130,25 @@ document.addEventListener('DOMContentLoaded', () => {
   if (themeToggle) {
     themeToggle.addEventListener('click', toggleTheme);
   }
+  
+  // Add smooth transitions to navigation links
+  document.querySelectorAll('a[href^="/"]').forEach(link => {
+    link.addEventListener('click', (e) => {
+      const href = link.getAttribute('href');
+      // Don't apply to external links or links with special attributes
+      if (href && !link.hasAttribute('target') && !link.hasAttribute('download')) {
+        e.preventDefault();
+        smoothNavigate(href);
+      }
+    });
+  });
+  
+  // Fade in on page load
+  document.body.style.opacity = '0';
+  setTimeout(() => {
+    document.body.style.transition = 'opacity 0.3s ease-in';
+    document.body.style.opacity = '1';
+  }, 10);
 });
 
 // Export for use in other scripts

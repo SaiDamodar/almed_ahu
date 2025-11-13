@@ -6,214 +6,613 @@
     <title>AHU Control - ALMED</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        .sensor-control {
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.08));
+        /* Sensor Control Cards - Matching Image 2 */
+        .sensor-control-card {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.1));
             border: 1.5px solid rgba(59, 130, 246, 0.3);
             border-radius: 24px;
             padding: 20px;
             text-align: center;
+            position: relative;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.15);
         }
-        .sensor-control.humidity {
-            background: linear-gradient(135deg, rgba(96, 165, 250, 0.15), rgba(96, 165, 250, 0.08));
+        
+        [data-theme="dark"] .sensor-control-card {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(59, 130, 246, 0.15));
+        }
+        
+        .sensor-control-card.humidity {
+            background: linear-gradient(135deg, rgba(96, 165, 250, 0.2), rgba(96, 165, 250, 0.1));
             border-color: rgba(96, 165, 250, 0.3);
+            box-shadow: 0 8px 32px rgba(96, 165, 250, 0.15);
         }
-        .sensor-icon-large {
-            font-size: 48px;
+        
+        [data-theme="dark"] .sensor-control-card.humidity {
+            background: linear-gradient(135deg, rgba(96, 165, 250, 0.25), rgba(96, 165, 250, 0.15));
+        }
+        
+        .sensor-icon-container {
+            padding: 12px;
+            background: rgba(59, 130, 246, 0.2);
+            border-radius: 50%;
+            display: inline-block;
             margin-bottom: 12px;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
         }
-        .sensor-actual {
+        
+        .sensor-control-card.humidity .sensor-icon-container {
+            background: rgba(96, 165, 250, 0.2);
+            box-shadow: 0 0 15px rgba(96, 165, 250, 0.3);
+        }
+        
+        .sensor-icon-large {
+            width: 32px;
+            height: 32px;
+            display: inline-block;
+            background: white;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M15 13V5c0-1.66-1.34-3-3-3S9 3.34 9 5v8c-1.21.91-2 2.37-2 4 0 2.76 2.24 5 5 5s5-2.24 5-5c0-1.63-.79-3.09-2-4zm-4-8c0-.55.45-1 1-1s1 .45 1 1h-1v1h-1V5zm0 2h1v1h-1V7zm0 2h1v1h-1V9zm0 2h1v1h-1v-1z'/%3E%3C/svg%3E") no-repeat center;
+            mask-size: contain;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M15 13V5c0-1.66-1.34-3-3-3S9 3.34 9 5v8c-1.21.91-2 2.37-2 4 0 2.76 2.24 5 5 5s5-2.24 5-5c0-1.63-.79-3.09-2-4zm-4-8c0-.55.45-1 1-1s1 .45 1 1h-1v1h-1V5zm0 2h1v1h-1V7zm0 2h1v1h-1V9zm0 2h1v1h-1v-1z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask-size: contain;
+        }
+        
+        .sensor-control-card.humidity .sensor-icon-large {
+            background: white;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'/%3E%3C/svg%3E") no-repeat center;
+            mask-size: contain;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask-size: contain;
+        }
+        
+        .sensor-label {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            letter-spacing: 0.5px;
+            color: white;
+        }
+        
+        [data-theme="light"] .sensor-label {
+            color: var(--on-surface);
+        }
+        
+        .sensor-actual-value {
             font-size: 48px;
             font-weight: bold;
-            color: #3B82F6;
+            color: white;
             margin: 16px 0;
+            line-height: 1;
         }
-        .sensor-setpoint {
-            margin-top: 20px;
+        
+        [data-theme="light"] .sensor-actual-value {
+            color: var(--temperature);
+        }
+        
+        .sensor-control-card.humidity .sensor-actual-value {
+            color: white;
+        }
+        
+        [data-theme="light"] .sensor-control-card.humidity .sensor-actual-value {
+            color: var(--humidity);
+        }
+        
+        .sensor-actual-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: rgba(59, 130, 246, 0.15);
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.7);
+            letter-spacing: 1.2px;
+            margin-bottom: 20px;
+        }
+        
+        [data-theme="light"] .sensor-actual-badge {
+            color: var(--temperature);
+        }
+        
+        .sensor-control-card.humidity .sensor-actual-badge {
+            background: rgba(96, 165, 250, 0.15);
+            color: rgba(255, 255, 255, 0.7);
+        }
+        
+        [data-theme="light"] .sensor-control-card.humidity .sensor-actual-badge {
+            color: var(--humidity);
+        }
+        
+        .setpoint-container {
             padding: 14px;
             background: rgba(59, 130, 246, 0.2);
             border-radius: 16px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
         }
+        
+        .sensor-control-card.humidity .setpoint-container {
+            background: rgba(96, 165, 250, 0.2);
+            border-color: rgba(96, 165, 250, 0.3);
+        }
+        
+        .setpoint-label {
+            font-size: 10px;
+            font-weight: bold;
+            color: rgba(59, 130, 246, 0.8);
+            letter-spacing: 1.2px;
+            margin-bottom: 10px;
+        }
+        
+        .sensor-control-card.humidity .setpoint-label {
+            color: rgba(96, 165, 250, 0.8);
+        }
+        
         .setpoint-controls {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 12px;
-            margin-top: 12px;
+            gap: 16px;
+            margin-top: 10px;
         }
-        .setpoint-value {
-            font-size: 24px;
-            font-weight: bold;
-            min-width: 60px;
-        }
-        .btn-icon {
-            width: 40px;
-            height: 40px;
+        
+        .glossy-button {
+            width: 44px;
+            height: 44px;
             border-radius: 12px;
             border: none;
-            background: rgba(59, 130, 246, 0.2);
-            color: #3B82F6;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.8), rgba(59, 130, 246, 0.6));
+            color: white;
             cursor: pointer;
             font-size: 20px;
+            font-weight: bold;
             display: flex;
             align-items: center;
             justify-content: center;
-        }
-        .btn-icon:hover {
-            background: rgba(59, 130, 246, 0.3);
-        }
-        .component-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-        }
-        .component-card {
-            background: var(--background);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 20px;
-            text-align: center;
-        }
-        .component-status {
-            font-size: 32px;
-            font-weight: bold;
-            margin: 12px 0;
-        }
-        .component-status.on {
-            color: var(--success);
-        }
-        .component-status.off {
-            color: var(--on-surface-variant);
-        }
-        .fan-speed-selector {
-            display: flex;
-            gap: 8px;
-            margin-top: 12px;
-        }
-        .fan-speed-btn {
-            flex: 1;
-            padding: 10px;
-            border-radius: 12px;
-            border: 1.5px solid var(--border);
-            background: transparent;
-            cursor: pointer;
-            font-weight: 600;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
             transition: all 0.2s;
         }
-        .fan-speed-btn.active {
+        
+        .glossy-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(59, 130, 246, 0.4);
+        }
+        
+        .glossy-button:disabled {
+            background: rgba(128, 128, 128, 0.2);
+            color: rgba(128, 128, 128, 0.5);
+            cursor: not-allowed;
+        }
+        
+        .sensor-control-card.humidity .glossy-button {
+            background: linear-gradient(135deg, rgba(96, 165, 250, 0.8), rgba(96, 165, 250, 0.6));
+            box-shadow: 0 4px 8px rgba(96, 165, 250, 0.3);
+        }
+        
+        .sensor-control-card.humidity .glossy-button:hover:not(:disabled) {
+            box-shadow: 0 6px 12px rgba(96, 165, 250, 0.4);
+        }
+        
+        .setpoint-display {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            font-size: 22px;
+            font-weight: bold;
+            color: var(--temperature);
+            min-width: 80px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+        }
+        
+        [data-theme="dark"] .setpoint-display {
+            background: rgba(30, 41, 59, 0.9);
+        }
+        
+        .sensor-control-card.humidity .setpoint-display {
+            color: var(--humidity);
+            box-shadow: 0 2px 8px rgba(96, 165, 250, 0.2);
+        }
+        
+        .setpoint-range {
+            font-size: 11px;
+            color: var(--on-surface-variant);
+            margin-top: 8px;
+        }
+        
+        /* Component Status - Matching Image 1 */
+        .component-status-container {
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+            border-radius: 24px;
+            border: 1.5px solid var(--border);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+        }
+        
+        [data-theme="dark"] .component-status-container {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+        }
+        
+        .component-status-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .component-status-icon {
+            width: 20px;
+            height: 20px;
             background: var(--primary);
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z'/%3E%3C/svg%3E") no-repeat center;
+            mask-size: contain;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask-size: contain;
+            margin-right: 12px;
+        }
+        
+        .component-status-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--on-surface);
+            letter-spacing: 0.5px;
+        }
+        
+        .component-scroll {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+        
+        .component-scroll::-webkit-scrollbar {
+            height: 6px;
+        }
+        
+        .component-scroll::-webkit-scrollbar-track {
+            background: var(--background);
+            border-radius: 3px;
+        }
+        
+        .component-scroll::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        
+        .component-indicator {
+            width: 120px;
+            flex-shrink: 0;
+            padding: 12px;
+            border-radius: 16px;
+            text-align: center;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+            border: 1px solid var(--border);
+            transition: all 0.3s;
+        }
+        
+        [data-theme="dark"] .component-indicator {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+        }
+        
+        .component-indicator.active {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(16, 185, 129, 0.15));
+            border: 2px solid rgba(16, 185, 129, 0.5);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        
+        .component-icon-wrapper {
+            padding: 10px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 50%;
+            display: inline-block;
+            margin-bottom: 8px;
+        }
+        
+        .component-indicator.active .component-icon-wrapper {
+            background: rgba(16, 185, 129, 0.2);
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+        }
+        
+        .component-icon {
+            width: 22px;
+            height: 22px;
+            display: inline-block;
+            background: var(--on-surface-variant);
+            mask-size: contain;
+            -webkit-mask-size: contain;
+            mask-position: center;
+            -webkit-mask-position: center;
+            mask-repeat: no-repeat;
+            -webkit-mask-repeat: no-repeat;
+        }
+        
+        .component-indicator.active .component-icon {
+            background: var(--success);
+        }
+        
+        .component-icon.motor1 {
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'/%3E%3C/svg%3E") no-repeat center;
+        }
+        
+        .component-icon.motor2 {
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z'/%3E%3C/svg%3E") no-repeat center;
+        }
+        
+        .component-icon.compressor {
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z'/%3E%3C/svg%3E") no-repeat center;
+        }
+        
+        .component-icon.heater {
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 13V5c0-1.66-1.34-3-3-3S9 3.34 9 5v8c-1.21.91-2 2.37-2 4 0 2.76 2.24 5 5 5s5-2.24 5-5c0-1.63-.79-3.09-2-4zm-4-8c0-.55.45-1 1-1s1 .45 1 1h-1v1h-1V5zm0 2h1v1h-1V7zm0 2h1v1h-1V9zm0 2h1v1h-1v-1z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 13V5c0-1.66-1.34-3-3-3S9 3.34 9 5v8c-1.21.91-2 2.37-2 4 0 2.76 2.24 5 5 5s5-2.24 5-5c0-1.63-.79-3.09-2-4zm-4-8c0-.55.45-1 1-1s1 .45 1 1h-1v1h-1V5zm0 2h1v1h-1V7zm0 2h1v1h-1V9zm0 2h1v1h-1v-1z'/%3E%3C/svg%3E") no-repeat center;
+        }
+        
+        .component-icon.fan {
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z'/%3E%3C/svg%3E") no-repeat center;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z'/%3E%3C/svg%3E") no-repeat center;
+        }
+        
+        .component-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--on-surface-variant);
+            letter-spacing: 0.3px;
+            margin-bottom: 6px;
+            line-height: 1.2;
+        }
+        
+        .component-indicator.active .component-label {
+            color: var(--success);
+        }
+        
+        .component-status-badge {
+            padding: 3px 8px;
+            border-radius: 8px;
+            font-size: 8px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            background: rgba(128, 128, 128, 0.15);
+            color: var(--on-surface-variant);
+            border: 1px solid rgba(128, 128, 128, 0.2);
+        }
+        
+        .component-indicator.active .component-status-badge {
+            background: rgba(16, 185, 129, 0.3);
+            color: var(--success);
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+        
+        /* Top Bar for Control Screen */
+        .control-top-bar {
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .control-back-btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            transition: all 0.2s;
+            color: var(--on-surface);
+            font-size: 18px;
+        }
+        
+        .control-back-btn:hover {
+            background: var(--background);
+        }
+        
+        .control-device-info {
+            flex: 1;
+        }
+        
+        .control-device-name {
+            font-size: 22px;
+            font-weight: 600;
+            color: var(--on-surface);
+            margin-bottom: 4px;
+        }
+        
+        .control-status-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .control-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--error);
+        }
+        
+        .control-status-dot.online {
+            background: var(--success);
+        }
+        
+        .control-running-chip {
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1.5px solid var(--success);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .control-start-stop-btn {
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
             color: white;
-            border-color: var(--primary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        
+        .control-start-stop-btn.start {
+            background: linear-gradient(135deg, #10B981, #059669);
+        }
+        
+        .control-start-stop-btn.stop {
+            background: linear-gradient(135deg, #EF4444, #DC2626);
+        }
+        
+        .control-start-stop-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
     </style>
 </head>
 <body>
-    <!-- Top Navigation Bar -->
+    <!-- Top Bar with ALMED Branding -->
     <div class="top-bar">
         <div style="display: flex; align-items: center;">
             <span class="brand">ALMED</span>
             <div class="brand-divider"></div>
-            <button class="icon-button" onclick="window.history.back()">←</button>
-            <div style="margin-left: 16px;">
-                <h1 style="font-size: 22px; font-weight: 600; margin: 0;" id="device-name">AHU Control</h1>
-                <div id="device-status" style="display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 14px;">
-                    <div class="status-dot"></div>
-                    <span>Offline</span>
-                </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link">Home</a>
+                <a href="/hospitals" class="nav-link">Hospitals</a>
             </div>
         </div>
         <div class="top-bar-actions">
-            <a href="/graphs/{{ device_id }}" class="btn btn-outline">📊 Graphs</a>
-            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()">☀️</button>
+            <div id="connection-status" class="status-indicator">
+                <div class="status-dot"></div>
+                <span>Disconnected</span>
+            </div>
+            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()" title="Toggle Theme">●</button>
+            <a href="/settings" class="icon-button" title="Settings" style="font-size: 18px;">⚙</a>
+            <a href="/logout" class="logout-btn" title="Logout">Logout</a>
         </div>
+    </div>
+    
+    <!-- Control Screen Top Bar -->
+    <div class="control-top-bar">
+        <button class="control-back-btn" onclick="window.history.back()">←</button>
+        <div class="control-device-info">
+            <div class="control-device-name" id="device-name">AHU Control</div>
+            <div class="control-status-row">
+                <div class="control-status-dot" id="status-dot"></div>
+                <span id="status-text" style="font-size: 14px;">Offline</span>
+                <div class="control-running-chip" id="running-chip" style="display: none;">
+                    <span style="font-size: 12px;">▶</span>
+                    <span>RUNNING</span>
+                </div>
+            </div>
+        </div>
+        <button class="control-start-stop-btn start" id="start-stop-btn" onclick="toggleSystem()">
+            <span style="font-size: 14px;">▶</span>
+            <span>Start</span>
+        </button>
     </div>
 
     <!-- Main Content -->
-    <div class="container">
-        <!-- System Control -->
-        <div class="card" style="margin-bottom: 24px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <h2 class="card-title">System Control</h2>
-                    <p style="color: var(--on-surface-variant); margin-top: 4px;">Start or stop the AHU system</p>
-                </div>
-                <button id="system-toggle" class="btn btn-success" onclick="toggleSystem()">
-                    ▶ Start
-                </button>
-            </div>
-        </div>
-
+    <div class="container page-transition">
         <!-- Sensor Controls -->
-        <div class="grid grid-2" style="margin-bottom: 24px;">
-            <div class="sensor-control temperature">
-                <div class="sensor-icon-large">🌡️</div>
-                <div style="font-size: 13px; font-weight: 600; margin-bottom: 16px; letter-spacing: 0.5px;">TEMPERATURE</div>
-                <div class="sensor-actual" id="temp-actual">--</div>
-                <div style="font-size: 10px; font-weight: bold; color: #3B82F6; letter-spacing: 1.2px; margin-bottom: 20px;">ACTUAL</div>
-                <div class="sensor-setpoint">
-                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">SETPOINT</div>
+        <div class="grid grid-2" style="margin-bottom: 20px;">
+            <!-- Temperature Card -->
+            <div class="sensor-control-card temperature">
+                <div class="sensor-icon-container">
+                    <div class="sensor-icon-large"></div>
+                </div>
+                <div class="sensor-label">TEMPERATURE</div>
+                <div class="sensor-actual-value" id="temp-actual">--</div>
+                <div class="sensor-actual-badge">ACTUAL</div>
+                <div class="setpoint-container">
+                    <div class="setpoint-label">SETPOINT</div>
                     <div class="setpoint-controls">
-                        <button class="btn-icon" onclick="adjustSetpoint('temp', -1)">−</button>
-                        <div class="setpoint-value" id="temp-setpoint">22.0</div>
-                        <button class="btn-icon" onclick="adjustSetpoint('temp', 1)">+</button>
+                        <button class="glossy-button" onclick="adjustSetpoint('temp', -0.5)" id="temp-minus">−</button>
+                        <div class="setpoint-display" id="temp-setpoint">22.0°C</div>
+                        <button class="glossy-button" onclick="adjustSetpoint('temp', 0.5)" id="temp-plus">+</button>
                     </div>
-                    <div style="font-size: 11px; color: var(--on-surface-variant); margin-top: 8px;">15°C - 30°C</div>
+                    <div class="setpoint-range">15°C - 30°C</div>
                 </div>
             </div>
-            <div class="sensor-control humidity">
-                <div class="sensor-icon-large">💧</div>
-                <div style="font-size: 13px; font-weight: 600; margin-bottom: 16px; letter-spacing: 0.5px;">HUMIDITY</div>
-                <div class="sensor-actual" style="color: #60A5FA;" id="hum-actual">--</div>
-                <div style="font-size: 10px; font-weight: bold; color: #60A5FA; letter-spacing: 1.2px; margin-bottom: 20px;">ACTUAL</div>
-                <div class="sensor-setpoint" style="background: rgba(96, 165, 250, 0.2);">
-                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">SETPOINT</div>
+            
+            <!-- Humidity Card -->
+            <div class="sensor-control-card humidity">
+                <div class="sensor-icon-container">
+                    <div class="sensor-icon-large"></div>
+                </div>
+                <div class="sensor-label">HUMIDITY</div>
+                <div class="sensor-actual-value" id="hum-actual">--</div>
+                <div class="sensor-actual-badge">ACTUAL</div>
+                <div class="setpoint-container">
+                    <div class="setpoint-label">SETPOINT</div>
                     <div class="setpoint-controls">
-                        <button class="btn-icon" onclick="adjustSetpoint('hum', -1)">−</button>
-                        <div class="setpoint-value" id="hum-setpoint">55.0</div>
-                        <button class="btn-icon" onclick="adjustSetpoint('hum', 1)">+</button>
+                        <button class="glossy-button" onclick="adjustSetpoint('hum', -0.5)" id="hum-minus">−</button>
+                        <div class="setpoint-display" id="hum-setpoint">55.0%</div>
+                        <button class="glossy-button" onclick="adjustSetpoint('hum', 0.5)" id="hum-plus">+</button>
                     </div>
-                    <div style="font-size: 11px; color: var(--on-surface-variant); margin-top: 8px;">30% - 80%</div>
+                    <div class="setpoint-range">30% - 80%</div>
                 </div>
             </div>
         </div>
 
         <!-- Component Status -->
-        <div class="card">
-            <h2 class="card-title">Component Status</h2>
-            <div class="component-grid">
-                <div class="component-card">
-                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">COMPRESSOR</div>
-                    <div class="component-status off" id="cp-status">OFF</div>
+        <div class="component-status-container">
+            <div class="component-status-header">
+                <div class="component-status-icon"></div>
+                <div class="component-status-title">Component Status</div>
+            </div>
+            <div class="component-scroll">
+                <div class="component-indicator" id="m1-indicator">
+                    <div class="component-icon-wrapper">
+                        <div class="component-icon motor1"></div>
+                    </div>
+                    <div class="component-label">Motor 1<br>(Drain)</div>
+                    <div class="component-status-badge" id="m1-badge">OFF</div>
                 </div>
-                <div class="component-card">
-                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">HEATER</div>
-                    <div class="component-status off" id="heater-status">OFF</div>
+                <div class="component-indicator" id="m2-indicator">
+                    <div class="component-icon-wrapper">
+                        <div class="component-icon motor2"></div>
+                    </div>
+                    <div class="component-label">Motor 2<br>(Filter)</div>
+                    <div class="component-status-badge" id="m2-badge">OFF</div>
                 </div>
-                <div class="component-card">
-                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">MOTOR 1</div>
-                    <div class="component-status off" id="m1-status">OFF</div>
+                <div class="component-indicator" id="cp-indicator">
+                    <div class="component-icon-wrapper">
+                        <div class="component-icon compressor"></div>
+                    </div>
+                    <div class="component-label">Compressor</div>
+                    <div class="component-status-badge" id="cp-badge">OFF</div>
                 </div>
-                <div class="component-card">
-                    <div style="font-size: 14px; font-weight: 600; color: var(--on-surface-variant); margin-bottom: 8px;">MOTOR 2</div>
-                    <div class="component-status off" id="m2-status">OFF</div>
+                <div class="component-indicator" id="heater-indicator">
+                    <div class="component-icon-wrapper">
+                        <div class="component-icon heater"></div>
+                    </div>
+                    <div class="component-label">Heater</div>
+                    <div class="component-status-badge" id="heater-badge">OFF</div>
+                </div>
+                <div class="component-indicator" id="fan-indicator">
+                    <div class="component-icon-wrapper">
+                        <div class="component-icon fan"></div>
+                    </div>
+                    <div class="component-label" id="fan-label">Fan (OFF)</div>
+                    <div class="component-status-badge" id="fan-badge">OFF</div>
                 </div>
             </div>
-        </div>
-
-        <!-- Fan Control -->
-        <div class="card" style="margin-top: 24px;">
-            <h2 class="card-title">Fan Speed</h2>
-            <div class="fan-speed-selector">
-                <button class="fan-speed-btn" data-speed="0" onclick="setFanSpeed(0)" id="fan-off-btn" style="display: none;">OFF</button>
-                <button class="fan-speed-btn" data-speed="1" onclick="setFanSpeed(1)">LOW</button>
-                <button class="fan-speed-btn" data-speed="2" onclick="setFanSpeed(2)">MED</button>
-                <button class="fan-speed-btn" data-speed="3" onclick="setFanSpeed(3)">HIGH</button>
-            </div>
-            <p style="margin-top: 12px; font-size: 12px; color: var(--on-surface-variant);">
-                Fan can only be turned off when system is stopped
-            </p>
         </div>
     </div>
 
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='js/api.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script>
@@ -221,7 +620,6 @@
         let deviceData = {};
         let isRunning = false;
         
-        // Optimistic state - stores pending changes until confirmed
         let optimisticState = {
             tempSet: null,
             humSet: null,
@@ -235,13 +633,8 @@
                 if (response.success && response.data) {
                     deviceData = response.data;
                     
-                    // Don't auto-clear optimistic state here - let the confirmation intervals handle it
-                    // This prevents clearing optimistic state when old data arrives from DynamoDB
-                    
-                    // Only clear if it's been too long (30 seconds) without confirmation
                     const now = Date.now();
                     if (now - optimisticState.lastUpdate > 30000) {
-                        console.warn('Clearing optimistic state due to timeout');
                         optimisticState = { tempSet: null, humSet: null, fanSpeed: null, lastUpdate: 0 };
                     }
                     
@@ -252,14 +645,10 @@
             }
         }
 
-        // Helper to convert value to boolean (handles 0.0, 1.0, false, true, "0", "1")
         function toBool(val) {
             if (val === null || val === undefined) return false;
             if (typeof val === 'boolean') return val;
-            if (typeof val === 'number') {
-                // Handle both integer and float: 0.0 = false, anything else = true
-                return Math.abs(val) > 0.001;
-            }
+            if (typeof val === 'number') return Math.abs(val) > 0.001;
             if (typeof val === 'string') {
                 const lower = val.toLowerCase().trim();
                 return lower === 'true' || lower === '1' || lower === 'yes' || lower === 'on';
@@ -267,7 +656,6 @@
             return Boolean(val);
         }
 
-        // Helper to get numeric value
         function getNum(val, defaultValue = null) {
             if (val === null || val === undefined) return defaultValue;
             const num = parseFloat(val);
@@ -278,93 +666,80 @@
             const telemetry = deviceData.telemetry || {};
             const state = deviceData.state || {};
             const status = deviceData.status || 'offline';
+            const isOnline = status === 'online';
 
-            // Update device name and status
-            document.getElementById('device-name').textContent = `AHU ${deviceId.replace('ahu-', '').toUpperCase()}`;
-            const statusEl = document.getElementById('device-status');
-            statusEl.innerHTML = `
-                <div class="status-dot ${status === 'online' ? 'connected' : ''}"></div>
-                <span>${status === 'online' ? 'Online' : 'Offline'}</span>
-            `;
-
-            // Update temperature (handle null/undefined/string values)
-            const temp = getNum(telemetry.temp);
-            if (temp !== null) {
-                document.getElementById('temp-actual').textContent = `${temp.toFixed(1)}°C`;
-            } else {
-                document.getElementById('temp-actual').textContent = '--';
-            }
+            // Update device name
+            document.getElementById('device-name').textContent = `AHU ${deviceId.replace('ahu-', '').replace('AHU_', '').toUpperCase()}`;
             
-            // Get setpoint: optimistic state > state > telemetry
+            // Update status dot and text
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            statusDot.className = `control-status-dot ${isOnline ? 'online' : ''}`;
+            statusText.textContent = isOnline ? 'Online' : 'Offline';
+            
+            // Update running chip
+            const runVal = telemetry.run !== undefined ? telemetry.run : state.run;
+            isRunning = toBool(runVal);
+            const runningChip = document.getElementById('running-chip');
+            runningChip.style.display = isRunning ? 'flex' : 'none';
+            
+            // Update start/stop button
+            const startStopBtn = document.getElementById('start-stop-btn');
+            if (isRunning) {
+                startStopBtn.className = 'control-start-stop-btn stop';
+                startStopBtn.innerHTML = '<span style="font-size: 14px;">■</span><span>Stop</span>';
+            } else {
+                startStopBtn.className = 'control-start-stop-btn start';
+                startStopBtn.innerHTML = '<span style="font-size: 14px;">▶</span><span>Start</span>';
+            }
+
+            // Update temperature
+            const temp = getNum(telemetry.temp);
+            document.getElementById('temp-actual').textContent = temp !== null ? `${temp.toFixed(1)}°C` : '--';
+            
             const tempSet = optimisticState.tempSet !== null 
                 ? optimisticState.tempSet 
                 : getNum(state.tempSet !== undefined ? state.tempSet : telemetry.tempSet, 22.0);
-            document.getElementById('temp-setpoint').textContent = tempSet.toFixed(1);
+            document.getElementById('temp-setpoint').textContent = `${tempSet.toFixed(1)}°C`;
 
-            // Update humidity (handle null/undefined/string values)
+            // Update humidity
             const hum = getNum(telemetry.hum);
-            if (hum !== null) {
-                document.getElementById('hum-actual').textContent = `${hum.toFixed(1)}%`;
-            } else {
-                document.getElementById('hum-actual').textContent = '--';
-            }
+            document.getElementById('hum-actual').textContent = hum !== null ? `${hum.toFixed(1)}%` : '--';
             
-            // Get setpoint: optimistic state > state > telemetry
             const humSet = optimisticState.humSet !== null 
                 ? optimisticState.humSet 
                 : getNum(state.humSet !== undefined ? state.humSet : telemetry.humSet, 55.0);
-            document.getElementById('hum-setpoint').textContent = humSet.toFixed(1);
+            document.getElementById('hum-setpoint').textContent = `${humSet.toFixed(1)}%`;
 
-            // Update system status - use telemetry first (most recent), then state
-            const runVal = telemetry.run !== undefined ? telemetry.run : state.run;
-            isRunning = toBool(runVal);
-            const toggleBtn = document.getElementById('system-toggle');
-            toggleBtn.className = isRunning ? 'btn btn-danger' : 'btn btn-success';
-            toggleBtn.textContent = isRunning ? '⏹ Stop' : '▶ Start';
-
-            // Update components - use telemetry first (most recent), then state
-            // Telemetry has the current status of motors/components
+            // Update components
             const cpVal = telemetry.cp !== undefined ? telemetry.cp : state.cp;
             const heaterVal = telemetry.heater !== undefined ? telemetry.heater : state.heater;
             const m1Val = telemetry.m1 !== undefined ? telemetry.m1 : state.m1;
             const m2Val = telemetry.m2 !== undefined ? telemetry.m2 : state.m2;
-            
-            // Debug logging
-            if (window.DEBUG) {
-                console.log('Component values:', {
-                    cp: { raw: cpVal, bool: toBool(cpVal) },
-                    heater: { raw: heaterVal, bool: toBool(heaterVal) },
-                    m1: { raw: m1Val, bool: toBool(m1Val) },
-                    m2: { raw: m2Val, bool: toBool(m2Val) }
-                });
-            }
+            const fanVal = telemetry.fan !== undefined ? telemetry.fan : state.fan;
+            const fanSpeed = optimisticState.fanSpeed !== null
+                ? optimisticState.fanSpeed
+                : parseInt(state.fanSpeed !== undefined ? state.fanSpeed : telemetry.fanSpeed) || 0;
             
             updateComponent('cp', toBool(cpVal));
             updateComponent('heater', toBool(heaterVal));
             updateComponent('m1', toBool(m1Val));
             updateComponent('m2', toBool(m2Val));
-
-            // Update fan speed - optimistic state > state > telemetry
-            const fanSpeed = optimisticState.fanSpeed !== null
-                ? optimisticState.fanSpeed
-                : parseInt(state.fanSpeed !== undefined ? state.fanSpeed : telemetry.fanSpeed) || 0;
-            
-            const fanSpeedBtns = document.querySelectorAll('.fan-speed-btn');
-            fanSpeedBtns.forEach(btn => {
-                const btnSpeed = parseInt(btn.dataset.speed);
-                // Hide OFF button if system is running
-                if (btnSpeed === 0) {
-                    btn.style.display = isRunning ? 'none' : 'block';
-                }
-                btn.classList.toggle('active', btnSpeed === fanSpeed);
-            });
+            updateComponent('fan', toBool(fanVal), fanSpeed);
         }
 
-        function updateComponent(name, isOn) {
-            const statusEl = document.getElementById(`${name}-status`);
-            if (statusEl) {
-                statusEl.textContent = isOn ? 'ON' : 'OFF';
-                statusEl.className = `component-status ${isOn ? 'on' : 'off'}`;
+        function updateComponent(name, isOn, fanSpeed = null) {
+            const indicator = document.getElementById(`${name}-indicator`);
+            const badge = document.getElementById(`${name}-badge`);
+            
+            if (indicator && badge) {
+                indicator.classList.toggle('active', isOn);
+                badge.textContent = isOn ? 'ON' : 'OFF';
+                
+                if (name === 'fan' && fanSpeed !== null) {
+                    const labels = ['OFF', 'LOW', 'MID', 'HIGH'];
+                    document.getElementById('fan-label').textContent = `Fan (${labels[fanSpeed] || 'OFF'})`;
+                }
             }
         }
 
@@ -382,12 +757,12 @@
         }
 
         async function adjustSetpoint(type, delta) {
-            const current = parseFloat(document.getElementById(`${type}-setpoint`).textContent);
+            const currentEl = document.getElementById(`${type}-setpoint`);
+            const current = parseFloat(currentEl.textContent);
             const newValue = type === 'temp' 
                 ? Math.max(15, Math.min(30, current + delta))
                 : Math.max(30, Math.min(80, current + delta));
             
-            // Store in optimistic state
             if (type === 'temp') {
                 optimisticState.tempSet = newValue;
             } else {
@@ -395,8 +770,7 @@
             }
             optimisticState.lastUpdate = Date.now();
             
-            // Update UI immediately
-            document.getElementById(`${type}-setpoint`).textContent = newValue.toFixed(1);
+            currentEl.textContent = type === 'temp' ? `${newValue.toFixed(1)}°C` : `${newValue.toFixed(1)}%`;
             
             try {
                 if (type === 'temp') {
@@ -404,31 +778,20 @@
                 } else {
                     await api.setHumidity(deviceId, newValue);
                 }
-                // Keep checking until we get confirmation (new value matches)
-                // ESP32 publishes every ~5 seconds, so we need to wait longer
+                
                 let attempts = 0;
                 const checkInterval = setInterval(async () => {
                     attempts++;
                     await loadDeviceData();
                     
-                    // Get current value from backend (state or telemetry)
                     const currentValue = type === 'temp' 
                         ? getNum(deviceData.state?.tempSet || deviceData.telemetry?.tempSet)
                         : getNum(deviceData.state?.humSet || deviceData.telemetry?.humSet);
                     
-                    // Check if confirmed (allow small floating point differences)
                     const confirmed = currentValue !== null && Math.abs(currentValue - newValue) < 0.1;
                     
-                    console.log(`[${type}] Attempt ${attempts}: sent=${newValue}, received=${currentValue}, confirmed=${confirmed}`);
-                    
-                    // Wait up to 20 seconds (10 attempts * 2 seconds) for ESP32 to publish
                     if (confirmed || attempts > 10) {
                         clearInterval(checkInterval);
-                        if (confirmed) {
-                            console.log(`[${type}] Confirmed! Value updated to ${currentValue}`);
-                        } else {
-                            console.warn(`[${type}] Timeout: Value may not have updated (still showing ${currentValue})`);
-                        }
                         if (type === 'temp') {
                             optimisticState.tempSet = null;
                         } else {
@@ -438,7 +801,6 @@
                 }, 2000);
             } catch (error) {
                 alert('Error: ' + error.message);
-                // Clear optimistic state on error
                 if (type === 'temp') {
                     optimisticState.tempSet = null;
                 } else {
@@ -448,63 +810,130 @@
             }
         }
 
-        async function setFanSpeed(speed) {
-            // Don't allow turning fan off if system is running
-            if (speed === 0 && isRunning) {
-                alert('Cannot turn fan off while system is running. Stop the system first.');
-                return;
-            }
-            
-            // Store in optimistic state
-            optimisticState.fanSpeed = speed;
-            optimisticState.lastUpdate = Date.now();
-            
-            // Update UI immediately
-            document.querySelectorAll('.fan-speed-btn').forEach(btn => {
-                btn.classList.toggle('active', parseInt(btn.dataset.speed) === speed);
-            });
-            
+        // WebSocket connection for real-time updates
+        let socket = null;
+        let useWebSocket = true;
+        let pollingInterval = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+
+        function initWebSocket() {
             try {
-                await api.setFanSpeed(deviceId, speed);
+                socket = io();
                 
-                // Keep checking until we get confirmation
-                // ESP32 publishes every ~5 seconds, so we need to wait longer
-                let attempts = 0;
-                const checkInterval = setInterval(async () => {
-                    attempts++;
-                    await loadDeviceData();
+                socket.on('connect', () => {
+                    console.log('WebSocket: Connected');
+                    reconnectAttempts = 0;
+                    useWebSocket = true;
                     
-                    // Get current value from backend
-                    const currentSpeed = parseInt(deviceData.state?.fanSpeed || deviceData.telemetry?.fanSpeed) || 0;
-                    
-                    // Check if confirmed
-                    const confirmed = currentSpeed === speed;
-                    
-                    console.log(`[fan] Attempt ${attempts}: sent=${speed}, received=${currentSpeed}, confirmed=${confirmed}`);
-                    
-                    // Wait up to 20 seconds (10 attempts * 2 seconds) for ESP32 to publish
-                    if (confirmed || attempts > 10) {
-                        clearInterval(checkInterval);
-                        if (confirmed) {
-                            console.log(`[fan] Confirmed! Fan speed updated to ${currentSpeed}`);
-                        } else {
-                            console.warn(`[fan] Timeout: Fan speed may not have updated (still showing ${currentSpeed})`);
-                        }
-                        optimisticState.fanSpeed = null;
+                    // Stop polling if WebSocket is connected
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
                     }
-                }, 2000);
+                    
+                    // Subscribe to device updates
+                    socket.emit('subscribe_device', { device_id: deviceId });
+                });
+                
+                socket.on('disconnect', () => {
+                    console.log('WebSocket: Disconnected');
+                    useWebSocket = false;
+                    // Fallback to polling
+                    startPolling();
+                    // Attempt to reconnect
+                    attemptReconnect();
+                });
+                
+                socket.on('device_update', (data) => {
+                    if (data.device_id === deviceId) {
+                        // Update device data from WebSocket
+                        if (data.type === 'telemetry') {
+                            deviceData.telemetry = data.data;
+                            deviceData.status = 'online';
+                        } else if (data.type === 'state') {
+                            deviceData.state = data.data;
+                            deviceData.status = 'online';
+                        } else if (data.type === 'cached') {
+                            // Initial cached data
+                            deviceData = data.data;
+                            deviceData.status = 'online';
+                        }
+                        
+                        // Clear optimistic state if confirmed
+                        if (data.type === 'state' || data.type === 'telemetry') {
+                            const now = Date.now();
+                            if (now - optimisticState.lastUpdate < 30000) {
+                                const tempSet = getNum(data.data.tempSet);
+                                const humSet = getNum(data.data.humSet);
+                                const fanSpeed = parseInt(data.data.fanSpeed) || 0;
+                                
+                                if (optimisticState.tempSet !== null && tempSet !== null) {
+                                    if (Math.abs(tempSet - optimisticState.tempSet) < 0.1) {
+                                        optimisticState.tempSet = null;
+                                    }
+                                }
+                                if (optimisticState.humSet !== null && humSet !== null) {
+                                    if (Math.abs(humSet - optimisticState.humSet) < 0.1) {
+                                        optimisticState.humSet = null;
+                                    }
+                                }
+                                if (optimisticState.fanSpeed !== null && fanSpeed === optimisticState.fanSpeed) {
+                                    optimisticState.fanSpeed = null;
+                                }
+                            }
+                        }
+                        
+                        updateUI();
+                    }
+                });
+                
+                socket.on('connected', (data) => {
+                    console.log('WebSocket: Server confirmed connection', data);
+                });
+                
+                socket.on('subscribed', (data) => {
+                    console.log('WebSocket: Subscribed to device', data);
+                });
+                
             } catch (error) {
-                alert('Error: ' + error.message);
-                // Clear optimistic state on error
-                optimisticState.fanSpeed = null;
-                loadDeviceData();
+                console.error('WebSocket: Failed to initialize', error);
+                useWebSocket = false;
+                startPolling();
             }
         }
 
-        // Load data on page load and refresh every 2 seconds
+        function attemptReconnect() {
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                console.log(`WebSocket: Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
+                setTimeout(() => {
+                    if (!socket || !socket.connected) {
+                        initWebSocket();
+                    }
+                }, 3000 * reconnectAttempts); // Exponential backoff
+            } else {
+                console.log('WebSocket: Max reconnection attempts reached. Using polling fallback.');
+            }
+        }
+
+        function startPolling() {
+            if (!pollingInterval) {
+                console.log('WebSocket: Starting polling fallback');
+                pollingInterval = setInterval(loadDeviceData, 2000);
+            }
+        }
+
+        // Initialize WebSocket on page load
+        if (typeof io !== 'undefined') {
+            initWebSocket();
+        } else {
+            console.warn('WebSocket: Socket.IO not loaded, using polling only');
+            startPolling();
+        }
+        
+        // Initial load
         loadDeviceData();
-        setInterval(loadDeviceData, 2000);
     </script>
 </body>
 </html>
-

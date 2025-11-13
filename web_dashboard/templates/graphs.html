@@ -32,27 +32,24 @@
     </style>
 </head>
 <body>
-    <!-- Top Navigation Bar -->
-    <div class="top-bar">
-        <div style="display: flex; align-items: center;">
-            <span class="brand">ALMED</span>
-            <div class="brand-divider"></div>
-            <button class="icon-button" onclick="window.history.back()">←</button>
-            <div style="margin-left: 16px;">
-                <h1 style="font-size: 22px; font-weight: 600; margin: 0;">Graphs & Analytics</h1>
-                <div style="font-size: 14px; color: var(--on-surface-variant); margin-top: 4px;" id="device-info">
+    {% include 'navbar.html' %}
+    
+    <!-- Device Header -->
+    <div class="container" style="padding-top: 20px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
+            <div>
+                <button class="icon-button" onclick="window.history.back()" style="margin-right: 16px; font-size: 18px;">←</button>
+                <h1 style="font-size: 28px; font-weight: 600; margin: 0; display: inline-block;">Graphs & Analytics</h1>
+                <div style="font-size: 14px; color: var(--on-surface-variant); margin-top: 8px;" id="device-info">
                     AHU {{ device_id }}
                 </div>
             </div>
-        </div>
-        <div class="top-bar-actions">
-            <a href="/ahu/{{ device_id }}" class="btn btn-outline">← Control</a>
-            <button class="icon-button" id="theme-toggle" onclick="toggleTheme()">☀️</button>
+            <a href="/ahu/{{ device_id }}" class="btn btn-outline" style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 18px;">←</span> Control</a>
         </div>
     </div>
 
     <!-- Main Content -->
-    <div class="container">
+    <div class="container page-transition">
         <!-- Time Range Selector -->
         <div class="card" style="margin-bottom: 24px;">
             <div class="time-range-selector">
