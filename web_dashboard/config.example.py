@@ -14,15 +14,13 @@ AWS_IOT_ENDPOINT = 'al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com'  # Your IoT 
 AWS_IOT_TOPIC_PUBLISH = 'esp32/pub'
 AWS_IOT_TOPIC_SUBSCRIBE = 'esp32/sub'
 
-# DynamoDB
-DYNAMODB_TABLE_NAME = 'AHU_ESP2_AWSDB'
-DYNAMODB_REGION = AWS_REGION
-
-# Local MQTT (Raspberry Pi) - Optional fallback
-LOCAL_MQTT_BROKER = '10.42.0.1'
-LOCAL_MQTT_PORT = 1883
-LOCAL_MQTT_USERNAME = 'almed'
-LOCAL_MQTT_PASSWORD = 'Almed1234$'
+# MongoDB Atlas (historical data storage)
+MONGO_URI = os.getenv(
+    'MONGO_URI',
+    'mongodb+srv://almed_user_db:KpMUufXy4D5tNaWK@almed-ahu-cluster.ffdxv72.mongodb.net/?retryWrites=true&w=majority&appName=almed-ahu-cluster'
+)
+MONGO_DB_NAME = os.getenv('MONGO_DB_NAME', 'almed_ahu')
+MONGO_COLLECTION = os.getenv('MONGO_COLLECTION', 'telemetry')
 
 # Flask Configuration
 SECRET_KEY = os.getenv('SECRET_KEY', 'change-this-secret-key-in-production')

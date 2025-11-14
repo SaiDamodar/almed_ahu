@@ -20,6 +20,8 @@ import hashlib
 import base64
 from datetime import datetime as dt
 import ssl
+from pymongo import MongoClient, ASCENDING, DESCENDING
+from pymongo.errors import PyMongoError
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config.SECRET_KEY
@@ -48,16 +50,67 @@ except Exception as e:
 aws_iot_mqtt_client = None
 aws_iot_connected = False
 
-# MQTT Client for local broker (fallback)
-mqtt_client = None
-mqtt_connected = False
-
 # In-memory cache for real-time data
 device_cache = {}
 device_status = {}
+last_persist_time = {}  # Track last Mongo write per device/type
 
 # WebSocket connected clients
 connected_clients = set()
+
+# MongoDB client (historical data)
+mongo_client = None
+mongo_collection = None
+THROTTLE_SECONDS = 10  # Minimum seconds between MongoDB writes per device/type
+
+def init_mongo():
+    """Initialize MongoDB client for historical data storage"""
+    global mongo_client, mongo_collection
+    try:
+        mongo_client = MongoClient(
+            config.MONGO_URI,
+            serverSelectionTimeoutMS=5000,
+            retryWrites=True
+        )
+        mongo_db = mongo_client[config.MONGO_DB_NAME]
+        mongo_collection = mongo_db[config.MONGO_COLLECTION]
+        # Force connection test
+        mongo_client.admin.command('ping')
+        print(f"MongoDB: Connected to {config.MONGO_DB_NAME}.{config.MONGO_COLLECTION}")
+    except Exception as e:
+        mongo_client = None
+        mongo_collection = None
+        print(f"MongoDB: Failed to connect - {e}")
+
+def store_historical_data(device_id, msg_type, payload):
+    """Persist telemetry/state payloads to MongoDB for historical graphs"""
+    if mongo_collection is None:
+        return
+    
+    now = time.time()
+    throttle_key = f"{device_id}:{msg_type}"
+    last_time = last_persist_time.get(throttle_key, 0)
+    if now - last_time < THROTTLE_SECONDS:
+        return
+    last_persist_time[throttle_key] = now
+    
+    document = {
+        'device_id': device_id,
+        'type': msg_type,
+        'created_at': datetime.utcnow(),
+        'ts': payload.get('ts'),
+        'payload': payload
+    }
+    
+    # Flatten commonly queried fields for easier filtering
+    for field in ['temp', 'hum', 'm1', 'm2', 'run', 'cp', 'heater', 'fan', 'fanSpeed', 'tempSet', 'humSet']:
+        if field in payload:
+            document[field] = payload.get(field)
+    
+    try:
+        mongo_collection.insert_one(document)
+    except PyMongoError as exc:
+        print(f"MongoDB: Failed to store telemetry for {device_id} - {exc}")
 
 def sign_url(access_key, secret_key, region, endpoint, service='iotdevicegateway'):
     """Generate SigV4 signed URL for AWS IoT Core WebSocket connection"""
@@ -197,6 +250,9 @@ def on_aws_iot_message(client, userdata, msg):
             device_cache[device_id]['state'] = payload
             device_cache[device_id]['last_update'] = time.time()
         
+        # Persist for historical analysis
+        store_historical_data(device_id, msg_type, payload)
+        
         # Broadcast to all connected WebSocket clients
         socketio.emit('device_update', {
             'device_id': device_id,
@@ -220,65 +276,11 @@ def on_aws_iot_disconnect(client, userdata, rc):
     time.sleep(5)
     init_aws_iot_mqtt()
 
-def init_mqtt():
-    """Initialize MQTT client for local broker (optional fallback)"""
-    global mqtt_client, mqtt_connected
-    
-    try:
-        mqtt_client = mqtt.Client()
-        mqtt_client.username_pw_set(config.LOCAL_MQTT_USERNAME, config.LOCAL_MQTT_PASSWORD)
-        mqtt_client.on_connect = on_mqtt_connect
-        mqtt_client.on_message = on_mqtt_message
-        
-        mqtt_client.connect(config.LOCAL_MQTT_BROKER, config.LOCAL_MQTT_PORT, 60)
-        mqtt_client.loop_start()
-        print(f"MQTT: Connected to local broker at {config.LOCAL_MQTT_BROKER}")
-    except Exception as e:
-        print(f"MQTT: Failed to connect to local broker: {e}")
-        print("MQTT: Will use AWS IoT Core only")
-
-def on_mqtt_connect(client, userdata, flags, rc):
-    """MQTT connection callback"""
-    global mqtt_connected
-    if rc == 0:
-        mqtt_connected = True
-        client.subscribe('almed/ahu/#')
-        print("MQTT: Subscribed to almed/ahu/#")
-    else:
-        mqtt_connected = False
-        print(f"MQTT: Connection failed with code {rc}")
-
-def on_mqtt_message(client, userdata, msg):
-    """MQTT message callback"""
-    try:
-        topic = msg.topic
-        payload = json.loads(msg.payload.decode())
-        
-        # Parse topic: almed/ahu/site/room/ahu-id/type
-        parts = topic.split('/')
-        if len(parts) >= 5:
-            device_id = parts[4]
-            
-            if topic.endswith('/telemetry'):
-                device_cache[device_id] = {
-                    'telemetry': payload,
-                    'last_update': time.time()
-                }
-            elif topic.endswith('/state'):
-                if device_id not in device_cache:
-                    device_cache[device_id] = {}
-                device_cache[device_id]['state'] = payload
-                device_cache[device_id]['last_update'] = time.time()
-            elif topic.endswith('/status'):
-                device_status[device_id] = payload if isinstance(payload, str) else payload.get('status', 'offline')
-    except Exception as e:
-        print(f"MQTT: Error processing message: {e}")
-
 # Initialize AWS IoT MQTT on startup
 init_aws_iot_mqtt()
 
-# Initialize local MQTT (fallback)
-init_mqtt()
+# Initialize MongoDB for historical storage
+init_mongo()
 
 # ==================== Authentication Decorator ====================
 
@@ -506,34 +508,55 @@ def get_device_status(device_id):
 
 @app.route('/api/device/<device_id>/telemetry', methods=['GET'])
 def get_telemetry(device_id):
-    """Get telemetry data for graphs (from cache only - historical data will be from S3 later)"""
+    """Get telemetry data for graphs (historical data from MongoDB Atlas)"""
     try:
-        # For now, return current cached data only
-        # Historical data will be retrieved from S3 in the future
-        cache_data = device_cache.get(device_id, {})
-        telemetry = cache_data.get('telemetry') or {}
+        if mongo_collection is None:
+            return jsonify({
+                'success': False,
+                'error': 'MongoDB connection not available'
+            }), 500
         
-        # Return current data point only (historical data will come from S3)
+        hours = int(request.args.get('hours', 24))
+        limit = int(request.args.get('limit', 1000))
+        limit = max(1, min(limit, 5000))
+        
+        query = {
+            'device_id': device_id,
+            'type': 'telemetry'
+        }
+        
+        if hours > 0:
+            since = datetime.utcnow() - timedelta(hours=hours)
+            query['created_at'] = {'$gte': since}
+        
+        cursor = mongo_collection.find(query).sort('created_at', ASCENDING).limit(limit)
+        
         data = []
-        if telemetry:
-            current_time = int(time.time() * 1000)
+        for doc in cursor:
+            payload = doc.get('payload', {})
+            created_at = doc.get('created_at') or datetime.utcnow()
+            timestamp_ms = int(created_at.timestamp() * 1000)
+            
             data.append({
-                'timestamp': current_time,
-                'temp': telemetry.get('temp'),
-                'hum': telemetry.get('hum'),
-                'm1': telemetry.get('m1', False),
-                'm2': telemetry.get('m2', False),
-                'run': telemetry.get('run', False),
-                'cp': telemetry.get('cp', False),
-                'heater': telemetry.get('heater', False),
-                'fan': telemetry.get('fan', False),
-                'fanSpeed': telemetry.get('fanSpeed', 0)
+                'timestamp': timestamp_ms,
+                'temp': doc.get('temp', payload.get('temp')),
+                'hum': doc.get('hum', payload.get('hum')),
+                'm1': doc.get('m1', payload.get('m1', False)),
+                'm2': doc.get('m2', payload.get('m2', False)),
+                'run': doc.get('run', payload.get('run', False)),
+                'cp': doc.get('cp', payload.get('cp', False)),
+                'heater': doc.get('heater', payload.get('heater', False)),
+                'fan': doc.get('fan', payload.get('fan', False)),
+                'fanSpeed': doc.get('fanSpeed', payload.get('fanSpeed', 0)),
+                'tempSet': doc.get('tempSet', payload.get('tempSet')),
+                'humSet': doc.get('humSet', payload.get('humSet'))
             })
         
         return jsonify({
             'success': True,
             'data': data,
-            'note': 'Historical data will be available from S3 in the future'
+            'count': len(data),
+            'source': 'MongoDB Atlas'
         })
     except Exception as e:
         return jsonify({
@@ -549,7 +572,7 @@ def send_command(device_id):
         command = data.get('command', {})
         payload = json.dumps(command)
         
-        # Try AWS IoT Core first
+        # Publish via AWS IoT Core
         if iot_data:
             try:
                 topic = config.AWS_IOT_TOPIC_SUBSCRIBE
@@ -563,22 +586,15 @@ def send_command(device_id):
                     'message': 'Command sent via AWS IoT Core'
                 })
             except Exception as e:
-                print(f"AWS IoT publish failed: {e}, trying local MQTT")
-        
-        # Fallback to local MQTT
-        if mqtt_client and mqtt_connected:
-            # Construct topic: almed/ahu/site/room/device-id/cmd
-            # For now, use a default topic structure
-            topic = f'almed/ahu/hospitalA/icu1/{device_id}/cmd'
-            mqtt_client.publish(topic, payload)
-            return jsonify({
-                'success': True,
-                'message': 'Command sent via local MQTT'
-            })
+                print(f"AWS IoT publish failed: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to send command via AWS IoT Core'
+                }), 500
         
         return jsonify({
             'success': False,
-            'error': 'No MQTT connection available'
+            'error': 'AWS IoT Core client not available'
         }), 500
         
     except Exception as e:
@@ -667,6 +683,7 @@ if __name__ == '__main__':
     print(f"AWS Region: {config.AWS_REGION}")
     print(f"AWS IoT Endpoint: {config.AWS_IOT_ENDPOINT}")
     print(f"MQTT Topic: {config.AWS_IOT_TOPIC_PUBLISH}")
+    print(f"MongoDB Collection: {config.MONGO_DB_NAME}.{config.MONGO_COLLECTION}")
     print(f"WebSocket enabled: SocketIO")
     print("=" * 50)
     
