@@ -3,6 +3,9 @@ ALMED AHU Web Dashboard - Flask Backend
 Handles AWS IoT Core and MQTT communication (Real-time only, no DynamoDB)
 """
 
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -22,15 +25,24 @@ from datetime import datetime as dt
 import ssl
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import PyMongoError
+from zoneinfo import ZoneInfo
+from github import Github
+from github.GithubException import GithubException
+import requests
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config.SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expires after 24 hours
 CORS(app, origins=config.CORS_ORIGINS)
 
-# Initialize SocketIO
-# Auto-detect async mode (will use threading if eventlet/gevent not available)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Initialize SocketIO with explicit async mode and heartbeat settings
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    ping_interval=25,
+    ping_timeout=60
+)
 
 # AWS IoT Data Plane client (for publishing)
 iot_data = None
@@ -42,9 +54,16 @@ try:
         aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
         endpoint_url=f'https://{config.AWS_IOT_ENDPOINT}'
     )
+    print(f"✓ AWS IoT Data client initialized")
+    print(f"  Endpoint: {config.AWS_IOT_ENDPOINT}")
+    print(f"  Region: {config.AWS_REGION}")
+    print(f"  Subscribe topic: {config.AWS_IOT_TOPIC_SUBSCRIBE}")
+    print(f"  Publish topic: {config.AWS_IOT_TOPIC_PUBLISH}")
 except Exception as e:
-    print(f"Warning: Could not initialize IoT Data client: {e}")
+    print(f"❌ ERROR: Could not initialize IoT Data client: {e}")
     print("Publishing to AWS IoT Core will be disabled")
+    import traceback
+    traceback.print_exc()
 
 # MQTT Client for AWS IoT Core
 aws_iot_mqtt_client = None
@@ -62,6 +81,50 @@ connected_clients = set()
 mongo_client = None
 mongo_collection = None
 THROTTLE_SECONDS = 10  # Minimum seconds between MongoDB writes per device/type
+IST_ZONE = ZoneInfo('Asia/Kolkata')
+
+def parse_timestamp_seconds(value):
+    """Convert various timestamp formats to epoch seconds."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, str):
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S.%f'):
+            try:
+                parsed = datetime.strptime(value, fmt)
+                parsed = parsed.replace(tzinfo=IST_ZONE)
+                return parsed.timestamp()
+            except ValueError:
+                continue
+    try:
+        value = float(value)
+        if value > 1e12:  # assume milliseconds
+            return value / 1000.0
+        return value
+    except (TypeError, ValueError):
+        return None
+
+def get_last_telemetry_doc(device_id):
+    """Fetch the most recent telemetry document for a device."""
+    if mongo_collection is None:
+        return None
+    cursor = (
+        mongo_collection
+        .find({'device_id': device_id, 'type': 'telemetry'})
+        .sort('created_at', DESCENDING)
+        .limit(1)
+    )
+    doc = next(cursor, None)
+    if doc is None:
+        legacy_cursor = (
+            mongo_collection
+            .find({'device_id': device_id, 'type': 'telemetry'})
+            .sort('_id', DESCENDING)
+            .limit(1)
+        )
+        doc = next(legacy_cursor, None)
+    return doc
 
 def init_mongo():
     """Initialize MongoDB client for historical data storage"""
@@ -94,10 +157,14 @@ def store_historical_data(device_id, msg_type, payload):
         return
     last_persist_time[throttle_key] = now
     
+    created_at_utc = datetime.utcnow()
+    created_at_ist = datetime.now(IST_ZONE)
+    created_at_str = created_at_ist.strftime('%Y-%m-%d %H:%M:%S')
     document = {
         'device_id': device_id,
         'type': msg_type,
-        'created_at': datetime.utcnow(),
+        'created_at': created_at_utc,
+        'created_at_ist': created_at_str,
         'ts': payload.get('ts'),
         'payload': payload
     }
@@ -403,6 +470,52 @@ def get_devices():
     try:
         # Group by hospital/site from cache only
         hospitals = {}
+        seen_devices = set()
+
+        def format_device_name(device_id):
+            cleaned = (
+                device_id.replace('ahu-', '')
+                .replace('AHU_', '')
+                .replace('ESP2', '')
+                .strip()
+                .upper()
+            )
+            return f'AHU {cleaned or "ESP2"}'
+
+        def add_device_record(device_id, telemetry=None, state=None, last_seen=None):
+            nonlocal hospitals
+            telemetry = telemetry or {}
+            state = state or {}
+            source = telemetry if telemetry else state
+
+            site = 'hospitalA'
+            room = 'icu1'
+
+            # Map known device IDs
+            lower_id = device_id.lower()
+            if 'ahu_esp2' in lower_id or 'esp2' in lower_id:
+                site = 'hospitalA'
+                room = 'icu1'
+            elif 'ahu-01' in lower_id:
+                site = 'hospitalA'
+                room = 'icu1'
+
+            site = source.get('site', state.get('site', site))
+            room = source.get('room', state.get('room', room))
+
+            if site not in hospitals:
+                hospitals[site] = {}
+            if room not in hospitals[site]:
+                hospitals[site][room] = []
+
+            hospitals[site][room].append({
+                'id': device_id,
+                'name': format_device_name(device_id),
+                'site': site,
+                'room': room,
+                'last_seen': last_seen
+            })
+            seen_devices.add(device_id)
         
         for device_id, data in device_cache.items():
             # Try to extract site/room from cache or use defaults
@@ -431,17 +544,23 @@ def get_devices():
             elif 'room' in state:
                 room = state['room']
             
-            if site not in hospitals:
-                hospitals[site] = {}
-            if room not in hospitals[site]:
-                hospitals[site][room] = []
-            
-            hospitals[site][room].append({
-                'id': device_id,
-                'name': f'AHU {device_id.replace("ahu-", "").replace("AHU_", "").replace("ESP2", "").strip().upper() or "ESP2"}',
-                'site': site,
-                'room': room
-            })
+            add_device_record(device_id, telemetry, state, data.get('last_update'))
+
+        # Include offline devices persisted in MongoDB
+        if mongo_collection is not None:
+            try:
+                device_ids = mongo_collection.distinct('device_id', {'type': 'telemetry'})
+                for device_id in device_ids:
+                    if device_id in seen_devices:
+                        continue
+                    doc = get_last_telemetry_doc(device_id)
+                    if not doc:
+                        continue
+                    payload = doc.get('payload', {})
+                    last_seen = parse_timestamp_seconds(doc.get('created_at')) or parse_timestamp_seconds(payload.get('ts'))
+                    add_device_record(device_id, payload, payload, last_seen)
+            except Exception as mongo_err:
+                print(f"MongoDB fallback failed in get_devices: {mongo_err}")
         
         return jsonify({
             'success': True,
@@ -461,6 +580,22 @@ def get_device_status(device_id):
     try:
         # Get data from cache only
         cache_data = device_cache.get(device_id, {})
+        fallback_doc = None
+        
+        # If cache empty and Mongo available, use last stored telemetry
+        if (not cache_data or (not cache_data.get('telemetry') and not cache_data.get('state'))) and (mongo_collection is not None):
+            fallback_doc = get_last_telemetry_doc(device_id)
+            if fallback_doc:
+                payload = fallback_doc.get('payload', {})
+                last_update_ts = parse_timestamp_seconds(fallback_doc.get('created_at')) or parse_timestamp_seconds(payload.get('ts'))
+                if last_update_ts is None:
+                    last_update_ts = time.time()
+                cache_data = {
+                    'telemetry': payload,
+                    'state': payload,
+                    'last_update': last_update_ts
+                }
+                device_cache[device_id] = cache_data
         
         # Determine status: online if we have recent data (within last 5 minutes)
         status = 'offline'
@@ -530,12 +665,34 @@ def get_telemetry(device_id):
             query['created_at'] = {'$gte': since}
         
         cursor = mongo_collection.find(query).sort('created_at', ASCENDING).limit(limit)
+        documents = list(cursor)
+
+        # Fallback for legacy records that don't have comparable datetime fields
+        if not documents:
+            legacy_cursor = (
+                mongo_collection
+                .find({'device_id': device_id, 'type': 'telemetry'})
+                .sort('_id', DESCENDING)
+                .limit(limit)
+            )
+            legacy_docs = list(legacy_cursor)
+            legacy_docs.reverse()  # chronological order
+            documents = legacy_docs
         
         data = []
-        for doc in cursor:
+        for doc in documents:
             payload = doc.get('payload', {})
-            created_at = doc.get('created_at') or datetime.utcnow()
-            timestamp_ms = int(created_at.timestamp() * 1000)
+            created_at = doc.get('created_at')
+            timestamp_secs = parse_timestamp_seconds(created_at)
+
+            if timestamp_secs is None:
+                ts_value = doc.get('ts') or payload.get('ts')
+                timestamp_secs = parse_timestamp_seconds(ts_value)
+
+            if timestamp_secs is None:
+                timestamp_secs = datetime.utcnow().timestamp()
+
+            timestamp_ms = int(timestamp_secs * 1000)
             
             data.append({
                 'timestamp': timestamp_ms,
@@ -643,6 +800,331 @@ def verify_admin():
             'error': 'Invalid passcode'
         }), 401
 
+@app.route('/api/ota/push-to-github', methods=['POST'])
+@login_required
+def push_firmware_to_github():
+    """Push ESP32 firmware code to GitHub repository AND create release with .bin file"""
+    try:
+        data = request.json
+        firmware_code = data.get('code', '')
+        firmware_bin_base64 = data.get('bin_file', '')  # Base64-encoded .bin file
+        commit_message = data.get('message', 'OTA firmware update')
+        version = data.get('version', '')  # Optional version tag (e.g., "v1.0.1")
+
+        if not firmware_code:
+            return jsonify({
+                'success': False,
+                'error': 'Firmware code is required'
+            }), 400
+
+        # Check if code looks like it's already base64 encoded (common mistake)
+        if len(firmware_code) > 100 and not any(keyword in firmware_code for keyword in ['#include', 'void setup', 'void loop', 'Serial.', 'WiFi.', '//', '/*']):
+            try:
+                decoded = base64.b64decode(firmware_code).decode('utf-8')
+                if any(keyword in decoded for keyword in ['#include', 'void setup', 'void loop']):
+                    firmware_code = decoded
+            except:
+                pass
+
+        # Validate it looks like Arduino code
+        if not any(keyword in firmware_code for keyword in ['#include', 'void setup', 'void loop', 'setup()', 'loop()']):
+            return jsonify({
+                'success': False,
+                'error': 'Code does not appear to be valid Arduino/ESP32 code.'
+            }), 400
+
+        # Validate GitHub configuration
+        if not config.GITHUB_TOKEN or not config.GITHUB_REPO_OWNER or not config.GITHUB_REPO_NAME:
+            return jsonify({
+                'success': False,
+                'error': 'GitHub configuration is missing'
+            }), 500
+
+        headers = {
+            'Authorization': f'token {config.GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+        }
+
+        # Step 1: Push .ino source code to repo
+        api_url = f"https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/contents/{config.GITHUB_FIRMWARE_PATH}"
+        
+        # Check if file exists and get SHA
+        response = requests.get(api_url, headers=headers, params={'ref': config.GITHUB_REPO_BRANCH})
+        sha = None
+        if response.status_code == 200:
+            sha = response.json().get('sha')
+        elif response.status_code != 404:
+            return jsonify({
+                'success': False,
+                'error': f'GitHub API error: {response.status_code}'
+            }), 500
+
+        # Encode firmware code to base64
+        firmware_encoded = base64.b64encode(firmware_code.encode('utf-8')).decode('utf-8')
+
+        payload = {
+            'message': commit_message,
+            'content': firmware_encoded,
+            'branch': config.GITHUB_REPO_BRANCH
+        }
+        if sha:
+            payload['sha'] = sha
+
+        response = requests.put(api_url, headers=headers, json=payload)
+        if response.status_code not in [200, 201]:
+            error_msg = response.json().get('message', response.text) if response.text else 'Unknown error'
+            return jsonify({
+                'success': False,
+                'error': f'Failed to push source code ({response.status_code}): {error_msg}'
+            }), 500
+
+        result = response.json()
+        commit_sha = result.get('commit', {}).get('sha', 'unknown')
+        commit_url = result.get('commit', {}).get('html_url', '')
+
+        # Step 2: Create GitHub Release with .bin file (if provided)
+        release_tag = version
+        release_created = False
+        release_url = ''
+        
+        if firmware_bin_base64:
+            # Auto-generate version if not provided (format: v1.0.0, v1.0.1, etc.)
+            if not release_tag:
+                # Get latest release to auto-increment version
+                releases_url = f"https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/releases"
+                releases_response = requests.get(releases_url, headers=headers, params={'per_page': 1})
+                
+                if releases_response.status_code == 200:
+                    releases = releases_response.json()
+                    if releases and len(releases) > 0:
+                        latest_tag = releases[0].get('tag_name', 'v0.0.0')
+                        # Simple version increment: v1.0.0 -> v1.0.1
+                        try:
+                            parts = latest_tag.lstrip('v').split('.')
+                            if len(parts) == 3:
+                                patch = int(parts[2]) + 1
+                                release_tag = f"v{parts[0]}.{parts[1]}.{patch}"
+                            else:
+                                release_tag = f"v1.0.{int(time.time()) % 10000}"  # Fallback: use timestamp
+                        except:
+                            release_tag = f"v1.0.{int(time.time()) % 10000}"
+                    else:
+                        release_tag = "v1.0.0"  # First release
+                else:
+                    release_tag = f"v1.0.{int(time.time()) % 10000}"  # Fallback
+            
+            # Create release
+            release_payload = {
+                'tag_name': release_tag,
+                'name': release_tag,
+                'body': f'OTA Firmware Update\n\nCommit: {commit_sha[:7]}\nMessage: {commit_message}',
+                'draft': False,
+                'prerelease': False
+            }
+            
+            create_release_url = f"https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/releases"
+            release_response = requests.post(create_release_url, headers=headers, json=release_payload)
+            
+            if release_response.status_code == 201:
+                release_data = release_response.json()
+                release_id = release_data.get('id')
+                upload_url = release_data.get('upload_url', '').split('{')[0]  # Remove {?name,label} suffix
+                release_url = release_data.get('html_url', '')
+                
+                # Upload .bin file as release asset
+                firmware_bin_data = base64.b64decode(firmware_bin_base64)
+                asset_name = config.GITHUB_FIRMWARE_ASSET_NAME if hasattr(config, 'GITHUB_FIRMWARE_ASSET_NAME') else 'esp32_main.ino.bin'
+                
+                upload_headers = {
+                    'Authorization': f'token {config.GITHUB_TOKEN}',
+                    'Content-Type': 'application/octet-stream'
+                }
+                
+                upload_response = requests.post(
+                    f"{upload_url}?name={asset_name}",
+                    headers=upload_headers,
+                    data=firmware_bin_data
+                )
+                
+                if upload_response.status_code == 201:
+                    release_created = True
+                    print(f"[OTA] ✓ Release created: {release_tag} with asset: {asset_name}")
+                else:
+                    print(f"[OTA] ⚠️ Release created but asset upload failed: {upload_response.status_code}")
+            else:
+                print(f"[OTA] ⚠️ Failed to create release: {release_response.status_code}")
+                print(f"[OTA] Response: {release_response.text}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Firmware pushed to GitHub successfully',
+            'commit_sha': commit_sha,
+            'commit_url': commit_url,
+            'release_created': release_created,
+            'release_tag': release_tag if release_created else None,
+            'release_url': release_url if release_created else None
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ota/test-mqtt', methods=['POST'])
+@login_required
+def test_mqtt():
+    """Test MQTT connection by sending a simple message"""
+    try:
+        if not iot_data:
+            return jsonify({
+                'success': False,
+                'error': 'AWS IoT Data client not available'
+            }), 500
+        
+        test_command = {
+            'type': 'test',
+            'message': 'MQTT test message',
+            'timestamp': int(time.time())
+        }
+        
+        topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+        payload = json.dumps(test_command)
+        
+        print(f"\n[TEST] Sending test MQTT message to {topic}")
+        response = iot_data.publish(
+            topic=topic,
+            qos=1,
+            payload=payload
+        )
+        
+        http_status = response.get('ResponseMetadata', {}).get('HTTPStatusCode', 'Unknown')
+        
+        return jsonify({
+            'success': http_status == 200,
+            'message': 'Test MQTT message sent',
+            'topic': topic,
+            'http_status': http_status,
+            'response': str(response)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ota/trigger-update', methods=['POST'])
+@login_required
+def trigger_ota_update():
+    """Send MQTT command to ESP32 to trigger OTA update from GitHub"""
+    try:
+        data = request.json
+        device_id = data.get('device_id', '')
+        version = data.get('version', 'latest')
+        commit_sha = data.get('commit_sha', '')
+        
+        if not device_id:
+            return jsonify({
+                'success': False,
+                'error': 'Device ID is required'
+            }), 400
+        
+        # Validate GitHub configuration
+        if not config.GITHUB_TOKEN or not config.GITHUB_REPO_OWNER or not config.GITHUB_REPO_NAME:
+            return jsonify({
+                'success': False,
+                'error': 'GitHub configuration is missing'
+            }), 500
+        
+        # Build GitHub raw file URL for firmware download
+        # Format: https://raw.githubusercontent.com/owner/repo/branch/path
+        firmware_url = f"https://raw.githubusercontent.com/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/{config.GITHUB_REPO_BRANCH}/{config.GITHUB_FIRMWARE_PATH}"
+        
+        # Build GitHub API URL for getting file (with auth token)
+        # ESP32 will use this to download firmware
+        github_api_url = f"https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/contents/{config.GITHUB_FIRMWARE_PATH}"
+        
+        # Create OTA command - MINIMAL (ESP32 has hardcoded GitHub values)
+        # Only send essential info, ESP32 will use hardcoded repo details
+        ota_command = {
+            'type': 'ota_update',
+            'version': version,
+            'commit_sha': commit_sha if commit_sha else 'latest'
+        }
+        # Note: ESP32 will use hardcoded GITHUB_REPO_OWNER, GITHUB_REPO_NAME, etc.
+        # Only send token if needed (ESP32 also has it hardcoded)
+        
+        # Print the exact OTA command for debugging
+        ota_json = json.dumps(ota_command, indent=2)
+        print(f"\n[OTA] OTA Command JSON:")
+        print(ota_json)
+        print(f"[OTA] Command size: {len(ota_json)} bytes\n")
+        
+        # Send via AWS IoT Core
+        if iot_data:
+            try:
+                topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+                payload = json.dumps(ota_command)
+                
+                print(f"\n{'='*60}")
+                print(f"[OTA] Publishing MQTT message to AWS IoT Core")
+                print(f"[OTA] Topic: {topic}")
+                print(f"[OTA] Payload length: {len(payload)} bytes")
+                print(f"[OTA] Payload preview: {payload[:300]}...")
+                print(f"{'='*60}\n")
+                
+                # Publish to AWS IoT Core
+                response = iot_data.publish(
+                    topic=topic,
+                    qos=1,
+                    payload=payload
+                )
+                
+                print(f"[OTA] Publish response: {response}")
+                print(f"[OTA] Response metadata: {response.get('ResponseMetadata', {})}")
+                
+                # Verify the message was sent
+                if 'ResponseMetadata' in response:
+                    http_status = response['ResponseMetadata'].get('HTTPStatusCode', 'Unknown')
+                    print(f"[OTA] HTTP Status Code: {http_status}")
+                    if http_status == 200:
+                        print(f"[OTA] ✓ Message published successfully to {topic}")
+                    else:
+                        print(f"[OTA] ⚠️ Unexpected HTTP status: {http_status}")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'OTA update command sent to device',
+                    'device_id': device_id,
+                    'firmware_url': firmware_url,
+                    'topic': topic,
+                    'payload_length': len(payload),
+                    'http_status': response.get('ResponseMetadata', {}).get('HTTPStatusCode', 'Unknown')
+                })
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[OTA] AWS IoT publish failed: {error_msg}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to send OTA command via AWS IoT Core: {error_msg}'
+                }), 500
+        
+        return jsonify({
+            'success': False,
+            'error': 'AWS IoT Core client not available. Check AWS credentials and IoT endpoint configuration.'
+        }), 500
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 # ==================== WebSocket Event Handlers ====================
 
@@ -692,6 +1174,7 @@ if __name__ == '__main__':
         host=config.HOST,
         port=config.PORT,
         debug=config.DEBUG,
+        use_reloader=False,
         allow_unsafe_werkzeug=True
     )
 

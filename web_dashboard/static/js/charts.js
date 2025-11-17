@@ -424,6 +424,185 @@ function createTemperatureAreaChart(canvasId, data) {
   return chartInstances[canvasId];
 }
 
+function createHumidityAreaChart(canvasId, data) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return null;
+
+  if (chartInstances[canvasId]) {
+    chartInstances[canvasId].destroy();
+  }
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const tealColor = isDark ? '#60A5FA' : '#3B82F6';
+  const lightTeal = isDark ? 'rgba(96, 165, 250, 0.35)' : 'rgba(59, 130, 246, 0.35)';
+
+  const labels = data.map(d => {
+    const date = d.timestamp ? new Date(d.timestamp) : new Date();
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  });
+  const humidityValues = data.map(d => d.hum || d.humidity).filter(v => v != null);
+
+  chartInstances[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Humidity (%)',
+        data: humidityValues,
+        borderColor: tealColor,
+        backgroundColor: lightTeal,
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: isDark ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          titleColor: isDark ? '#F1F5F9' : '#1F2937',
+          bodyColor: isDark ? '#F1F5F9' : '#1F2937',
+          borderColor: tealColor,
+          borderWidth: 1,
+          padding: 12,
+          displayColors: false
+        }
+      },
+      scales: {
+        x: {
+          grid: {
+            color: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+          },
+          ticks: {
+            color: isDark ? '#94A3B8' : '#6B7280'
+          }
+        },
+        y: {
+          beginAtZero: true,
+          max: 100,
+          grid: {
+            color: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+          },
+          ticks: {
+            color: isDark ? '#94A3B8' : '#6B7280',
+            callback: function(value) {
+              return value + '%';
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return chartInstances[canvasId];
+}
+
+function createComponentStatusLineChart(canvasId, data) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return null;
+
+  if (chartInstances[canvasId]) {
+    chartInstances[canvasId].destroy();
+  }
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const labels = data.map(d => {
+    const date = d.timestamp ? new Date(d.timestamp) : new Date();
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  });
+
+  const cpSeries = data.map(d => (d.cp === true || d.cp === 1 || d.cp === 'true') ? 1 : 0);
+  const heaterSeries = data.map(d => (d.heater === true || d.heater === 1 || d.heater === 'true') ? 1 : 0);
+
+  chartInstances[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Compressor',
+          data: cpSeries,
+          borderColor: '#38BDF8',
+          backgroundColor: 'rgba(56, 189, 248, 0.15)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 4
+        },
+        {
+          label: 'Heater',
+          data: heaterSeries,
+          borderColor: '#F97316',
+          backgroundColor: 'rgba(249, 115, 22, 0.15)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 4
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: {
+            color: isDark ? '#F1F5F9' : '#1F2937',
+            usePointStyle: true
+          }
+        },
+        tooltip: {
+          backgroundColor: isDark ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          titleColor: isDark ? '#F1F5F9' : '#1F2937',
+          bodyColor: isDark ? '#F1F5F9' : '#1F2937',
+          borderColor: 'rgba(15, 23, 42, 0.2)',
+          borderWidth: 1,
+          padding: 12,
+          callbacks: {
+            label: function(item) {
+              return `${item.dataset.label}: ${item.parsed.y ? 'ON' : 'OFF'}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: {
+            color: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+          },
+          ticks: {
+            color: isDark ? '#94A3B8' : '#6B7280'
+          }
+        },
+        y: {
+          beginAtZero: true,
+          max: 1,
+          grid: {
+            color: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+          },
+          ticks: {
+            color: isDark ? '#94A3B8' : '#6B7280',
+            stepSize: 1,
+            callback: function(value) {
+              return value === 1 ? 'ON' : 'OFF';
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return chartInstances[canvasId];
+}
+
 // Export
 window.charts = {
   createTemperatureChart,
@@ -431,6 +610,8 @@ window.charts = {
   createMotorCyclesChart,
   createSystemStatusChart,
   createTemperatureAreaChart,
+  createHumidityAreaChart,
+  createComponentStatusLineChart,
   destroyAllCharts
 };
 
