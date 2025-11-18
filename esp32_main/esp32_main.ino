@@ -9,11 +9,24 @@
 #include <esp_task_wdt.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
+#include <HTTPClient.h>
+#include <Update.h>
 
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
 #define THINGNAME "AHU_ESP2" // Unique identifier for your device, change this
+
+// ============ GitHub OTA Configuration (Hardcoded) ============
+#define GITHUB_REPO_OWNER "ESPUpdaterzaid"
+#define GITHUB_REPO_NAME "almed-esp32-firmware"
+#define GITHUB_REPO_BRANCH "main"
+#define GITHUB_FIRMWARE_PATH "firmware/esp32_main.ino"
+// For GitHub Releases, specify the asset name (compiled .bin file)
+// If using direct file download, this is the path to the .ino file
+#define GITHUB_FIRMWARE_ASSET_NAME "esp32_main.ino.bin"  // Name of the .bin file in GitHub Releases
+// GitHub token - set this if you want to use private repos
+#define GITHUB_TOKEN "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"  // Your GitHub token for private repo access
 
 const char WIFI_SSID[] = "ez"; // Your WiFi SSID
 const char WIFI_PASSWORD[] = "12345678"; // Your WiFi password
@@ -151,6 +164,7 @@ bool runState = false, m1Active = false, m2Active = false, shuttingDown = false;
 unsigned long m1StopAt = 0, m2StopAt = 0, m2NextAt = 0;
 bool m2ScheduledAfterM1 = false;
 unsigned long m2StartAt = 0;
+unsigned long m2LastRunTime = 0; // Track when Motor 2 last ran (for accurate timing across resets)
 bool shutdownM2Pending = false;
 bool shutdownStarted = false;
 
@@ -221,17 +235,67 @@ bool pendingRecoveryStart = false;
 
 // ---------- State Persistence ----------
 void saveSystemState(){
+  unsigned long now = millis();
   prefs.putBool("runState", runState);
   prefs.putBool("cpOn", cpOn);
   prefs.putBool("heatOn", heatOn);
   prefs.putBool("shuttingDown", shuttingDown);
   prefs.putInt("fanSpeed", (int)fanSpeed);
-  prefs.putULong("saveTime", millis());
+  prefs.putULong("saveTime", now);
+  
+  // Save motor timing state (time remaining until next M2 run)
+  // CRITICAL: Save when Motor 2 last ran (relative to saveTime) for accurate timing across resets
+  if (runState && !shuttingDown) {
+    if (m2ScheduledAfterM1 && m2StartAt > now) {
+      // M2 is scheduled after M1, save time remaining until m2StartAt
+      unsigned long remaining = m2StartAt - now;
+      prefs.putULong("m2StartAtRemaining", remaining);
+      prefs.putBool("m2ScheduledAfterM1", true);
+      prefs.putULong("m2NextAtRemaining", 0); // Not set yet
+      // Save last run time if available
+      if (m2LastRunTime > 0 && m2LastRunTime <= now) {
+        prefs.putULong("m2LastRunTime", now - m2LastRunTime); // Elapsed since last run
+      } else {
+        prefs.putULong("m2LastRunTime", 0);
+      }
+    } else if (m2NextAt > now) {
+      // M2 has a scheduled next run time
+      unsigned long remaining = m2NextAt - now;
+      prefs.putULong("m2NextAtRemaining", remaining);
+      prefs.putBool("m2ScheduledAfterM1", false);
+      prefs.putULong("m2StartAtRemaining", 0);
+      // CRITICAL: Save when Motor 2 last ran (relative to saveTime)
+      // This allows us to calculate elapsed time even across reboots
+      if (m2LastRunTime > 0 && m2LastRunTime <= now) {
+        prefs.putULong("m2LastRunTime", now - m2LastRunTime); // Elapsed since last run
+      } else {
+        prefs.putULong("m2LastRunTime", 0);
+      }
+    } else {
+      // M2 can run immediately (time has passed) - save that it's due
+      prefs.putULong("m2NextAtRemaining", 0);
+      prefs.putULong("m2StartAtRemaining", 0);
+      prefs.putBool("m2ScheduledAfterM1", false);
+      // Save last run time if available
+      if (m2LastRunTime > 0 && m2LastRunTime <= now) {
+        prefs.putULong("m2LastRunTime", now - m2LastRunTime);
+      } else {
+        prefs.putULong("m2LastRunTime", 0);
+      }
+    }
+  } else {
+    // System not running, clear motor timing
+    prefs.putULong("m2NextAtRemaining", 0);
+    prefs.putULong("m2StartAtRemaining", 0);
+    prefs.putBool("m2ScheduledAfterM1", false);
+    prefs.putULong("m2LastRunTime", 0);
+  }
 }
 
 void restoreSystemState(){
   unsigned long saveTime = prefs.getULong("saveTime", 0);
-  if (saveTime == 0 || millis() < 300000) {
+  unsigned long now = millis();
+  if (saveTime == 0 || now < 300000) {
     bool wasRunning = prefs.getBool("runState", false);
     bool wasCpOn = prefs.getBool("cpOn", false);
     bool wasHeatOn = prefs.getBool("heatOn", false);
@@ -250,11 +314,110 @@ void restoreSystemState(){
         setFanSpeed((FanSpeed)savedFanSpd);
       }
       
+      // Restore motor timing state
+      // CRITICAL FIX: Use m2LastRunTime to calculate accurate remaining time even across reboots
+      bool rebootDetected = (saveTime > 0 && saveTime > now);
+      unsigned long elapsedSinceSave = 0;
+      if (!rebootDetected && saveTime > 0 && now > saveTime) {
+        // Normal case: calculate exact elapsed time since save
+        elapsedSinceSave = now - saveTime;
+      }
+      // Note: On reboot, we can't know elapsedSinceSave, but we'll use m2LastRunTime instead
+      
+      bool savedM2ScheduledAfterM1 = prefs.getBool("m2ScheduledAfterM1", false);
+      unsigned long savedM2StartAtRemaining = prefs.getULong("m2StartAtRemaining", 0);
+      unsigned long savedM2NextAtRemaining = prefs.getULong("m2NextAtRemaining", 0);
+      unsigned long savedM2LastRunElapsed = prefs.getULong("m2LastRunTime", 0); // Elapsed since Motor 2 last ran (at save time)
+      
+      if (savedM2ScheduledAfterM1 && savedM2StartAtRemaining > 0) {
+        // M2 was scheduled after M1
+        if (rebootDetected) {
+          // Reboot: Use saved remaining time directly
+          if (savedM2StartAtRemaining > 0 && savedM2StartAtRemaining < M2_INTERVAL) {
+            m2StartAt = now + savedM2StartAtRemaining;
+            m2ScheduledAfterM1 = true;
+            m2NextAt = 0;
+          } else {
+            m2NextAt = now + M2_INTERVAL;
+            m2ScheduledAfterM1 = false;
+            m2StartAt = 0;
+          }
+        } else if (elapsedSinceSave >= savedM2StartAtRemaining) {
+          m2NextAt = now + M2_INTERVAL;
+          m2ScheduledAfterM1 = false;
+          m2StartAt = 0;
+        } else {
+          m2StartAt = now + (savedM2StartAtRemaining - elapsedSinceSave);
+          m2ScheduledAfterM1 = true;
+          m2NextAt = 0;
+        }
+      } else if (savedM2NextAtRemaining > 0 || savedM2LastRunElapsed > 0) {
+        // M2 had a scheduled next run time OR we have last run time info
+        if (rebootDetected) {
+          // CRITICAL: On reboot, we save every 2 seconds when M2 is waiting
+          // So savedM2NextAtRemaining should be recent (within 2 seconds)
+          // Use it directly, but subtract a small safety margin (2 seconds) to account for time since last save
+          if (savedM2NextAtRemaining > 0 && savedM2NextAtRemaining <= M2_INTERVAL) {
+            // Subtract 2 seconds as safety margin (worst case: save happened 2 seconds ago)
+            unsigned long remaining = (savedM2NextAtRemaining > 2000) ? (savedM2NextAtRemaining - 2000) : 0;
+            m2NextAt = now + remaining;
+          } else if (savedM2LastRunElapsed > 0 && savedM2LastRunElapsed < M2_INTERVAL) {
+            // Fallback: Calculate from last run time
+            // remaining = M2_INTERVAL - savedM2LastRunElapsed - 2 seconds safety margin
+            unsigned long remaining = (savedM2LastRunElapsed + 2000 < M2_INTERVAL) ? (M2_INTERVAL - savedM2LastRunElapsed - 2000) : 0;
+            m2NextAt = now + remaining;
+          } else {
+            // Invalid data, wait for normal interval
+            m2NextAt = now + M2_INTERVAL;
+          }
+          m2ScheduledAfterM1 = false;
+          m2StartAt = 0;
+        } else {
+          // No reboot: Calculate accurately using elapsed time since save
+          if (elapsedSinceSave >= savedM2NextAtRemaining) {
+            // Time has passed, wait for next interval
+            m2NextAt = now + M2_INTERVAL;
+          } else {
+            // Still waiting - calculate accurate remaining time
+            m2NextAt = now + (savedM2NextAtRemaining - elapsedSinceSave);
+          }
+          m2ScheduledAfterM1 = false;
+          m2StartAt = 0;
+        }
+      } else {
+        // No motor timing saved
+        m2NextAt = now + M2_INTERVAL;
+        m2ScheduledAfterM1 = false;
+        m2StartAt = 0;
+      }
+      
+      // Restore m2LastRunTime for future saves
+      if (savedM2LastRunElapsed > 0) {
+        // Calculate when Motor 2 last ran: now - (saved elapsed + time since save)
+        if (rebootDetected) {
+          // Can't know exact time, but we know it was at least savedM2LastRunElapsed ago
+          m2LastRunTime = (now >= savedM2LastRunElapsed) ? (now - savedM2LastRunElapsed) : 0;
+        } else {
+          m2LastRunTime = (now >= (savedM2LastRunElapsed + elapsedSinceSave)) ? (now - savedM2LastRunElapsed - elapsedSinceSave) : 0;
+        }
+      }
+      
       Serial.println("⚠️ WATCHDOG RECOVERY: State restored, waiting for WiFi");
       Serial.print("  CP: "); Serial.print(cpOn ? "ON" : "OFF");
       Serial.print(" | Heater: "); Serial.print(heatOn ? "ON" : "OFF");
       Serial.print(" | Fan: "); Serial.println(savedFanSpd);
-      Serial.println("  Motors: DELAYED until WiFi connected");
+      Serial.print("  [DEBUG] savedM2NextAtRemaining: "); Serial.print(savedM2NextAtRemaining / 1000); Serial.println("s");
+      Serial.print("  [DEBUG] savedM2LastRunElapsed: "); Serial.print(savedM2LastRunElapsed / 1000); Serial.println("s");
+      Serial.print("  [DEBUG] rebootDetected: "); Serial.println(rebootDetected ? "YES" : "NO");
+      if (m2ScheduledAfterM1) {
+        unsigned long remaining = (m2StartAt > now) ? (m2StartAt - now) : 0;
+        Serial.print("  M2 scheduled after M1 in: "); Serial.print(remaining / 1000); Serial.println("s");
+      } else if (m2NextAt > now) {
+        unsigned long remaining = m2NextAt - now;
+        Serial.print("  M2 next run in: "); Serial.print(remaining / 1000); Serial.println("s");
+      } else {
+        Serial.println("  Motors: DELAYED until WiFi connected");
+      }
     }
   }
 }
@@ -266,6 +429,10 @@ void clearSystemState(){
   prefs.putBool("shuttingDown", false);
   prefs.putInt("fanSpeed", 0);
   prefs.putULong("saveTime", 0);
+  prefs.putULong("m2NextAtRemaining", 0);
+  prefs.putULong("m2StartAtRemaining", 0);
+  prefs.putBool("m2ScheduledAfterM1", false);
+  prefs.putULong("m2LastRunTime", 0);
 }
 
 // ---------- Logging (Simplified - Serial only to avoid MQTT overload) ----------
@@ -661,17 +828,22 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
   Serial.println("\n========================================");
   Serial.print("📩 AWS Message Received from: ");
   Serial.println(topic);
+  Serial.print("  Payload length: ");
+  Serial.println(length);
   Serial.print("  Payload: ");
-  for (unsigned int i = 0; i < length; i++) {
+  for (unsigned int i = 0; i < length && i < 200; i++) {  // Limit to 200 chars for readability
     Serial.print((char)payload[i]);
   }
+  if (length > 200) Serial.print("...");
   Serial.println();
   Serial.println("========================================\n");
 
-  // Parse JSON command
-  StaticJsonDocument<320> doc;
-  if (deserializeJson(doc, payload, length)) {
-    Serial.println("❌ JSON parse failed");
+  // Parse JSON command - increase buffer size for OTA commands
+  StaticJsonDocument<1024> doc;  // Increased from 320 to handle OTA commands
+  DeserializationError error = deserializeJson(doc, payload, length);
+  if (error) {
+    Serial.print("❌ JSON parse failed: ");
+    Serial.println(error.c_str());
     return;
   }
 
@@ -679,6 +851,22 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
   String cmdStr;
   serializeJson(doc, cmdStr);
   Serial.println("📝 Command: " + cmdStr);
+  
+  // Handle test message
+  if (doc.containsKey("type") && doc["type"] == "test") {
+    Serial.println("🧪 TEST MESSAGE RECEIVED!");
+    Serial.println("  Message: " + String(doc["message"] | "No message"));
+    Serial.println("  Timestamp: " + String(doc["timestamp"] | 0));
+    Serial.println("✓ MQTT is working! ESP32 can receive messages.");
+    return;
+  }
+  
+  // Handle OTA Update command FIRST (before other commands)
+  if (doc.containsKey("type") && doc["type"] == "ota_update") {
+    Serial.println("🔄 OTA Update command detected!");
+    handleOTAUpdate(doc);
+    return; // Don't process other commands during OTA
+  }
   
   // Handle motor timing provisioning
   if (doc.containsKey("m1_start")) { 
@@ -788,6 +976,266 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
       publishStateLocal();
       publishTelemetryLocal();
     }
+  }
+}
+
+// ---------- OTA Update Handler ----------
+void handleOTAUpdate(JsonDocument& doc) {
+  Serial.println("\n========================================");
+  Serial.println("🔄 Starting OTA Update Process");
+  Serial.println("========================================");
+
+  if (!WiFi.isConnected()) {
+    Serial.println("❌ OTA Failed: WiFi not connected");
+    publishOTAStatus("error", "WiFi not connected");
+    return;
+  }
+  
+  // Extract OTA parameters from MQTT command (minimal - ESP32 uses hardcoded values)
+  String version = doc["version"] | "latest";
+  String commitSha = doc["commit_sha"] | "";
+  
+  // Use hardcoded GitHub values (defined at top of file)
+  String repoOwner = String(GITHUB_REPO_OWNER);
+  String repoName = String(GITHUB_REPO_NAME);
+  String githubToken = String(GITHUB_TOKEN);
+  String firmwareAssetName = String(GITHUB_FIRMWARE_ASSET_NAME);
+  
+  // Log OTA parameters
+  Serial.println("📋 OTA Parameters:");
+  Serial.println("  Version: " + version);
+  Serial.println("  Commit SHA: " + commitSha);
+  Serial.println("  Repo: " + repoOwner + "/" + repoName + " (hardcoded)");
+  Serial.println("  Asset: " + firmwareAssetName + " (hardcoded)");
+  Serial.println("  Token: " + (githubToken.length() > 0 ? "***" + githubToken.substring(githubToken.length()-4) : "Not provided"));
+  
+  Serial.println("\n📥 Fetching latest release from GitHub...");
+  publishOTAStatus("downloading", "Fetching release info from GitHub...");
+  
+  // CRITICAL: Feed watchdog before starting long OTA process
+  esp_task_wdt_reset();
+  
+  // Step 1: Get latest release info
+  String releasesUrl = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest";
+  
+  WiFiClientSecure client_ota;
+  client_ota.setInsecure(); // Skip certificate validation for GitHub
+  
+  HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setUserAgent("ESP32-OTA-Client");
+  http.setTimeout(30000); // 30 second timeout
+  
+  Serial.println("  Releases API: " + releasesUrl);
+  http.begin(client_ota, releasesUrl);
+  http.addHeader("Authorization", "token " + githubToken);
+  http.addHeader("Accept", "application/vnd.github.v3+json");
+  
+  int httpCode = http.GET();
+  Serial.println("  HTTP Response Code: " + String(httpCode));
+  
+  if (httpCode != HTTP_CODE_OK) {
+    String errorResponse = http.getString();
+    Serial.println("❌ Failed to fetch release info: HTTP " + String(httpCode));
+    Serial.println("  Response: " + errorResponse.substring(0, 200));
+    http.end();
+    publishOTAStatus("error", "Failed to fetch release: HTTP " + String(httpCode));
+    return;
+  }
+  
+  // Parse release JSON
+  StaticJsonDocument<4096> releaseDoc;
+  DeserializationError error = deserializeJson(releaseDoc, http.getStream());
+  http.end();
+  
+  if (error) {
+    Serial.println("❌ Failed to parse release JSON: " + String(error.c_str()));
+    publishOTAStatus("error", "Failed to parse release JSON");
+    return;
+  }
+  
+  String latestVersion = releaseDoc["tag_name"].as<String>();
+  Serial.println("✓ Latest release found: " + latestVersion);
+  Serial.println("  Searching for asset: " + firmwareAssetName);
+  
+  // Step 2: Find the firmware asset in the release
+  String firmwareUrl = "";
+  JsonArray assets = releaseDoc["assets"].as<JsonArray>();
+  
+  for (JsonObject asset : assets) {
+    String assetName = asset["name"].as<String>();
+    Serial.println("  Found asset: " + assetName);
+    
+    if (assetName == firmwareAssetName) {
+      String assetId = asset["id"].as<String>();
+      firmwareUrl = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/assets/" + assetId;
+      Serial.println("✓ Found matching asset! ID: " + assetId);
+      break;
+    }
+  }
+  
+  if (firmwareUrl.length() == 0) {
+    Serial.println("❌ Error: Could not find asset '" + firmwareAssetName + "' in the release.");
+    Serial.println("  Available assets:");
+    for (JsonObject asset : assets) {
+      Serial.println("    - " + asset["name"].as<String>());
+    }
+    publishOTAStatus("error", "Firmware asset not found in release");
+    return;
+  }
+  
+  // Step 3: Download firmware binary from asset URL
+  Serial.println("\n📥 Downloading firmware binary...");
+  Serial.println("  Asset URL: " + firmwareUrl);
+  publishOTAStatus("installing", "Downloading firmware binary...");
+  
+  // Feed watchdog before starting download
+  esp_task_wdt_reset();
+  
+  http.begin(client_ota, firmwareUrl);
+  http.addHeader("Accept", "application/octet-stream");  // CRITICAL: Get binary, not JSON
+  http.addHeader("Authorization", "token " + githubToken);
+  http.setUserAgent("ESP32-OTA-Client");
+  
+  httpCode = http.GET();
+  Serial.println("  HTTP Response Code: " + String(httpCode));
+  
+  if (httpCode != HTTP_CODE_OK) {
+    String errorResponse = http.getString();
+    Serial.println("❌ Download failed: HTTP " + String(httpCode));
+    Serial.println("  Response: " + errorResponse.substring(0, 200));
+    http.end();
+    publishOTAStatus("error", "Download failed: HTTP " + String(httpCode));
+    return;
+  }
+  
+  // Get firmware size
+  int contentLength = http.getSize();
+  Serial.println("  Content Length: " + String(contentLength) + " bytes");
+  
+  if (contentLength <= 0) {
+    Serial.println("❌ Error: Invalid content length");
+    http.end();
+    publishOTAStatus("error", "Invalid content length");
+    return;
+  }
+  
+  // Start OTA update
+  if (!Update.begin(contentLength)) {
+    Serial.println("❌ Update.begin() failed: " + String(Update.errorString()));
+    http.end();
+    publishOTAStatus("error", "Update.begin() failed: " + String(Update.errorString()));
+    return;
+  }
+  
+  Serial.println("✓ Update.begin() successful");
+  Serial.println("📦 Writing firmware to flash...");
+  Serial.println("  ⚠️ This may take 30-60 seconds for large files. Watchdog will be fed during update.");
+  
+  // Feed watchdog before starting write loop
+  esp_task_wdt_reset();
+  
+  // Use chunked reading approach (from reference code)
+  WiFiClient* stream = http.getStreamPtr();
+  uint8_t buff[1024];
+  size_t totalWritten = 0;
+  int lastProgress = -1;
+  
+      while (totalWritten < contentLength) {
+        // CRITICAL: Feed watchdog during OTA update to prevent timeout
+        esp_task_wdt_reset();
+        
+        int available = stream->available();
+        if (available > 0) {
+          int readLen = stream->read(buff, min((size_t)available, sizeof(buff)));
+          if (readLen < 0) {
+            Serial.println("❌ Error reading from stream");
+            Update.abort();
+            http.end();
+            publishOTAStatus("error", "Stream read error");
+            return;
+          }
+          
+          if (Update.write(buff, readLen) != readLen) {
+            Serial.println("❌ Update.write failed: " + String(Update.errorString()));
+            Serial.println("  Written so far: " + String(totalWritten) + " bytes");
+            Serial.println("  Attempted to write: " + String(readLen) + " bytes");
+            Update.abort();
+            http.end();
+            publishOTAStatus("error", "Write failed: " + String(Update.errorString()));
+            return;
+          }
+          
+          totalWritten += readLen;
+          int progress = (int)((totalWritten * 100L) / contentLength);
+          if (progress > lastProgress && (progress % 5 == 0 || progress == 100)) {
+            Serial.print("  Progress: " + String(progress) + "%");
+            if (progress == 100) {
+              Serial.println();
+            } else {
+              Serial.print("\r");
+            }
+            lastProgress = progress;
+          }
+        }
+        delay(1);
+      }
+  Serial.println();
+  
+  http.end();
+  
+  // Verify and finalize
+  if (totalWritten != contentLength) {
+    Serial.println("❌ Error: Write incomplete. Wrote " + String(totalWritten) + " of " + String(contentLength) + " bytes");
+    Update.abort();
+    publishOTAStatus("error", "Write incomplete");
+    return;
+  }
+  
+  if (!Update.end()) {
+    Serial.println("❌ Update.end() failed: " + String(Update.errorString()));
+    publishOTAStatus("error", "Update.end() failed: " + String(Update.errorString()));
+    Update.abort();
+    return;
+  }
+  
+  if (Update.isFinished()) {
+    Serial.println("✓ OTA Update successful!");
+    Serial.println("  Version: " + latestVersion);
+    Serial.println("  Commit: " + commitSha);
+    // Save version info to preferences for tracking
+    prefs.putString("ota_version", latestVersion);
+    prefs.putString("ota_commit", commitSha);
+    prefs.putString("ota_updated_at", String(millis() / 1000));
+    publishOTAStatus("success", "OTA update completed. Version: " + latestVersion + ". Rebooting...");
+    delay(2000);
+    ESP.restart();
+  } else {
+    Serial.println("❌ OTA Update failed: Update not finished");
+    publishOTAStatus("error", "Update not finished");
+    Update.abort();
+  }
+  
+  Serial.println("========================================\n");
+}
+
+void publishOTAStatus(String status, String message) {
+  if (!client.connected()) return;
+  
+  StaticJsonDocument<256> doc;
+  doc["type"] = "ota_status";
+  doc["status"] = status;
+  doc["message"] = message;
+  doc["thing"] = THINGNAME;
+  doc["ts"] = millis();
+  
+  char buf[256];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
+  
+  // Also publish to local MQTT
+  if (mqttLocal.connected()) {
+    mqttLocal.publish((baseTopic() + "/ota/status").c_str(), (uint8_t*)buf, n, false);
   }
 }
 
@@ -1007,6 +1455,8 @@ void setup()
   Serial.println("   ALMED AHU Controller v2.0");
   Serial.println("   AWS IoT Cloud Edition");
   Serial.println("========================================");
+  Serial.println("HELLO");
+  Serial.println("========================================");
   
   esp_task_wdt_config_t wdt_config = {
     .timeout_ms = WDT_TIMEOUT * 1000,
@@ -1057,6 +1507,15 @@ void setup()
   esp_task_wdt_reset();
 
   prefs.begin("ahu", false);
+
+  // Display OTA version info if available (from previous OTA update)
+  String otaVersion = prefs.getString("ota_version", "");
+  String otaCommit = prefs.getString("ota_commit", "");
+  if (otaVersion.length() > 0 || otaCommit.length() > 0) {
+    Serial.println("📦 Previous OTA Update Info:");
+    if (otaVersion.length() > 0) Serial.println("  Version: " + otaVersion);
+    if (otaCommit.length() > 0) Serial.println("  Commit: " + otaCommit.substring(0, 7));
+  }
 
   float sp = prefs.getFloat("tempSet", tempSet);
   if (sp>=1 && sp<=100) tempSet = sp;
@@ -1140,6 +1599,20 @@ void setup()
   Serial.println("  - System state preserved during reconnections");
   Serial.println("========================================\n");
 
+  // Try initial AWS IoT connection if WiFi is already connected
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("📡 WiFi already connected, attempting AWS IoT connection...");
+    if (client.connect(THINGNAME)) {
+      Serial.println("✓ AWS IoT connected on startup");
+      bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+      Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+      Serial.println(subResult ? " ✓" : " ✗ FAILED");
+      publishStatusOnline();
+    } else {
+      Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
+    }
+  }
+
   // Restore system state if needed (standalone mode)
   if (pendingRecoveryStart) {
     pendingRecoveryStart = false;
@@ -1167,7 +1640,14 @@ void loop()
   lastLoopTime = now;
   
   static unsigned long lastStateSave = 0;
-  if (runState && (now - lastStateSave > 10000)) {
+  // Save more frequently when Motor 2 is waiting to preserve accurate timing
+  // This is critical to prevent flooding if ESP resets during M2 wait period
+  unsigned long saveInterval = 10000; // Default: 10 seconds
+  if (runState && !shuttingDown && m2NextAt > now && (m2NextAt - now) < 60000) {
+    // Motor 2 is waiting and has less than 60s remaining - save every 2 seconds for accuracy
+    saveInterval = 2000;
+  }
+  if (runState && (now - lastStateSave > saveInterval)) {
     saveSystemState();
     lastStateSave = now;
   }
@@ -1224,8 +1704,9 @@ void loop()
       if (client.connect(THINGNAME)) {
         Serial.println("✓ AWS IoT reconnected");
         // Resubscribe to command topic
-        client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-        Serial.println("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+        Serial.print("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+        Serial.println(subResult ? " ✓" : " ✗ FAILED");
         // Send status on reconnection
         publishStatusOnline();
         publishStateAWS();
@@ -1234,6 +1715,17 @@ void loop()
         Serial.print("✗ AWS reconnection failed, state: ");
         Serial.println(client.state());
       }
+    }
+  }
+  
+  // Debug: Log MQTT connection status periodically
+  static unsigned long lastMqttStatusLog = 0;
+  if (now - lastMqttStatusLog > 30000) { // Every 30 seconds
+    lastMqttStatusLog = now;
+    if (client.connected()) {
+      Serial.println("[DEBUG] AWS IoT MQTT: Connected, subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+    } else {
+      Serial.println("[DEBUG] AWS IoT MQTT: Disconnected (WiFi: " + String(WiFi.status() == WL_CONNECTED ? "OK" : "OFF") + ")");
     }
   }
 
@@ -1335,8 +1827,11 @@ void loop()
       m2_start();
       m2StopAt = now + M2_RUN_TIME;
       m2NextAt = now + M2_INTERVAL;
+      m2LastRunTime = now; // CRITICAL: Record when Motor 2 last ran
       m2ScheduledAfterM1 = false;
       motorLogMsg("[RUN] First M2 cycle (" + String(M2_RUN_TIME/1000) + "s), next in " + String(M2_INTERVAL/1000) + "s");
+      // CRITICAL: Save state immediately after M2 runs to preserve accurate timing
+      saveSystemState();
     }
 
     // Periodic M2 runs
@@ -1344,7 +1839,10 @@ void loop()
       m2_start();
       m2StopAt = now + M2_RUN_TIME;
       m2NextAt = now + M2_INTERVAL;
+      m2LastRunTime = now; // CRITICAL: Record when Motor 2 last ran
       motorLogMsg("[RUN] Periodic M2 (" + String(M2_RUN_TIME/1000) + "s)");
+      // CRITICAL: Save state immediately after M2 runs to preserve accurate timing
+      saveSystemState();
     }
   }
 
