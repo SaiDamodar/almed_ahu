@@ -1,0 +1,46 @@
+# Root .gitignore for ALMED AHU project
+
+# Gradle cache directories (should never be committed)
+**/gradle/caches/
+**/gradle/wrapper/dists/
+**/${GRADLE_USER_HOME}/
+**/GRADLE_USER_HOME/
+**/.gradle/
+**/build/
+**/.dart_tool/
+
+# Android build artifacts
+**/android/app/build/
+**/android/build/
+**/android/.gradle/
+**/android/local.properties
+**/*.iml
+
+# Flutter
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/venv/
+**/env/
+**/.venv
+
+# IDE
+**/.idea/
+**/.vscode/
+**/*.swp
+**/*.swo
+**/.DS_Store
+
+# OS
+**/Thumbs.db
+**/.DS_Store
+

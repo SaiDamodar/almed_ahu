@@ -1,0 +1,65 @@
+name: almed_ahu_android
+description: "ALMED AHU Android App - Admin dashboard for monitoring and controlling Air Handling Units"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  
+  # HTTP client for API calls
+  http: ^1.2.0
+  
+  # State management
+  provider: ^6.1.2
+  
+  # JSON serialization
+  json_annotation: ^4.9.0
+  
+  # Shared preferences for local storage
+  shared_preferences: ^2.3.3
+  
+  # Charts for data visualization
+  fl_chart: ^0.70.1
+  
+  # Intl for date/time formatting
+  intl: ^0.20.1
+  
+  # WebSocket for real-time updates (optional, can use polling)
+  web_socket_channel: ^2.4.0
+  
+  # MQTT client for direct AWS IoT Core connection
+  mqtt_client: ^10.0.0
+  
+  # Crypto for AWS SigV4 signing
+  crypto: ^3.0.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  
+  # JSON code generation
+  build_runner: ^2.4.15
+  json_serializable: ^6.9.2
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+
+  # Fonts commented out - uncomment when you add the font file
+  # fonts:
+  #   - family: Verdana
+  #     fonts:
+  #       - asset: assets/fonts/Vendura-SemiBold-Demo.otf
+  #         weight: 600
+
