@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/screen_utils.dart';
 import 'login_screen.dart';
 import 'user_auth_screen.dart';
 
@@ -12,8 +13,6 @@ class LandingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
 
     return Scaffold(
       body: Container(
@@ -38,8 +37,8 @@ class LandingScreen extends StatelessWidget {
           child: Center(
             child: SingleChildScrollView(
               padding: EdgeInsets.symmetric(
-                horizontal: screenWidth * 0.06,
-                vertical: screenHeight * 0.05,
+                horizontal: ScreenUtils.getPadding(context, 24),
+                vertical: ScreenUtils.getSpacing(context, 40),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -47,8 +46,8 @@ class LandingScreen extends StatelessWidget {
                   // ALMED Logo
                   Container(
                     constraints: BoxConstraints(
-                      maxWidth: screenWidth * 0.5,
-                      maxHeight: screenHeight * 0.2,
+                      maxWidth: ScreenUtils.getPadding(context, 200),
+                      maxHeight: ScreenUtils.getSpacing(context, 150),
                     ),
                     child: Image.asset(
                       isDark
@@ -63,16 +62,17 @@ class LandingScreen extends StatelessWidget {
                               'ALMED',
                               style: TextStyle(
                                 fontFamily: 'Verdana',
-                                fontSize: screenWidth * 0.12,
+                                fontSize: ScreenUtils.getFontSize(context, 48),
                                 fontWeight: FontWeight.w600,
                                 color: isDark ? Colors.white : Colors.black,
                                 letterSpacing: 2,
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            SizedBox(height: ScreenUtils.getSpacing(context, 8)),
                             Text(
                               'AHU Control System',
                               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    fontSize: ScreenUtils.getFontSize(context, 14),
                                     color: isDark
                                         ? AppTheme.darkOnSurfaceVariant
                                         : AppTheme.lightOnSurfaceVariant,
@@ -83,7 +83,7 @@ class LandingScreen extends StatelessWidget {
                       },
                     ),
                   ),
-                  SizedBox(height: screenHeight * 0.08),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 60)),
 
                   // User Type Selection Cards
                   _UserTypeCard(
@@ -99,7 +99,7 @@ class LandingScreen extends StatelessWidget {
                       );
                     },
                   ),
-                  SizedBox(height: screenHeight * 0.03),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 20)),
                   _UserTypeCard(
                     title: 'Hospital User',
                     icon: Icons.local_hospital_rounded,
@@ -114,7 +114,7 @@ class LandingScreen extends StatelessWidget {
                       );
                     },
                   ),
-                  SizedBox(height: screenHeight * 0.05),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 40)),
 
                   // Theme toggle
                   Consumer<ThemeProvider>(
@@ -160,15 +160,14 @@ class _UserTypeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final screenWidth = MediaQuery.of(context).size.width;
 
     return Card(
-      margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.02),
+      margin: EdgeInsets.symmetric(horizontal: ScreenUtils.getPadding(context, 8)),
       child: InkWell(
         onTap: isComingSoon ? null : onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         child: Container(
-          padding: EdgeInsets.all(screenWidth * 0.06),
+          padding: EdgeInsets.all(ScreenUtils.getPadding(context, 20)),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -188,7 +187,7 @@ class _UserTypeCard extends StatelessWidget {
                           color.withOpacity(0.05),
                         ],
             ),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: isComingSoon
                   ? Colors.grey.shade400
@@ -199,20 +198,20 @@ class _UserTypeCard extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                padding: EdgeInsets.all(screenWidth * 0.04),
+                padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
                 decoration: BoxDecoration(
                   color: isComingSoon
                       ? Colors.grey.shade400
                       : color.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(
                   icon,
                   color: isComingSoon ? Colors.grey.shade700 : color,
-                  size: screenWidth * 0.08,
+                  size: ScreenUtils.getIconSize(context, 32),
                 ),
               ),
-              SizedBox(width: screenWidth * 0.04),
+              SizedBox(width: ScreenUtils.getPadding(context, 16)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -226,25 +225,25 @@ class _UserTypeCard extends StatelessWidget {
                                 .textTheme
                                 .displayMedium
                                 ?.copyWith(
-                                  fontSize: screenWidth * 0.06,
+                                  fontSize: ScreenUtils.getFontSize(context, 18),
                                   fontWeight: FontWeight.bold,
                                 ),
                           ),
                         ),
                         if (isComingSoon)
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: ScreenUtils.getPadding(context, 6),
+                              vertical: ScreenUtils.getSpacing(context, 3),
                             ),
                             decoration: BoxDecoration(
                               color: Colors.orange.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              'Coming Soon',
+                              'Soon',
                               style: TextStyle(
-                                fontSize: screenWidth * 0.03,
+                                fontSize: ScreenUtils.getFontSize(context, 10),
                                 fontWeight: FontWeight.w600,
                                 color: Colors.orange.shade700,
                               ),
@@ -252,10 +251,11 @@ class _UserTypeCard extends StatelessWidget {
                           ),
                       ],
                     ),
-                    SizedBox(height: screenWidth * 0.01),
+                    SizedBox(height: ScreenUtils.getSpacing(context, 4)),
                     Text(
                       description,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontSize: ScreenUtils.getFontSize(context, 12),
                             color: isDark
                                 ? AppTheme.darkOnSurfaceVariant
                                 : AppTheme.lightOnSurfaceVariant,
@@ -269,7 +269,7 @@ class _UserTypeCard extends StatelessWidget {
                 color: isComingSoon
                     ? Colors.grey.shade600
                     : color,
-                size: screenWidth * 0.06,
+                size: ScreenUtils.getIconSize(context, 24),
               ),
             ],
           ),

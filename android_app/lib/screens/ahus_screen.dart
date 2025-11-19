@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/hospital.dart';
+import '../utils/screen_utils.dart';
 import 'ahu_control_screen.dart';
 
 /// AHUs list screen for a specific hospital
@@ -15,8 +16,6 @@ class AhusScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final allAhus = hospital.allAhus;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
 
     return Scaffold(
       appBar: AppBar(
@@ -60,14 +59,14 @@ class AhusScreen extends StatelessWidget {
                   children: [
                     Icon(
                       Icons.air_rounded,
-                      size: screenWidth * 0.2,
+                      size: ScreenUtils.getIconSize(context, 80),
                       color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
                     ),
-                    SizedBox(height: screenHeight * 0.02),
+                    SizedBox(height: ScreenUtils.getSpacing(context, 16)),
                     Text(
                       'No AHU units found',
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            fontSize: screenWidth * 0.04,
+                            fontSize: ScreenUtils.getFontSize(context, 16),
                           ),
                     ),
                   ],
@@ -81,14 +80,14 @@ class AhusScreen extends StatelessWidget {
                 },
                 child: ListView.builder(
                   padding: EdgeInsets.symmetric(
-                    horizontal: screenWidth * 0.05,
-                    vertical: screenHeight * 0.02,
+                    horizontal: ScreenUtils.getPadding(context, 16),
+                    vertical: ScreenUtils.getSpacing(context, 12),
                   ),
                   itemCount: allAhus.length,
                   itemBuilder: (context, index) {
                     final ahu = allAhus[index];
                     return Padding(
-                      padding: EdgeInsets.only(bottom: screenHeight * 0.02),
+                      padding: EdgeInsets.only(bottom: ScreenUtils.getSpacing(context, 12)),
                       child: _AhuCard(ahu: ahu, hospital: hospital),
                     );
                   },
@@ -113,13 +112,11 @@ class _AhuCard extends StatelessWidget {
     final isRunning = status?.isRunning ?? false;
     final temp = status?.temperature;
     final hum = status?.humidity;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
 
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
       ),
       child: InkWell(
         onTap: () {
@@ -129,9 +126,9 @@ class _AhuCard extends StatelessWidget {
             ),
           );
         },
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         child: Padding(
-          padding: EdgeInsets.all(screenWidth * 0.05),
+          padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -145,28 +142,30 @@ class _AhuCard extends StatelessWidget {
                         Text(
                           ahu.name,
                           style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                                fontSize: screenWidth * 0.055,
+                                fontSize: ScreenUtils.getFontSize(context, 18),
                                 fontWeight: FontWeight.bold,
                               ),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
-                        SizedBox(height: screenHeight * 0.005),
+                        SizedBox(height: ScreenUtils.getSpacing(context, 4)),
                         Text(
                           '${ahu.room.toUpperCase()} • ${hospital.name}',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                fontSize: screenWidth * 0.032,
+                                fontSize: ScreenUtils.getFontSize(context, 12),
                               ),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ],
                     ),
                   ),
-                  SizedBox(width: screenWidth * 0.03),
+                  SizedBox(width: ScreenUtils.getPadding(context, 12)),
                   // Status badge
                   Container(
                     padding: EdgeInsets.symmetric(
-                      horizontal: screenWidth * 0.03,
-                      vertical: screenHeight * 0.008,
+                      horizontal: ScreenUtils.getPadding(context, 10),
+                      vertical: ScreenUtils.getSpacing(context, 6),
                     ),
                     decoration: BoxDecoration(
                       color: (isOnline ? AppTheme.success : AppTheme.error).withOpacity(0.15),
@@ -180,18 +179,18 @@ class _AhuCard extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(
-                          width: screenWidth * 0.015,
-                          height: screenWidth * 0.015,
+                          width: 8,
+                          height: 8,
                           decoration: BoxDecoration(
                             color: isOnline ? AppTheme.success : AppTheme.error,
                             shape: BoxShape.circle,
                           ),
                         ),
-                        SizedBox(width: screenWidth * 0.015),
+                        SizedBox(width: ScreenUtils.getPadding(context, 6)),
                         Text(
                           isOnline ? 'Online' : 'Offline',
                           style: TextStyle(
-                            fontSize: screenWidth * 0.03,
+                            fontSize: ScreenUtils.getFontSize(context, 11),
                             fontWeight: FontWeight.w600,
                             color: isOnline ? AppTheme.success : AppTheme.error,
                           ),
@@ -201,58 +200,30 @@ class _AhuCard extends StatelessWidget {
                   ),
                 ],
               ),
-              SizedBox(height: screenHeight * 0.025),
+              SizedBox(height: ScreenUtils.getSpacing(context, 16)),
 
-              // Sensors - Responsive layout
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  if (constraints.maxWidth < 400) {
-                    // Stack vertically on small screens
-                    return Column(
-                      children: [
-                        _SensorDisplay(
-                          icon: Icons.thermostat_rounded,
-                          value: temp != null ? '${temp.toStringAsFixed(1)}°C' : '--',
-                          color: AppTheme.temperature,
-                        ),
-                        SizedBox(height: screenHeight * 0.015),
-                        _SensorDisplay(
-                          icon: Icons.water_drop_rounded,
-                          value: hum != null ? '${hum.toStringAsFixed(1)}%' : '--',
-                          color: AppTheme.humidity,
-                        ),
-                      ],
-                    );
-                  } else {
-                    // Side by side on larger screens
-                    return Row(
-                      children: [
-                        Expanded(
-                          child: _SensorDisplay(
-                            icon: Icons.thermostat_rounded,
-                            value: temp != null ? '${temp.toStringAsFixed(1)}°C' : '--',
-                            color: AppTheme.temperature,
-                          ),
-                        ),
-                        SizedBox(width: screenWidth * 0.04),
-                        Expanded(
-                          child: _SensorDisplay(
-                            icon: Icons.water_drop_rounded,
-                            value: hum != null ? '${hum.toStringAsFixed(1)}%' : '--',
-                            color: AppTheme.humidity,
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-                },
+              // Sensors - Always column for narrow screens
+              Column(
+                children: [
+                  _SensorDisplay(
+                    icon: Icons.thermostat_rounded,
+                    value: temp != null ? '${temp.toStringAsFixed(1)}°C' : '--',
+                    color: AppTheme.temperature,
+                  ),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 12)),
+                  _SensorDisplay(
+                    icon: Icons.water_drop_rounded,
+                    value: hum != null ? '${hum.toStringAsFixed(1)}%' : '--',
+                    color: AppTheme.humidity,
+                  ),
+                ],
               ),
-              SizedBox(height: screenHeight * 0.02),
+              SizedBox(height: ScreenUtils.getSpacing(context, 12)),
 
               // Status chips
               Wrap(
-                spacing: screenWidth * 0.02,
-                runSpacing: screenWidth * 0.02,
+                spacing: ScreenUtils.getPadding(context, 8),
+                runSpacing: ScreenUtils.getSpacing(context, 8),
                 children: [
                   _StatusChip(
                     label: 'Running',
@@ -299,11 +270,8 @@ class _SensorDisplay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-    
     return Container(
-      padding: EdgeInsets.all(screenWidth * 0.04),
+      padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -313,7 +281,7 @@ class _SensorDisplay extends StatelessWidget {
             color.withOpacity(0.05),
           ],
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: color.withOpacity(0.3),
           width: 1.5,
@@ -322,12 +290,12 @@ class _SensorDisplay extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: screenWidth * 0.07),
-          SizedBox(height: screenHeight * 0.01),
+          Icon(icon, color: color, size: ScreenUtils.getIconSize(context, 28)),
+          SizedBox(height: ScreenUtils.getSpacing(context, 8)),
           Text(
             value,
             style: TextStyle(
-              fontSize: screenWidth * 0.05,
+              fontSize: ScreenUtils.getFontSize(context, 18),
               fontWeight: FontWeight.bold,
               color: color,
             ),
@@ -352,12 +320,10 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    
     return Container(
       padding: EdgeInsets.symmetric(
-        horizontal: screenWidth * 0.03,
-        vertical: screenWidth * 0.015,
+        horizontal: ScreenUtils.getPadding(context, 10),
+        vertical: ScreenUtils.getSpacing(context, 6),
       ),
       decoration: BoxDecoration(
         color: isActive ? color.withOpacity(0.15) : Colors.transparent,
@@ -370,7 +336,7 @@ class _StatusChip extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-          fontSize: screenWidth * 0.03,
+          fontSize: ScreenUtils.getFontSize(context, 11),
           fontWeight: FontWeight.w600,
           color: isActive ? color : Theme.of(context).textTheme.bodyMedium?.color,
         ),

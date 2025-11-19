@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/hospital.dart';
 import '../models/device_status.dart';
+import '../models/ahu_state.dart';
 import '../services/api_service.dart';
 import '../services/aws_iot_service.dart';
 
@@ -181,22 +182,86 @@ class AppProvider extends ChangeNotifier {
   
   /// Set temperature setpoint
   Future<void> setTemperature(String deviceId, double temp) async {
+    // Optimistic update: Update UI immediately
+    final status = _deviceStatuses[deviceId];
+    if (status != null && status.state != null) {
+      // Create updated status with new setpoint
+      final updatedStatus = DeviceStatus(
+        deviceId: status.deviceId,
+        status: status.status,
+        telemetry: status.telemetry,
+        state: AhuState(
+          run: status.state!.run,
+          tempSet: temp, // Update setpoint immediately
+          humSet: status.state!.humSet,
+          fan: status.state!.fan,
+          fanSpeed: status.state!.fanSpeed,
+          cp: status.state!.cp,
+          heater: status.state!.heater,
+          m1: status.state!.m1,
+          m2: status.state!.m2,
+          ip: status.state!.ip,
+          m1Start: status.state!.m1Start,
+          m1Post: status.state!.m1Post,
+          m2Interval: status.state!.m2Interval,
+          m2Run: status.state!.m2Run,
+          m2Delay: status.state!.m2Delay,
+        ),
+        lastUpdate: status.lastUpdate,
+      );
+      _deviceStatuses[deviceId] = updatedStatus;
+      notifyListeners(); // Update UI instantly
+    }
+    
+    // Send command in background
     // ESP32 expects "setpoint" not "tempSet"
     final command = {
       'setpoint': temp,
     };
     
-    await sendCommand(deviceId, command);
+    sendCommand(deviceId, command); // Don't await - send in background
   }
   
   /// Set humidity setpoint
   Future<void> setHumidity(String deviceId, double hum) async {
+    // Optimistic update: Update UI immediately
+    final status = _deviceStatuses[deviceId];
+    if (status != null && status.state != null) {
+      // Create updated status with new setpoint
+      final updatedStatus = DeviceStatus(
+        deviceId: status.deviceId,
+        status: status.status,
+        telemetry: status.telemetry,
+        state: AhuState(
+          run: status.state!.run,
+          tempSet: status.state!.tempSet,
+          humSet: hum, // Update humidity setpoint immediately
+          fan: status.state!.fan,
+          fanSpeed: status.state!.fanSpeed,
+          cp: status.state!.cp,
+          heater: status.state!.heater,
+          m1: status.state!.m1,
+          m2: status.state!.m2,
+          ip: status.state!.ip,
+          m1Start: status.state!.m1Start,
+          m1Post: status.state!.m1Post,
+          m2Interval: status.state!.m2Interval,
+          m2Run: status.state!.m2Run,
+          m2Delay: status.state!.m2Delay,
+        ),
+        lastUpdate: status.lastUpdate,
+      );
+      _deviceStatuses[deviceId] = updatedStatus;
+      notifyListeners(); // Update UI instantly
+    }
+    
+    // Send command in background
     // ESP32 expects "humset" (lowercase) not "humSet"
     final command = {
       'humset': hum,
     };
     
-    await sendCommand(deviceId, command);
+    sendCommand(deviceId, command); // Don't await - send in background
   }
   
   /// Set fan speed (0=OFF, 1=LOW, 2=MED, 3=HIGH)

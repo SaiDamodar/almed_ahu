@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/device_status.dart';
+import '../utils/screen_utils.dart';
 import 'admin_screen.dart';
 
 /// AHU Control Screen - Main control interface
@@ -49,11 +50,11 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // Top bar - Responsive layout
+              // Top bar - Optimized for 393x873
               Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: MediaQuery.of(context).size.width * 0.04,
-                  vertical: MediaQuery.of(context).size.height * 0.02,
+                  horizontal: ScreenUtils.getPadding(context, 16),
+                  vertical: ScreenUtils.getSpacing(context, 12),
                 ),
                 child: Column(
                   children: [
@@ -71,10 +72,11 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                           child: IconButton(
                             icon: const Icon(Icons.arrow_back_rounded),
                             onPressed: () => Navigator.of(context).pop(),
-                            iconSize: MediaQuery.of(context).size.width * 0.06,
+                            iconSize: ScreenUtils.getIconSize(context, 24),
+                            padding: EdgeInsets.all(ScreenUtils.getPadding(context, 8)),
                           ),
                         ),
-                        SizedBox(width: MediaQuery.of(context).size.width * 0.03),
+                        SizedBox(width: ScreenUtils.getPadding(context, 12)),
                         Expanded(
                           child: Consumer<AppProvider>(
                             builder: (context, provider, child) {
@@ -88,39 +90,42 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                                   Text(
                                     widget.deviceName,
                                     style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                                          fontSize: MediaQuery.of(context).size.width * 0.055,
+                                          fontSize: ScreenUtils.getFontSize(context, 20),
+                                          fontWeight: FontWeight.bold,
                                         ),
                                     overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
                                   ),
-                                  SizedBox(height: MediaQuery.of(context).size.height * 0.005),
+                                  SizedBox(height: ScreenUtils.getSpacing(context, 4)),
                                   Wrap(
-                                    spacing: MediaQuery.of(context).size.width * 0.03,
-                                    runSpacing: MediaQuery.of(context).size.width * 0.02,
+                                    spacing: ScreenUtils.getPadding(context, 8),
+                                    runSpacing: ScreenUtils.getSpacing(context, 4),
                                     children: [
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Container(
-                                            width: 6,
-                                            height: 6,
+                                            width: 8,
+                                            height: 8,
                                             decoration: BoxDecoration(
                                               color: isOnline ? AppTheme.success : AppTheme.error,
                                               shape: BoxShape.circle,
                                             ),
                                           ),
-                                          SizedBox(width: MediaQuery.of(context).size.width * 0.015),
+                                          SizedBox(width: ScreenUtils.getPadding(context, 6)),
                                           Text(
                                             isOnline ? 'Online' : 'Offline',
                                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                                  fontSize: MediaQuery.of(context).size.width * 0.032,
+                                                  fontSize: ScreenUtils.getFontSize(context, 12),
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                           ),
                                         ],
                                       ),
                                       Container(
                                         padding: EdgeInsets.symmetric(
-                                          horizontal: MediaQuery.of(context).size.width * 0.02,
-                                          vertical: MediaQuery.of(context).size.height * 0.005,
+                                          horizontal: ScreenUtils.getPadding(context, 10),
+                                          vertical: ScreenUtils.getSpacing(context, 4),
                                         ),
                                         decoration: BoxDecoration(
                                           color: isRunning
@@ -137,14 +142,14 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                                           children: [
                                             Icon(
                                               isRunning ? Icons.power_rounded : Icons.power_off_rounded,
-                                              size: MediaQuery.of(context).size.width * 0.035,
+                                              size: ScreenUtils.getIconSize(context, 14),
                                               color: isRunning ? AppTheme.success : Colors.grey.shade600,
                                             ),
-                                            SizedBox(width: MediaQuery.of(context).size.width * 0.01),
+                                            SizedBox(width: ScreenUtils.getPadding(context, 4)),
                                             Text(
                                               isRunning ? 'RUNNING' : 'STOPPED',
                                               style: TextStyle(
-                                                fontSize: MediaQuery.of(context).size.width * 0.028,
+                                                fontSize: ScreenUtils.getFontSize(context, 11),
                                                 fontWeight: FontWeight.bold,
                                                 color: isRunning ? AppTheme.success : Colors.grey.shade600,
                                               ),
@@ -161,7 +166,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                         ),
                       ],
                     ),
-                    SizedBox(height: MediaQuery.of(context).size.height * 0.015),
+                    SizedBox(height: ScreenUtils.getSpacing(context, 12)),
                     // Second row: Action buttons
                     Row(
                       children: [
@@ -174,6 +179,7 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                               final isOnline = status?.isOnline ?? false;
 
                               return Container(
+                                height: ScreenUtils.getButtonHeight(context),
                                 decoration: BoxDecoration(
                                   gradient: LinearGradient(
                                     colors: isRunning
@@ -189,33 +195,27 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                                         ? () => provider.toggleAhu(widget.deviceId)
                                         : null,
                                     borderRadius: BorderRadius.circular(12),
-                                    child: Padding(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: MediaQuery.of(context).size.width * 0.04,
-                                        vertical: MediaQuery.of(context).size.height * 0.015,
-                                      ),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
-                                            color: Colors.white,
-                                            size: MediaQuery.of(context).size.width * 0.05,
-                                          ),
-                                          SizedBox(width: MediaQuery.of(context).size.width * 0.02),
-                                          Flexible(
-                                            child: Text(
-                                              isRunning ? 'Stop' : 'Start',
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: MediaQuery.of(context).size.width * 0.04,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
+                                          color: Colors.white,
+                                          size: ScreenUtils.getIconSize(context, 20),
+                                        ),
+                                        SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                                        Flexible(
+                                          child: Text(
+                                            isRunning ? 'Stop' : 'Start',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: ScreenUtils.getFontSize(context, 16),
                                             ),
+                                            overflow: TextOverflow.ellipsis,
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -223,9 +223,11 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                             },
                           ),
                         ),
-                        SizedBox(width: MediaQuery.of(context).size.width * 0.03),
+                        SizedBox(width: ScreenUtils.getPadding(context, 12)),
                         // Admin settings button
                         Container(
+                          height: ScreenUtils.getButtonHeight(context),
+                          width: ScreenUtils.getButtonHeight(context),
                           decoration: BoxDecoration(
                             color: Theme.of(context).cardColor,
                             borderRadius: BorderRadius.circular(12),
@@ -233,17 +235,22 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                               color: Theme.of(context).dividerColor.withOpacity(0.1),
                             ),
                           ),
-                          child: IconButton(
-                            icon: const Icon(Icons.settings_rounded),
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => AdminScreen(deviceId: widget.deviceId),
-                                ),
-                              );
-                            },
-                            tooltip: 'Admin Settings',
-                            iconSize: MediaQuery.of(context).size.width * 0.06,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => AdminScreen(deviceId: widget.deviceId),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Icon(
+                                Icons.settings_rounded,
+                                size: ScreenUtils.getIconSize(context, 20),
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -256,18 +263,18 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
               Expanded(
                 child: SingleChildScrollView(
                   padding: EdgeInsets.symmetric(
-                    horizontal: MediaQuery.of(context).size.width * 0.05,
-                    vertical: MediaQuery.of(context).size.height * 0.02,
+                    horizontal: ScreenUtils.getPadding(context, 16),
+                    vertical: ScreenUtils.getSpacing(context, 16),
                   ),
                   child: Column(
                     children: [
                       // Temperature & Humidity Controls
                       _SensorControls(deviceId: widget.deviceId),
-                      SizedBox(height: MediaQuery.of(context).size.height * 0.025),
+                      SizedBox(height: ScreenUtils.getSpacing(context, 20)),
 
                       // Component Status
                       _ComponentStatus(deviceId: widget.deviceId),
-                      SizedBox(height: MediaQuery.of(context).size.height * 0.025),
+                      SizedBox(height: ScreenUtils.getSpacing(context, 20)),
                     ],
                   ),
                 ),
@@ -294,72 +301,33 @@ class _SensorControls extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final screenWidth = MediaQuery.of(context).size.width;
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            // Use column layout on small screens, row on larger screens
-            if (constraints.maxWidth < 600) {
-              return Column(
-                children: [
-                  _SensorControl(
-                    icon: Icons.thermostat_rounded,
-                    label: 'Temperature',
-                    actual: status.telemetry?.temp?.toStringAsFixed(1) ?? '--',
-                    setpoint: status.tempSetpoint,
-                    unit: '°C',
-                    color: AppTheme.temperature,
-                    min: 15,
-                    max: 30,
-                    onChanged: (value) => provider.setTemperature(deviceId, value),
-                  ),
-                  SizedBox(height: screenWidth * 0.04),
-                  _SensorControl(
-                    icon: Icons.water_drop_rounded,
-                    label: 'Humidity',
-                    actual: status.telemetry?.hum?.toStringAsFixed(1) ?? '--',
-                    setpoint: status.humSetpoint,
-                    unit: '%',
-                    color: AppTheme.humidity,
-                    min: 30,
-                    max: 80,
-                    onChanged: (value) => provider.setHumidity(deviceId, value),
-                  ),
-                ],
-              );
-            } else {
-              return Row(
-                children: [
-                  Expanded(
-                    child: _SensorControl(
-                      icon: Icons.thermostat_rounded,
-                      label: 'Temperature',
-                      actual: status.telemetry?.temp?.toStringAsFixed(1) ?? '--',
-                      setpoint: status.tempSetpoint,
-                      unit: '°C',
-                      color: AppTheme.temperature,
-                      min: 15,
-                      max: 30,
-                      onChanged: (value) => provider.setTemperature(deviceId, value),
-                    ),
-                  ),
-                  SizedBox(width: screenWidth * 0.04),
-                  Expanded(
-                    child: _SensorControl(
-                      icon: Icons.water_drop_rounded,
-                      label: 'Humidity',
-                      actual: status.telemetry?.hum?.toStringAsFixed(1) ?? '--',
-                      setpoint: status.humSetpoint,
-                      unit: '%',
-                      color: AppTheme.humidity,
-                      min: 30,
-                      max: 80,
-                      onChanged: (value) => provider.setHumidity(deviceId, value),
-                    ),
-                  ),
-                ],
-              );
-            }
-          },
+        // Always use column layout for narrow screens (393px)
+        return Column(
+          children: [
+            _SensorControl(
+              icon: Icons.thermostat_rounded,
+              label: 'Temperature',
+              actual: status.telemetry?.temp?.toStringAsFixed(1) ?? '--',
+              setpoint: status.tempSetpoint,
+              unit: '°C',
+              color: AppTheme.temperature,
+              min: 15,
+              max: 30,
+              onChanged: (value) => provider.setTemperature(deviceId, value),
+            ),
+            SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+            _SensorControl(
+              icon: Icons.water_drop_rounded,
+              label: 'Humidity',
+              actual: status.telemetry?.hum?.toStringAsFixed(1) ?? '--',
+              setpoint: status.humSetpoint,
+              unit: '%',
+              color: AppTheme.humidity,
+              min: 30,
+              max: 80,
+              onChanged: (value) => provider.setHumidity(deviceId, value),
+            ),
+          ],
         );
       },
     );
@@ -392,8 +360,6 @@ class _SensorControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
 
     return Container(
       decoration: BoxDecoration(
@@ -404,35 +370,35 @@ class _SensorControl extends StatelessWidget {
               ? [color.withOpacity(0.15), color.withOpacity(0.08)]
               : [Colors.white, color.withOpacity(0.05)],
         ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.withOpacity(0.3), width: 1.5),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Padding(
-            padding: EdgeInsets.all(screenWidth * 0.05),
+            padding: EdgeInsets.all(ScreenUtils.getPadding(context, 20)),
             child: Column(
               children: [
                 Container(
-                  padding: EdgeInsets.all(screenWidth * 0.03),
+                  padding: EdgeInsets.all(ScreenUtils.getPadding(context, 12)),
                   decoration: BoxDecoration(
                     color: color.withOpacity(0.15),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(icon, color: color, size: screenWidth * 0.07),
+                  child: Icon(icon, color: color, size: ScreenUtils.getIconSize(context, 28)),
                 ),
-                SizedBox(height: screenHeight * 0.015),
+                SizedBox(height: ScreenUtils.getSpacing(context, 12)),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: screenWidth * 0.035,
+                    fontSize: ScreenUtils.getFontSize(context, 14),
                     fontWeight: FontWeight.w600,
                     color: isDark ? Colors.white.withOpacity(0.9) : Colors.black87,
                   ),
                 ),
-                SizedBox(height: screenHeight * 0.02),
+                SizedBox(height: ScreenUtils.getSpacing(context, 16)),
                 ShaderMask(
                   shaderCallback: (bounds) => LinearGradient(
                     colors: [color, color.withOpacity(0.7)],
@@ -444,17 +410,17 @@ class _SensorControl extends StatelessWidget {
                       Text(
                         actual,
                         style: TextStyle(
-                          fontSize: screenWidth * 0.1,
+                          fontSize: ScreenUtils.getFontSize(context, 40),
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),
                       ),
                       Padding(
-                        padding: EdgeInsets.only(top: screenHeight * 0.01),
+                        padding: EdgeInsets.only(top: ScreenUtils.getSpacing(context, 8)),
                         child: Text(
                           unit,
                           style: TextStyle(
-                            fontSize: screenWidth * 0.04,
+                            fontSize: ScreenUtils.getFontSize(context, 16),
                             fontWeight: FontWeight.w600,
                             color: Colors.white,
                           ),
@@ -463,9 +429,9 @@ class _SensorControl extends StatelessWidget {
                     ],
                   ),
                 ),
-                SizedBox(height: screenHeight * 0.025),
+                SizedBox(height: ScreenUtils.getSpacing(context, 20)),
                 Container(
-                  padding: EdgeInsets.all(screenWidth * 0.035),
+                  padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
@@ -482,13 +448,13 @@ class _SensorControl extends StatelessWidget {
                       Text(
                         'SETPOINT',
                         style: TextStyle(
-                          fontSize: screenWidth * 0.025,
+                          fontSize: ScreenUtils.getFontSize(context, 10),
                           fontWeight: FontWeight.bold,
                           color: color.withOpacity(0.8),
                           letterSpacing: 1.2,
                         ),
                       ),
-                      SizedBox(height: screenHeight * 0.012),
+                      SizedBox(height: ScreenUtils.getSpacing(context, 10)),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -497,12 +463,12 @@ class _SensorControl extends StatelessWidget {
                             color: color,
                             onPressed: setpoint > min ? () => onChanged(setpoint - 0.5) : null,
                           ),
-                          SizedBox(width: screenWidth * 0.04),
+                          SizedBox(width: ScreenUtils.getPadding(context, 16)),
                           Flexible(
                             child: Container(
                               padding: EdgeInsets.symmetric(
-                                horizontal: screenWidth * 0.04,
-                                vertical: screenHeight * 0.01,
+                                horizontal: ScreenUtils.getPadding(context, 16),
+                                vertical: ScreenUtils.getSpacing(context, 8),
                               ),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.9),
@@ -511,15 +477,16 @@ class _SensorControl extends StatelessWidget {
                               child: Text(
                                 '${setpoint.toStringAsFixed(1)}$unit',
                                 style: TextStyle(
-                                  fontSize: screenWidth * 0.055,
+                                  fontSize: ScreenUtils.getFontSize(context, 18),
                                   fontWeight: FontWeight.bold,
                                   color: color,
                                 ),
                                 overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
                               ),
                             ),
                           ),
-                          SizedBox(width: screenWidth * 0.04),
+                          SizedBox(width: ScreenUtils.getPadding(context, 16)),
                           _ControlButton(
                             icon: Icons.add,
                             color: color,
@@ -553,7 +520,7 @@ class _ControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isEnabled = onPressed != null;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final buttonSize = ScreenUtils.getButtonHeight(context);
 
     return Material(
       color: Colors.transparent,
@@ -561,8 +528,8 @@ class _ControlButton extends StatelessWidget {
         onTap: onPressed,
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          width: screenWidth * 0.11,
-          height: screenWidth * 0.11,
+          width: buttonSize,
+          height: buttonSize,
           decoration: BoxDecoration(
             gradient: isEnabled
                 ? LinearGradient(
@@ -577,7 +544,7 @@ class _ControlButton extends StatelessWidget {
           child: Icon(
             icon,
             color: isEnabled ? Colors.white : Colors.grey,
-            size: screenWidth * 0.05,
+            size: ScreenUtils.getIconSize(context, 20),
           ),
         ),
       ),
@@ -604,10 +571,10 @@ class _ComponentStatus extends StatelessWidget {
         final isRunning = status.isRunning;
 
         return Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
           decoration: BoxDecoration(
             color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: Theme.of(context).dividerColor.withOpacity(0.2),
             ),
@@ -616,9 +583,12 @@ class _ComponentStatus extends StatelessWidget {
             children: [
               Text(
                 'Component Status',
-                style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 18),
+                style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                      fontSize: ScreenUtils.getFontSize(context, 16),
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
-              const SizedBox(height: 20),
+              SizedBox(height: ScreenUtils.getSpacing(context, 16)),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -629,28 +599,28 @@ class _ComponentStatus extends StatelessWidget {
                       isActive: state?.m1 ?? false,
                       color: AppTheme.info,
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: ScreenUtils.getPadding(context, 10)),
                     _StatusIndicator(
                       icon: Icons.cleaning_services_rounded,
                       label: 'Motor 2',
                       isActive: state?.m2 ?? false,
                       color: AppTheme.info,
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: ScreenUtils.getPadding(context, 10)),
                     _StatusIndicator(
                       icon: Icons.ac_unit_rounded,
                       label: 'Compressor',
                       isActive: state?.cp ?? false,
                       color: AppTheme.info,
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: ScreenUtils.getPadding(context, 10)),
                     _StatusIndicator(
                       icon: Icons.whatshot_rounded,
                       label: 'Heater',
                       isActive: state?.heater ?? false,
                       color: AppTheme.info,
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: ScreenUtils.getPadding(context, 10)),
                     GestureDetector(
                       onTap: (isOnline && isRunning)
                           ? () {
@@ -698,8 +668,8 @@ class _StatusIndicator extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      width: 120,
-      padding: const EdgeInsets.all(12),
+      width: 100,
+      padding: EdgeInsets.all(ScreenUtils.getPadding(context, 10)),
       decoration: BoxDecoration(
         gradient: isActive
             ? LinearGradient(
@@ -714,16 +684,17 @@ class _StatusIndicator extends StatelessWidget {
                     ? [Colors.white.withOpacity(0.05), Colors.white.withOpacity(0.02)]
                     : [Colors.white.withOpacity(0.9), Colors.grey.shade50],
               ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isActive ? color.withOpacity(0.5) : Theme.of(context).dividerColor.withOpacity(0.2),
           width: isActive ? 2 : 1,
         ),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(ScreenUtils.getPadding(context, 8)),
             decoration: BoxDecoration(
               color: isActive ? color.withOpacity(0.2) : Colors.transparent,
               shape: BoxShape.circle,
@@ -731,22 +702,27 @@ class _StatusIndicator extends StatelessWidget {
             child: Icon(
               icon,
               color: isActive ? color : (isDark ? Colors.white.withOpacity(0.4) : Colors.black54),
-              size: 22,
+              size: ScreenUtils.getIconSize(context, 20),
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: ScreenUtils.getSpacing(context, 6)),
           Text(
             label,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 10,
+              fontSize: ScreenUtils.getFontSize(context, 9),
               fontWeight: FontWeight.w700,
               color: isActive ? color : (isDark ? Colors.white.withOpacity(0.7) : Colors.black87),
             ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: ScreenUtils.getSpacing(context, 4)),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: EdgeInsets.symmetric(
+              horizontal: ScreenUtils.getPadding(context, 6),
+              vertical: ScreenUtils.getSpacing(context, 2),
+            ),
             decoration: BoxDecoration(
               color: isActive ? color.withOpacity(0.3) : Colors.grey.withOpacity(0.15),
               borderRadius: BorderRadius.circular(8),
@@ -754,17 +730,17 @@ class _StatusIndicator extends StatelessWidget {
             child: Text(
               isActive ? 'ON' : 'OFF',
               style: TextStyle(
-                fontSize: 8,
+                fontSize: ScreenUtils.getFontSize(context, 8),
                 fontWeight: FontWeight.bold,
                 color: isActive ? color : Colors.grey.shade600,
               ),
             ),
           ),
           if (isClickable) ...[
-            const SizedBox(height: 4),
+            SizedBox(height: ScreenUtils.getSpacing(context, 4)),
             Icon(
               Icons.touch_app,
-              size: 10,
+              size: ScreenUtils.getIconSize(context, 12),
               color: AppTheme.info.withOpacity(0.6),
             ),
           ],
