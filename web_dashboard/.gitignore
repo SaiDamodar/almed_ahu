@@ -14,7 +14,6 @@ instance/
 .webassets-cache
 
 # Configuration
-config.py
 .env
 
 # IDE

@@ -1,10 +1,19 @@
 /// Application configuration
 class AppConfig {
   // Base URL for web dashboard API
-  // Change this to your web dashboard server URL
-  // For Android emulator: 'http://10.0.2.2:5000' (accesses host machine's localhost)
-  // For physical device: 'http://YOUR_SERVER_IP:5000' (e.g., 'http://192.168.1.100:5000')
-  static const String baseUrl = 'http://192.168.0.52:5000';
+  // 
+  // Option 1: Railway subdomain (may have DNS issues on mobile data)
+  // static const String baseUrl = 'https://almedahuwebapp-production.up.railway.app';
+  //
+  // Option 2: Custom domain (RECOMMENDED - fixes DNS issues)
+  // Using subdomain for faster DNS propagation
+  // Root domain (almedequipments.in) can take 24-48 hours to propagate on mobile carriers
+  // Subdomain (api.almedequipments.in) propagates faster (15-30 minutes)
+  // 
+  // If root domain doesn't work on mobile data, use subdomain:
+  static const String baseUrl = 'https://api.almedequipments.in';
+  // Or root domain (if DNS fully propagated):
+  // static const String baseUrl = 'https://almedequipments.in';
   static const String apiBaseUrl = '$baseUrl/api';
   
   // Admin credentials

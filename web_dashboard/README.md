@@ -16,7 +16,6 @@ ESP32 → AWS IoT Core → DynamoDB
 
 - **Hospitals → Devices View**: Hierarchical view of all hospitals and their AHU devices
 - **AHU Control Page**: Full control interface matching Flutter dashboard
-- **Graphs & Analytics**: Temperature, humidity, motor cycles visualization
 - **Settings Page**: Admin configuration (WiFi, broker, motor timings)
 - **OTA Updates**: Over-the-air firmware updates (placeholder)
 
@@ -64,14 +63,12 @@ web_dashboard/
 │   │   └── style.css     # Main stylesheet
 │   ├── js/
 │   │   ├── app.js        # Main application logic
-│   │   ├── charts.js     # Chart.js integration
 │   │   └── api.js        # API client
 │   └── images/           # Images and logos
 └── templates/
     ├── index.html        # Main dashboard
     ├── hospitals.html    # Hospitals → Devices view
     ├── ahu_control.html   # AHU control page
-    ├── graphs.html       # Graphs and analytics
     ├── settings.html     # Admin settings
     └── ota.html          # OTA updates (placeholder)
 ```

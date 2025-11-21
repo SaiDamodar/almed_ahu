@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../models/hospital.dart';
@@ -7,18 +8,31 @@ import '../models/device_status.dart';
 /// API Service for communicating with web dashboard
 class ApiService {
   String? _sessionCookie;
+  String? _lastError;
+  
+  String? get errorMessage => _lastError;
   
   /// Login and get session cookie
   Future<bool> login(String username, String password) async {
     try {
+      print('Login: Attempting to login to ${AppConfig.loginEndpoint}');
+      print('Login: Username: $username, Password: ${password.isNotEmpty ? '***' : 'empty'}');
+      
       final response = await http.post(
         Uri.parse(AppConfig.loginEndpoint),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: jsonEncode({
           'username': username,
           'password': password,
         }),
       );
+      
+      print('Login: Response status: ${response.statusCode}');
+      print('Login: Response headers: ${response.headers}');
+      print('Login: Response body: ${response.body}');
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -27,13 +41,37 @@ class ApiService {
           final cookies = response.headers['set-cookie'];
           if (cookies != null) {
             _sessionCookie = cookies.split(';').first;
+            print('Login: Session cookie stored');
           }
+          print('Login: Success');
           return true;
+        } else {
+          print('Login: Failed - ${data['message'] ?? 'Unknown error'}');
+          return false;
         }
+      } else {
+        // Try to parse error message
+        try {
+          final data = jsonDecode(response.body);
+          print('Login: Failed with status ${response.statusCode} - ${data['message'] ?? 'Unknown error'}');
+        } catch (e) {
+          print('Login: Failed with status ${response.statusCode} - ${response.body}');
+        }
+        return false;
       }
+    } on SocketException catch (e) {
+      _lastError = e.message;
+      print('Login error: DNS/Network error - ${e.message}');
+      print('This usually means:');
+      print('1. No internet connection');
+      print('2. DNS cannot resolve Railway domain');
+      print('3. Mobile carrier blocking the domain');
+      print('Solution: Check internet connection or try using WiFi');
       return false;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _lastError = e.toString();
       print('Login error: $e');
+      print('Stack trace: $stackTrace');
       return false;
     }
   }

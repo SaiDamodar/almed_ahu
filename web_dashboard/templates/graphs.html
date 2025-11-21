@@ -3,31 +3,134 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Graphs & Analytics - ALMED</title>
+    <title>AHU Graphs - ALMED</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        .chart-wrapper {
-            height: 300px;
+        .graphs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 16px;
         }
+        
         .time-range-selector {
             display: flex;
             gap: 8px;
-            margin-bottom: 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 4px;
         }
+        
         .time-range-btn {
             padding: 8px 16px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
+            border: none;
             background: transparent;
+            color: var(--text-secondary);
+            border-radius: 8px;
             cursor: pointer;
-            font-weight: 600;
+            font-size: 14px;
+            font-weight: 500;
             transition: all 0.2s;
         }
+        
+        .time-range-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+        
         .time-range-btn.active {
-            background: var(--primary);
+            background: var(--purple-primary);
             color: white;
-            border-color: var(--primary);
+        }
+        
+        .graphs-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        
+        @media (max-width: 1024px) {
+            .graphs-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .graph-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .graph-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .graph-card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .graph-container {
+            position: relative;
+            height: 300px;
+        }
+        
+        .graph-container.bar-chart {
+            height: 350px;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 20, 25, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 16px;
+            z-index: 10;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--purple-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+        
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+        
+        .empty-text {
+            font-size: 14px;
         }
     </style>
 </head>
@@ -38,7 +141,11 @@
         <div class="main-content">
             <div class="top-header">
                 <div class="header-left">
-                    <button class="icon-btn" onclick="window.history.back()" style="font-size: 18px;">←</button>
+                    <button class="icon-btn" onclick="window.history.back()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                    </button>
                     <div class="search-box">
                         <span class="nav-icon">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -50,6 +157,10 @@
                     </div>
                 </div>
                 <div class="header-right">
+                    <div id="connection-status" class="status-indicator" style="display: flex; align-items: center; gap: 8px; font-size: 14px;">
+                        <div class="status-dot"></div>
+                        <span>Disconnected</span>
+                    </div>
                     <button class="icon-btn" title="Notifications">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
@@ -60,103 +171,570 @@
             </div>
 
             <div class="content-container">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                <div class="graphs-header">
                     <div>
-                        <h1 class="page-title">Graphs & Analytics</h1>
-                        <p class="page-subtitle" id="device-info">AHU {{ device_id }}</p>
+                        <h1 class="page-title" id="device-name">AHU Graphs</h1>
+                        <p class="page-subtitle">Historical telemetry data visualization</p>
                     </div>
-                    <a href="/ahu/{{ device_id }}" class="btn btn-secondary" style="text-decoration: none;">← Control</a>
-                </div>
-
-                <!-- Time Range Selector -->
-                <div class="section-card" style="margin-bottom: 24px;">
-            <div class="time-range-selector">
-                <button class="time-range-btn active" data-hours="1" onclick="setTimeRange(1)">1 Hour</button>
-                <button class="time-range-btn" data-hours="6" onclick="setTimeRange(6)">6 Hours</button>
-                <button class="time-range-btn" data-hours="24" onclick="setTimeRange(24)">24 Hours</button>
-                <button class="time-range-btn" data-hours="168" onclick="setTimeRange(168)">7 Days</button>
-            </div>
-        </div>
-
-                <!-- Temperature Chart -->
-                <div class="section-card" style="margin-bottom: 24px;">
-                    <h2 class="section-title">Temperature</h2>
-                    <div class="chart-wrapper">
-                        <canvas id="temp-chart"></canvas>
+                    <div class="time-range-selector">
+                        <button class="time-range-btn" data-hours="1" onclick="setTimeRange(1)">1 Hour</button>
+                        <button class="time-range-btn active" data-hours="24" onclick="setTimeRange(24)">24 Hours</button>
+                        <button class="time-range-btn" data-hours="168" onclick="setTimeRange(168)">7 Days</button>
                     </div>
                 </div>
 
-                <!-- Humidity Chart -->
-                <div class="section-card" style="margin-bottom: 24px;">
-                    <h2 class="section-title">Humidity</h2>
-                    <div class="chart-wrapper">
-                        <canvas id="hum-chart"></canvas>
+                <div class="graphs-grid">
+                    <!-- Temperature Chart -->
+                    <div class="graph-card">
+                        <div class="graph-card-header">
+                            <div class="graph-card-title">Temperature</div>
+                        </div>
+                        <div class="graph-container">
+                            <canvas id="tempChart"></canvas>
+                            <div class="loading-overlay" id="tempLoading" style="display: none;">
+                                <div class="spinner"></div>
+                            </div>
+                        </div>
                     </div>
-                </div>
 
-                <!-- Motor Cycles Chart -->
-                <div class="section-card" style="margin-bottom: 24px;">
-                    <h2 class="section-title">Motor Cycles</h2>
-                    <div class="chart-wrapper">
-                        <canvas id="motor-chart"></canvas>
+                    <!-- Humidity Chart -->
+                    <div class="graph-card">
+                        <div class="graph-card-header">
+                            <div class="graph-card-title">Humidity</div>
+                        </div>
+                        <div class="graph-container">
+                            <canvas id="humChart"></canvas>
+                            <div class="loading-overlay" id="humLoading" style="display: none;">
+                                <div class="spinner"></div>
+                            </div>
+                        </div>
                     </div>
-                </div>
 
-                <!-- System Status Chart -->
-                <div class="section-card" style="margin-bottom: 24px;">
-                    <h2 class="section-title">System Status</h2>
-                    <div class="chart-wrapper">
-                        <canvas id="status-chart"></canvas>
+                    <!-- Component Status Chart -->
+                    <div class="graph-card">
+                        <div class="graph-card-header">
+                            <div class="graph-card-title">Component Status</div>
+                        </div>
+                        <div class="graph-container">
+                            <canvas id="componentChart"></canvas>
+                            <div class="loading-overlay" id="componentLoading" style="display: none;">
+                                <div class="spinner"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Motor Status Chart -->
+                    <div class="graph-card">
+                        <div class="graph-card-header">
+                            <div class="graph-card-title">Motor Status</div>
+                        </div>
+                        <div class="graph-container bar-chart">
+                            <canvas id="motorChart"></canvas>
+                            <div class="loading-overlay" id="motorLoading" style="display: none;">
+                                <div class="spinner"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="{{ url_for('static', filename='js/api.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
     <script>
         const deviceId = '{{ device_id }}';
-        let currentHours = 24;
+        let currentTimeRange = 24; // hours
+        let charts = {
+            temp: null,
+            hum: null,
+            component: null,
+            motor: null
+        };
 
-        async function loadCharts() {
-            try {
-                const response = await api.getTelemetry(deviceId, currentHours);
-                if (response.success && response.data) {
-                    const data = response.data;
-                    
-                    // Create charts
-                    charts.createTemperatureChart('temp-chart', data);
-                    charts.createHumidityChart('hum-chart', data);
-                    charts.createMotorCyclesChart('motor-chart', data);
-                    charts.createSystemStatusChart('status-chart', data);
-                } else {
-                    console.error('No data available');
-                }
-            } catch (error) {
-                console.error('Error loading charts:', error);
-            }
-        }
+        // Chart.js default configuration
+        Chart.defaults.color = '#94A3B8';
+        Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
+        Chart.defaults.backgroundColor = 'rgba(139, 92, 246, 0.1)';
 
         function setTimeRange(hours) {
-            currentHours = hours;
-            
-            // Update button states
+            currentTimeRange = hours;
             document.querySelectorAll('.time-range-btn').forEach(btn => {
                 btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
             });
-            
-            // Reload charts
-            loadCharts();
+            loadGraphs();
         }
 
-        // Load charts on page load
-        loadCharts();
-        
-        // Refresh charts every 30 seconds
-        setInterval(loadCharts, 30000);
+        function showLoading(chartName) {
+            const loadingEl = document.getElementById(chartName + 'Loading');
+            if (loadingEl) loadingEl.style.display = 'flex';
+        }
+
+        function hideLoading(chartName) {
+            const loadingEl = document.getElementById(chartName + 'Loading');
+            if (loadingEl) loadingEl.style.display = 'none';
+        }
+
+        async function loadGraphs() {
+            try {
+                showLoading('temp');
+                showLoading('hum');
+                showLoading('component');
+                showLoading('motor');
+
+                const response = await api.getTelemetry(deviceId, currentTimeRange);
+                
+                if (!response.success || !response.data || response.data.length === 0) {
+                    showEmptyState();
+                    hideLoading('temp');
+                    hideLoading('hum');
+                    hideLoading('component');
+                    hideLoading('motor');
+                    return;
+                }
+
+                const data = response.data.filter(d => d.timestamp != null);
+                
+                if (data.length === 0) {
+                    showEmptyState();
+                    hideLoading('temp');
+                    hideLoading('hum');
+                    hideLoading('component');
+                    hideLoading('motor');
+                    return;
+                }
+                
+                // Sort by timestamp to ensure chronological order
+                data.sort((a, b) => a.timestamp - b.timestamp);
+
+                updateTempChart(data);
+                updateHumChart(data);
+                updateComponentChart(data);
+                updateMotorChart(data);
+
+                hideLoading('temp');
+                hideLoading('hum');
+                hideLoading('component');
+                hideLoading('motor');
+            } catch (error) {
+                console.error('Error loading graphs:', error);
+                showEmptyState();
+                hideLoading('temp');
+                hideLoading('hum');
+                hideLoading('component');
+                hideLoading('motor');
+            }
+        }
+
+        function showEmptyState() {
+            // Show empty state message
+            console.log('No data available');
+        }
+
+        function updateTempChart(data) {
+            const ctx = document.getElementById('tempChart').getContext('2d');
+            
+            if (charts.temp) {
+                charts.temp.destroy();
+            }
+
+            const labels = data.map(d => {
+                const date = new Date(d.timestamp);
+                return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            });
+
+            charts.temp = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Temperature (°C)',
+                        data: data.map(d => d.temp),
+                        borderColor: '#EF4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#F1F5F9',
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(15, 20, 25, 0.9)',
+                            titleColor: '#F1F5F9',
+                            bodyColor: '#F1F5F9',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8',
+                                maxTicksLimit: 8
+                            }
+                        },
+                        y: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Temperature (°C)',
+                                color: '#94A3B8'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateHumChart(data) {
+            const ctx = document.getElementById('humChart').getContext('2d');
+            
+            if (charts.hum) {
+                charts.hum.destroy();
+            }
+
+            const labels = data.map(d => {
+                const date = new Date(d.timestamp);
+                return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            });
+
+            charts.hum = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Humidity (%)',
+                        data: data.map(d => d.hum),
+                        borderColor: '#3B82F6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#F1F5F9',
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(15, 20, 25, 0.9)',
+                            titleColor: '#F1F5F9',
+                            bodyColor: '#F1F5F9',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8',
+                                maxTicksLimit: 8
+                            }
+                        },
+                        y: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Humidity (%)',
+                                color: '#94A3B8'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateComponentChart(data) {
+            const ctx = document.getElementById('componentChart').getContext('2d');
+            
+            if (charts.component) {
+                charts.component.destroy();
+            }
+
+            const labels = data.map(d => {
+                const date = new Date(d.timestamp);
+                return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            });
+
+            // Convert boolean to number (0 or 1) for chart
+            const heaterData = data.map(d => d.heater ? 1 : 0);
+            const cpData = data.map(d => d.cp ? 1 : 0);
+            const fanData = data.map(d => d.fan ? 1 : 0);
+
+            charts.component = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Heater',
+                            data: heaterData,
+                            borderColor: '#F59E0B',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        },
+                        {
+                            label: 'Compressor',
+                            data: cpData,
+                            borderColor: '#10B981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        },
+                        {
+                            label: 'Fan',
+                            data: fanData,
+                            borderColor: '#8B5CF6',
+                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#F1F5F9',
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(15, 20, 25, 0.9)',
+                            titleColor: '#F1F5F9',
+                            bodyColor: '#F1F5F9',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + (context.parsed.y === 1 ? 'ON' : 'OFF');
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8',
+                                maxTicksLimit: 8
+                            }
+                        },
+                        y: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8',
+                                stepSize: 1,
+                                callback: function(value) {
+                                    return value === 1 ? 'ON' : 'OFF';
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Status',
+                                color: '#94A3B8'
+                            },
+                            min: 0,
+                            max: 1
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateMotorChart(data) {
+            const ctx = document.getElementById('motorChart').getContext('2d');
+            
+            if (charts.motor) {
+                charts.motor.destroy();
+            }
+
+            // Aggregate motor data by time periods for bar chart
+            const timeLabels = [];
+            const m1Data = [];
+            const m2Data = [];
+            
+            // Group data into time buckets (e.g., hourly for 7 days, every 15 min for 24h, every 5 min for 1h)
+            const bucketSize = currentTimeRange === 168 ? 3600000 : (currentTimeRange === 24 ? 900000 : 300000); // ms
+            const buckets = {};
+            
+            data.forEach(d => {
+                const bucket = Math.floor(d.timestamp / bucketSize) * bucketSize;
+                if (!buckets[bucket]) {
+                    buckets[bucket] = { m1: [], m2: [] };
+                }
+                if (d.m1 !== undefined) buckets[bucket].m1.push(d.m1 ? 1 : 0);
+                if (d.m2 !== undefined) buckets[bucket].m2.push(d.m2 ? 1 : 0);
+            });
+
+            Object.keys(buckets).sort().forEach(bucket => {
+                const date = new Date(parseInt(bucket));
+                timeLabels.push(date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+                
+                const m1Avg = buckets[bucket].m1.length > 0 
+                    ? buckets[bucket].m1.reduce((a, b) => a + b, 0) / buckets[bucket].m1.length 
+                    : 0;
+                const m2Avg = buckets[bucket].m2.length > 0 
+                    ? buckets[bucket].m2.reduce((a, b) => a + b, 0) / buckets[bucket].m2.length 
+                    : 0;
+                
+                m1Data.push(m1Avg);
+                m2Data.push(m2Avg);
+            });
+
+            charts.motor = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: timeLabels,
+                    datasets: [
+                        {
+                            label: 'Motor 1 (Drain)',
+                            data: m1Data,
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                            borderColor: '#3B82F6',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Motor 2 (Filter)',
+                            data: m2Data,
+                            backgroundColor: 'rgba(139, 92, 246, 0.7)',
+                            borderColor: '#8B5CF6',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#F1F5F9',
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(15, 20, 25, 0.9)',
+                            titleColor: '#F1F5F9',
+                            bodyColor: '#F1F5F9',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.parsed.y;
+                                    return context.dataset.label + ': ' + (value > 0.5 ? 'ON' : 'OFF') + ' (' + (value * 100).toFixed(0) + '%)';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8',
+                                maxTicksLimit: 12
+                            }
+                        },
+                        y: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#94A3B8',
+                                stepSize: 0.5,
+                                callback: function(value) {
+                                    return value === 1 ? 'ON' : (value === 0 ? 'OFF' : '');
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Status',
+                                color: '#94A3B8'
+                            },
+                            min: 0,
+                            max: 1
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            // Update device name
+            document.getElementById('device-name').textContent = 
+                `AHU ${deviceId.replace('ahu-', '').replace('AHU_', '').toUpperCase()} - Graphs`;
+            
+            loadGraphs();
+        });
     </script>
 </body>
 </html>

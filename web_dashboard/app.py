@@ -46,7 +46,16 @@ socketio = SocketIO(
 
 # AWS IoT Data Plane client (for publishing)
 iot_data = None
+iot_data_error = None
 try:
+    # Validate credentials before attempting to create client
+    if not config.AWS_ACCESS_KEY_ID or not config.AWS_SECRET_ACCESS_KEY:
+        raise ValueError("AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY is missing")
+    if not config.AWS_IOT_ENDPOINT:
+        raise ValueError("AWS_IOT_ENDPOINT is missing")
+    if not config.AWS_REGION:
+        raise ValueError("AWS_REGION is missing")
+    
     iot_data = boto3.client(
         'iot-data',
         region_name=config.AWS_REGION,
@@ -60,8 +69,14 @@ try:
     print(f"  Subscribe topic: {config.AWS_IOT_TOPIC_SUBSCRIBE}")
     print(f"  Publish topic: {config.AWS_IOT_TOPIC_PUBLISH}")
 except Exception as e:
+    iot_data_error = str(e)
     print(f"❌ ERROR: Could not initialize IoT Data client: {e}")
     print("Publishing to AWS IoT Core will be disabled")
+    print("Please check:")
+    print("  - AWS_ACCESS_KEY_ID environment variable")
+    print("  - AWS_SECRET_ACCESS_KEY environment variable")
+    print("  - AWS_IOT_ENDPOINT environment variable")
+    print("  - AWS_REGION environment variable")
     import traceback
     traceback.print_exc()
 
@@ -109,44 +124,98 @@ def get_last_telemetry_doc(device_id):
     """Fetch the most recent telemetry document for a device."""
     if mongo_collection is None:
         return None
-    cursor = (
-        mongo_collection
-        .find({'device_id': device_id, 'type': 'telemetry'})
-        .sort('created_at', DESCENDING)
-        .limit(1)
-    )
-    doc = next(cursor, None)
-    if doc is None:
-        legacy_cursor = (
+    try:
+        # Try to use created_at_ist first (latest first) - handle both cases
+        cursor = (
             mongo_collection
             .find({'device_id': device_id, 'type': 'telemetry'})
-            .sort('_id', DESCENDING)
+            .sort('created_at_ist', DESCENDING)
             .limit(1)
         )
-        doc = next(legacy_cursor, None)
+        doc = next(cursor, None)
+        
+        # Try uppercase version if lowercase didn't work
+        if doc is None:
+            cursor = (
+                mongo_collection
+                .find({'device_id': device_id, 'type': 'telemetry'})
+                .sort('created_at_IST', DESCENDING)
+                .limit(1)
+            )
+            doc = next(cursor, None)
+        
+        # Fallback to created_at if created_at_ist doesn't work
+        if doc is None:
+            cursor = (
+                mongo_collection
+                .find({'device_id': device_id, 'type': 'telemetry'})
+                .sort('created_at', DESCENDING)
+                .limit(1)
+            )
+            doc = next(cursor, None)
+        
+        # Last resort: use _id
+        if doc is None:
+            legacy_cursor = (
+                mongo_collection
+                .find({'device_id': device_id, 'type': 'telemetry'})
+                .sort('_id', DESCENDING)
+                .limit(1)
+            )
+            doc = next(legacy_cursor, None)
+    except Exception as e:
+        print(f"Error fetching last telemetry doc: {e}")
+        # Fallback to _id sort
+        try:
+            legacy_cursor = (
+                mongo_collection
+                .find({'device_id': device_id, 'type': 'telemetry'})
+                .sort('_id', DESCENDING)
+                .limit(1)
+            )
+            doc = next(legacy_cursor, None)
+        except:
+            doc = None
+    
     return doc
 
 def init_mongo():
     """Initialize MongoDB client for historical data storage"""
     global mongo_client, mongo_collection
     try:
+        # Increase timeout and add connection options for replica sets
+        # The MONGO_URI already contains connection parameters, so we just add timeout options
         mongo_client = MongoClient(
             config.MONGO_URI,
-            serverSelectionTimeoutMS=5000,
-            retryWrites=True
+            serverSelectionTimeoutMS=30000,  # Increased from 5s to 30s for replica set discovery
+            connectTimeoutMS=30000,  # Connection timeout
+            socketTimeoutMS=30000,  # Socket timeout
+            retryWrites=True,
+            retryReads=True,
+            # Connection pool options
+            maxPoolSize=10,
+            minPoolSize=1,
+            # Heartbeat frequency for replica set monitoring
+            heartbeatFrequencyMS=10000
         )
         mongo_db = mongo_client[config.MONGO_DB_NAME]
         mongo_collection = mongo_db[config.MONGO_COLLECTION]
-        # Force connection test
-        mongo_client.admin.command('ping')
-        print(f"MongoDB: Connected to {config.MONGO_DB_NAME}.{config.MONGO_COLLECTION}")
+        # Force connection test with longer timeout
+        mongo_client.admin.command('ping', maxTimeMS=30000)
+        print(f"✓ MongoDB: Connected to {config.MONGO_DB_NAME}.{config.MONGO_COLLECTION}")
     except Exception as e:
         mongo_client = None
         mongo_collection = None
-        print(f"MongoDB: Failed to connect - {e}")
+        print(f"❌ MongoDB: Failed to connect - {e}")
+        print("   This may be due to:")
+        print("   - Network connectivity issues")
+        print("   - Incorrect MongoDB URI")
+        print("   - Replica set configuration issues")
+        print("   - Firewall blocking connection")
+        print("   - Server selection timeout (replica set members not reachable)")
 
 def store_historical_data(device_id, msg_type, payload):
-    """Persist telemetry/state payloads to MongoDB for historical graphs"""
+    """Persist telemetry/state payloads to MongoDB for historical data"""
     if mongo_collection is None:
         return
     
@@ -222,6 +291,13 @@ def init_aws_iot_mqtt():
     """Initialize MQTT client for AWS IoT Core WebSocket connection"""
     global aws_iot_mqtt_client, aws_iot_connected
     
+    # Validate AWS credentials before attempting connection
+    if not config.AWS_ACCESS_KEY_ID or not config.AWS_SECRET_ACCESS_KEY or not config.AWS_IOT_ENDPOINT:
+        print("⚠️ AWS IoT MQTT: Missing AWS credentials or endpoint. Skipping MQTT connection.")
+        print("   Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_IOT_ENDPOINT environment variables to enable.")
+        aws_iot_connected = False
+        return
+    
     def connect_async():
         """Connect in a separate thread to avoid blocking"""
         try:
@@ -272,10 +348,20 @@ def init_aws_iot_mqtt():
             aws_iot_mqtt_client.loop_start()
             
         except Exception as e:
-            print(f"AWS IoT MQTT: Failed to initialize: {e}")
+            error_type = type(e).__name__
+            if 'WebsocketConnectionError' in error_type or 'WebSocket' in str(type(e)):
+                print(f"⚠️ AWS IoT MQTT: WebSocket connection failed: {e}")
+                print("   This may be due to:")
+                print("   - Invalid AWS credentials")
+                print("   - Incorrect AWS IoT endpoint")
+                print("   - Network connectivity issues")
+                print("   - AWS IoT Core policy restrictions")
+            else:
+                print(f"⚠️ AWS IoT MQTT: Failed to initialize: {e}")
             import traceback
             traceback.print_exc()
             aws_iot_connected = False
+            aws_iot_mqtt_client = None
     
     # Start connection in background thread
     thread = Thread(target=connect_async, daemon=True)
@@ -444,11 +530,12 @@ def ahu_control(device_id):
     """AHU control page"""
     return render_template('ahu_control.html', device_id=device_id)
 
-@app.route('/graphs/<device_id>')
+@app.route('/ahu/<device_id>/graphs')
 @login_required
-def graphs(device_id):
-    """Graphs and analytics page"""
+def ahu_graphs(device_id):
+    """AHU graphs page"""
     return render_template('graphs.html', device_id=device_id)
+
 
 @app.route('/settings')
 @login_required
@@ -463,6 +550,43 @@ def ota():
     return render_template('ota.html')
 
 # ==================== API Endpoints ====================
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for Railway and monitoring"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'ALMED AHU Web Dashboard',
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
+@app.route('/api/aws-iot/status', methods=['GET'])
+def aws_iot_status():
+    """Check AWS IoT connection status"""
+    status = {
+        'iot_data_client': iot_data is not None,
+        'mqtt_client': aws_iot_mqtt_client is not None,
+        'mqtt_connected': aws_iot_connected,
+        'endpoint': config.AWS_IOT_ENDPOINT if config.AWS_IOT_ENDPOINT else None,
+        'region': config.AWS_REGION if config.AWS_REGION else None,
+        'publish_topic': config.AWS_IOT_TOPIC_PUBLISH if hasattr(config, 'AWS_IOT_TOPIC_PUBLISH') else None,
+        'subscribe_topic': config.AWS_IOT_TOPIC_SUBSCRIBE if hasattr(config, 'AWS_IOT_TOPIC_SUBSCRIBE') else None,
+    }
+    
+    if iot_data_error:
+        status['iot_data_error'] = iot_data_error
+    
+    if not config.AWS_ACCESS_KEY_ID:
+        status['error'] = 'AWS_ACCESS_KEY_ID not configured'
+    elif not config.AWS_SECRET_ACCESS_KEY:
+        status['error'] = 'AWS_SECRET_ACCESS_KEY not configured'
+    elif not config.AWS_IOT_ENDPOINT:
+        status['error'] = 'AWS_IOT_ENDPOINT not configured'
+    
+    return jsonify({
+        'success': True,
+        'status': status
+    }), 200
 
 @app.route('/api/devices', methods=['GET'])
 def get_devices():
@@ -643,7 +767,7 @@ def get_device_status(device_id):
 
 @app.route('/api/device/<device_id>/telemetry', methods=['GET'])
 def get_telemetry(device_id):
-    """Get telemetry data for graphs (historical data from MongoDB Atlas)"""
+    """Get telemetry data (historical data from MongoDB Atlas)"""
     try:
         if mongo_collection is None:
             return jsonify({
@@ -660,35 +784,82 @@ def get_telemetry(device_id):
             'type': 'telemetry'
         }
         
+        # Calculate time threshold based on hours
         if hours > 0:
-            since = datetime.utcnow() - timedelta(hours=hours)
-            query['created_at'] = {'$gte': since}
+            now_ist = datetime.now(IST_ZONE)
+            since_ist = now_ist - timedelta(hours=hours)
+            since_str = since_ist.strftime('%Y-%m-%d %H:%M:%S')
+            # Filter by created_at_ist string comparison (works for ISO format strings)
+            query['created_at_ist'] = {'$gte': since_str}
         
-        cursor = mongo_collection.find(query).sort('created_at', ASCENDING).limit(limit)
-        documents = list(cursor)
-
-        # Fallback for legacy records that don't have comparable datetime fields
-        if not documents:
-            legacy_cursor = (
-                mongo_collection
-                .find({'device_id': device_id, 'type': 'telemetry'})
-                .sort('_id', DESCENDING)
-                .limit(limit)
-            )
-            legacy_docs = list(legacy_cursor)
-            legacy_docs.reverse()  # chronological order
-            documents = legacy_docs
+        # Try to use created_at_ist first, fallback to created_at
+        # Sort by ASCENDING to get chronological order (oldest first) for charts
+        try:
+            # First try with created_at_ist field (IST timezone string)
+            cursor = mongo_collection.find(query).sort('created_at_ist', ASCENDING).limit(limit)
+            documents = list(cursor)
+            
+            # If no documents or created_at_ist doesn't exist, try created_at
+            if not documents:
+                if hours > 0:
+                    since = datetime.utcnow() - timedelta(hours=hours)
+                    query.pop('created_at_ist', None)
+                    query['created_at'] = {'$gte': since}
+                
+                cursor = mongo_collection.find(query).sort('created_at', ASCENDING).limit(limit)
+                documents = list(cursor)
+            
+            # If still no documents, try legacy _id sort
+            if not documents:
+                query.pop('created_at', None)
+                query.pop('created_at_ist', None)
+                legacy_cursor = (
+                    mongo_collection
+                    .find(query)
+                    .sort('_id', ASCENDING)
+                    .limit(limit)
+                )
+                documents = list(legacy_cursor)
+            
+        except Exception as query_error:
+            print(f"MongoDB query error: {query_error}")
+            # Fallback to basic query
+            if hours > 0:
+                since = datetime.utcnow() - timedelta(hours=hours)
+                query.pop('created_at_ist', None)
+                query['created_at'] = {'$gte': since}
+            cursor = mongo_collection.find(query).sort('created_at', ASCENDING).limit(limit)
+            documents = list(cursor)
         
         data = []
         for doc in documents:
             payload = doc.get('payload', {})
-            created_at = doc.get('created_at')
-            timestamp_secs = parse_timestamp_seconds(created_at)
-
+            
+            # Try to parse created_at_ist first (format: "YYYY-MM-DD HH:MM:SS")
+            timestamp_secs = None
+            created_at_ist = doc.get('created_at_ist') or doc.get('created_at_IST')  # Handle both cases
+            
+            if created_at_ist:
+                try:
+                    # Parse IST string format: "2024-01-15 14:30:45"
+                    dt_obj = datetime.strptime(created_at_ist, '%Y-%m-%d %H:%M:%S')
+                    # Set timezone to IST
+                    dt_obj = dt_obj.replace(tzinfo=IST_ZONE)
+                    timestamp_secs = dt_obj.timestamp()
+                except (ValueError, TypeError) as e:
+                    print(f"Error parsing created_at_ist '{created_at_ist}': {e}")
+            
+            # Fallback to created_at (UTC datetime)
+            if timestamp_secs is None:
+                created_at = doc.get('created_at')
+                timestamp_secs = parse_timestamp_seconds(created_at)
+            
+            # Fallback to ts field
             if timestamp_secs is None:
                 ts_value = doc.get('ts') or payload.get('ts')
                 timestamp_secs = parse_timestamp_seconds(ts_value)
-
+            
+            # Last resort: use current time
             if timestamp_secs is None:
                 timestamp_secs = datetime.utcnow().timestamp()
 
@@ -716,6 +887,8 @@ def get_telemetry(device_id):
             'source': 'MongoDB Atlas'
         })
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
@@ -723,38 +896,95 @@ def get_telemetry(device_id):
 
 @app.route('/api/device/<device_id>/command', methods=['POST'])
 def send_command(device_id):
-    """Send command to device via AWS IoT Core or Local MQTT"""
+    """Send command to device via AWS IoT Core"""
     try:
         data = request.json
         command = data.get('command', {})
+        
+        if not command:
+            return jsonify({
+                'success': False,
+                'error': 'Command payload is required'
+            }), 400
+        
         payload = json.dumps(command)
         
+        # Check if AWS IoT Data client is available
+        if not iot_data:
+            error_msg = 'AWS IoT Core client not available'
+            if iot_data_error:
+                error_msg += f': {iot_data_error}'
+            return jsonify({
+                'success': False,
+                'error': error_msg,
+                'details': 'Please check AWS credentials and IoT endpoint configuration in Railway environment variables'
+            }), 500
+        
+        # Validate topic configuration
+        if not config.AWS_IOT_TOPIC_SUBSCRIBE:
+            return jsonify({
+                'success': False,
+                'error': 'AWS IoT topic not configured'
+            }), 500
+        
         # Publish via AWS IoT Core
-        if iot_data:
-            try:
-                topic = config.AWS_IOT_TOPIC_SUBSCRIBE
-                iot_data.publish(
-                    topic=topic,
-                    qos=1,
-                    payload=payload
-                )
+        try:
+            topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+            print(f"[COMMAND] Publishing to topic: {topic}")
+            print(f"[COMMAND] Payload: {payload[:200]}...")  # Log first 200 chars
+            
+            response = iot_data.publish(
+                topic=topic,
+                qos=1,
+                payload=payload
+            )
+            
+            # Check response
+            http_status = response.get('ResponseMetadata', {}).get('HTTPStatusCode', 0)
+            if http_status == 200:
+                print(f"[COMMAND] ✓ Command sent successfully (HTTP {http_status})")
                 return jsonify({
                     'success': True,
-                    'message': 'Command sent via AWS IoT Core'
+                    'message': 'Command sent via AWS IoT Core',
+                    'topic': topic,
+                    'device_id': device_id
                 })
-            except Exception as e:
-                print(f"AWS IoT publish failed: {e}")
+            else:
+                print(f"[COMMAND] ⚠️ Unexpected HTTP status: {http_status}")
                 return jsonify({
                     'success': False,
-                    'error': 'Failed to send command via AWS IoT Core'
+                    'error': f'AWS IoT Core returned HTTP status {http_status}',
+                    'response': str(response)
                 }), 500
-        
-        return jsonify({
-            'success': False,
-            'error': 'AWS IoT Core client not available'
-        }), 500
+                
+        except Exception as e:
+            error_msg = str(e)
+            error_type = type(e).__name__
+            print(f"[COMMAND] ❌ AWS IoT publish failed: {error_type}: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            
+            # Provide helpful error messages based on exception type
+            if 'CredentialsError' in error_type or 'InvalidAccessKeyId' in error_type:
+                error_details = 'Invalid AWS credentials. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.'
+            elif 'EndpointConnectionError' in error_type or 'ConnectionError' in error_type:
+                error_details = f'Cannot connect to AWS IoT endpoint: {config.AWS_IOT_ENDPOINT}. Check endpoint and network connectivity.'
+            elif 'UnauthorizedOperation' in error_type or 'AccessDenied' in error_type:
+                error_details = 'AWS credentials do not have permission to publish to IoT Core. Check IAM policies.'
+            else:
+                error_details = f'AWS IoT publish failed: {error_msg}'
+            
+            return jsonify({
+                'success': False,
+                'error': 'Failed to send command via AWS IoT Core',
+                'details': error_details,
+                'exception_type': error_type
+            }), 500
         
     except Exception as e:
+        print(f"[COMMAND] ❌ Unexpected error in send_command: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)

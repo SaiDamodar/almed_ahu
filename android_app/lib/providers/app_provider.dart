@@ -57,12 +57,28 @@ class AppProvider extends ChangeNotifier {
         notifyListeners();
         return true;
       } else {
-        _setError('Invalid username or password');
+        // Check if it's a network/DNS error
+        final apiError = _apiService.errorMessage ?? '';
+        if (apiError.contains('SocketException') || 
+            apiError.contains('Failed host lookup') ||
+            apiError.contains('No address associated with hostname')) {
+          _setError('Network error: Cannot resolve Railway domain. Your mobile carrier may be blocking DNS. Try using WiFi or change DNS to Google (8.8.8.8). See DNS_ISSUE_SOLUTION.md for details.');
+        } else {
+          _setError('Invalid username or password');
+        }
         _setLoading(false);
         return false;
       }
     } catch (e) {
-      _setError('Login failed: ${e.toString()}');
+      // Check if it's a network/DNS error
+      final errorStr = e.toString();
+      if (errorStr.contains('SocketException') || 
+          errorStr.contains('Failed host lookup') ||
+          errorStr.contains('No address associated with hostname')) {
+        _setError('Network error: Cannot resolve Railway domain. Your mobile carrier may be blocking it. Try using WiFi or change DNS settings (see DNS_ISSUE_SOLUTION.md).');
+      } else {
+        _setError('Login failed: ${e.toString()}');
+      }
       _setLoading(false);
       return false;
     }
