@@ -223,36 +223,38 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                             },
                           ),
                         ),
-                        SizedBox(width: ScreenUtils.getPadding(context, 12)),
-                        // Admin settings button
-                        Container(
-                          height: ScreenUtils.getButtonHeight(context),
-                          width: ScreenUtils.getButtonHeight(context),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Theme.of(context).dividerColor.withOpacity(0.1),
-                            ),
-                          ),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (context) => AdminScreen(deviceId: widget.deviceId),
-                                  ),
-                                );
-                              },
+                        // Admin settings button (only show for admin users)
+                        if (appProvider.isAdmin) ...[
+                          SizedBox(width: ScreenUtils.getPadding(context, 12)),
+                          Container(
+                            height: ScreenUtils.getButtonHeight(context),
+                            width: ScreenUtils.getButtonHeight(context),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(12),
-                              child: Icon(
-                                Icons.settings_rounded,
-                                size: ScreenUtils.getIconSize(context, 20),
+                              border: Border.all(
+                                color: Theme.of(context).dividerColor.withOpacity(0.1),
+                              ),
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => AdminScreen(deviceId: widget.deviceId),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Icon(
+                                  Icons.settings_rounded,
+                                  size: ScreenUtils.getIconSize(context, 20),
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ],

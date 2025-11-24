@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../models/hospital.dart';
 import 'ahus_screen.dart';
 import 'login_screen.dart';
+import 'admin_users_screen.dart';
 
 /// Hospitals list screen
 class HospitalsScreen extends StatelessWidget {
@@ -38,27 +39,38 @@ class HospitalsScreen extends StatelessWidget {
           child: Column(
             children: [
               // Top bar
-              Padding(
+              Container(
                 padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor.withOpacity(0.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
                 child: Row(
                   children: [
-                    Text(
-                      'ALMED',
-                      style: TextStyle(
-                        fontFamily: 'Verdana',
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black,
-                        letterSpacing: 1.5,
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lightPrimary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        'ALMED',
+                        style: TextStyle(
+                          fontFamily: 'Verdana',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.lightPrimary,
+                          letterSpacing: 1.5,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 20),
-                    Container(
-                      width: 1,
-                      height: 30,
-                      color: Theme.of(context).dividerColor.withOpacity(0.3),
-                    ),
-                    const SizedBox(width: 20),
+                    const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -66,12 +78,49 @@ class HospitalsScreen extends StatelessWidget {
                           Text(
                             'Hospitals',
                             style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                                  fontSize: 28,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
                                 ),
+                          ),
+                          const SizedBox(height: 4),
+                          Consumer<AppProvider>(
+                            builder: (context, appProvider, child) {
+                              final totalAhus = appProvider.hospitalsList
+                                  .fold(0, (sum, h) => sum + h.totalAhus);
+                              return Text(
+                                '$totalAhus AHU units',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppTheme.lightPrimary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              );
+                            },
                           ),
                         ],
                       ),
                     ),
+                    // Users management button
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Theme.of(context).dividerColor.withOpacity(0.1),
+                        ),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.people_rounded),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => const AdminUsersScreen(),
+                            ),
+                          );
+                        },
+                        tooltip: 'Users Management',
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     // Logout button
                     Container(
                       decoration: BoxDecoration(
@@ -187,9 +236,12 @@ class _HospitalCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final totalAhus = hospital.totalAhus;
     final onlineAhus = hospital.allAhus.where((ahu) => ahu.isOnline).length;
+    final offlineAhus = totalAhus - onlineAhus;
 
     return Card(
+      elevation: 2,
       margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: InkWell(
         onTap: () {
           Navigator.of(context).push(
@@ -207,7 +259,12 @@ class _HospitalCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppTheme.info.withOpacity(0.1),
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.info.withOpacity(0.2),
+                      AppTheme.info.withOpacity(0.1),
+                    ],
+                  ),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: const Icon(
@@ -226,47 +283,82 @@ class _HospitalCard extends StatelessWidget {
                       hospital.name,
                       style: Theme.of(context).textTheme.displayMedium?.copyWith(
                             fontSize: 20,
+                            fontWeight: FontWeight.bold,
                           ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
-                        Icon(
-                          Icons.air_rounded,
-                          size: 16,
-                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        _StatBadge(
+                          icon: Icons.air_rounded,
+                          label: '$totalAhus',
+                          color: AppTheme.info,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '$totalAhus AHU${totalAhus != 1 ? 's' : ''}',
-                          style: Theme.of(context).textTheme.bodyMedium,
+                        const SizedBox(width: 12),
+                        _StatBadge(
+                          icon: Icons.check_circle,
+                          label: '$onlineAhus',
+                          color: AppTheme.success,
                         ),
-                        const SizedBox(width: 16),
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: AppTheme.success,
-                            shape: BoxShape.circle,
+                        if (offlineAhus > 0) ...[
+                          const SizedBox(width: 12),
+                          _StatBadge(
+                            icon: Icons.error,
+                            label: '$offlineAhus',
+                            color: AppTheme.error,
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '$onlineAhus online',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: AppTheme.success,
-                              ),
-                        ),
+                        ],
                       ],
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.lightPrimary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppTheme.lightPrimary,
+                ),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _StatBadge extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _StatBadge({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }

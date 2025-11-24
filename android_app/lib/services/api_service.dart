@@ -350,6 +350,108 @@ class ApiService {
     }
   }
 
+  /// Get pending user registrations (admin only)
+  Future<List<User>> getPendingUsers() async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/admin/users/pending'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['users'] != null) {
+          return (data['users'] as List)
+              .map((json) => User.fromJson(json))
+              .toList();
+        }
+      }
+      return [];
+    } catch (e) {
+      print('Get pending users error: $e');
+      return [];
+    }
+  }
+
+  /// Get registered users (admin only)
+  Future<List<User>> getRegisteredUsers() async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/admin/users/registered'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['users'] != null) {
+          return (data['users'] as List)
+              .map((json) => User.fromJson(json))
+              .toList();
+        }
+      }
+      return [];
+    } catch (e) {
+      print('Get registered users error: $e');
+      return [];
+    }
+  }
+
+  /// Approve user registration (admin only)
+  Future<bool> approveUser(String userId) async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/admin/users/$userId/approve'),
+        method: 'POST',
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      print('Approve user error: $e');
+      return false;
+    }
+  }
+
+  /// Reject user registration (admin only)
+  Future<bool> rejectUser(String userId) async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/admin/users/$userId/reject'),
+        method: 'POST',
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      print('Reject user error: $e');
+      return false;
+    }
+  }
+
+  /// Assign AHUs to user (admin only)
+  Future<bool> assignAhusToUser(String userId, List<String> ahuIds) async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/admin/users/$userId/assign-ahus'),
+        method: 'POST',
+        body: jsonEncode({'ahu_ids': ahuIds}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      print('Assign AHUs error: $e');
+      return false;
+    }
+  }
+
   /// Logout (clear session)
   void logout() {
     _sessionCookie = null;

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/user.dart';
+import '../models/device_status.dart';
 import 'ahu_control_screen.dart';
 import 'landing_screen.dart';
 
@@ -18,15 +19,27 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Check user status when screen loads
+    // Check user status and load device statuses when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkUserStatus();
+      _loadDeviceStatuses();
     });
   }
 
   Future<void> _checkUserStatus() async {
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     await appProvider.checkUserStatus();
+  }
+
+  Future<void> _loadDeviceStatuses() async {
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+    final user = appProvider.currentUser;
+    if (user != null && user.assignedAhuIds.isNotEmpty) {
+      // Load status for all assigned AHUs
+      for (final ahuId in user.assignedAhuIds) {
+        await appProvider.loadDeviceStatus(ahuId);
+      }
+    }
   }
 
   @override
@@ -178,93 +191,97 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildAhuList(BuildContext context, User user, bool isDark) {
+    final appProvider = Provider.of<AppProvider>(context);
+    
     return RefreshIndicator(
-      onRefresh: _checkUserStatus,
+      onRefresh: () async {
+        await _checkUserStatus();
+        // Refresh device statuses for assigned AHUs
+        for (final ahuId in user.assignedAhuIds) {
+          await appProvider.loadDeviceStatus(ahuId);
+        }
+      },
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           // User Info Card
           Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 30,
-                        backgroundColor: AppTheme.lightPrimary.withOpacity(0.1),
-                        child: Icon(
-                          Icons.person,
-                          color: AppTheme.lightPrimary,
-                          size: 30,
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor: AppTheme.lightPrimary.withOpacity(0.1),
+                    child: Icon(
+                      Icons.person,
+                      color: AppTheme.lightPrimary,
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user.username,
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              user.username,
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              user.hospitalName,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: isDark
-                                        ? AppTheme.darkOnSurfaceVariant
-                                        : AppTheme.lightOnSurfaceVariant,
-                                  ),
-                            ),
-                          ],
+                        const SizedBox(height: 4),
+                        Text(
+                          user.hospitalName,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: isDark
+                                    ? AppTheme.darkOnSurfaceVariant
+                                    : AppTheme.lightOnSurfaceVariant,
+                              ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
 
           // Assigned AHUs Section
-          Text(
-            'Assigned AHU Units',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+          Row(
+            children: [
+              Text(
+                'Assigned AHU Units',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const Spacer(),
+              Text(
+                '${user.assignedAhuIds.length} unit${user.assignedAhuIds.length != 1 ? 's' : ''}',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppTheme.lightPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
 
-          // AHU List
+          // AHU List with status
           ...user.assignedAhuIds.map((ahuId) {
+            final status = appProvider.getDeviceStatus(ahuId);
+            final isOnline = status?.isOnline ?? false;
+            
             return Card(
+              elevation: 2,
               margin: const EdgeInsets.only(bottom: 12),
-              child: ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.lightPrimary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.ac_unit,
-                    color: AppTheme.lightPrimary,
-                  ),
-                ),
-                title: Text(
-                  'AHU Unit $ahuId',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text('Device ID: $ahuId'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: InkWell(
                 onTap: () {
-                  // Navigate to AHU control screen
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (context) => AhuControlScreen(
@@ -274,6 +291,103 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   );
                 },
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      // Status indicator
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: isOnline ? AppTheme.success : AppTheme.error,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Icon
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.lightPrimary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.ac_unit,
+                          color: AppTheme.lightPrimary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Info
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'AHU Unit $ahuId',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            if (status != null) ...[
+                              Row(
+                                children: [
+                                  Icon(
+                                    isOnline ? Icons.check_circle : Icons.error,
+                                    size: 14,
+                                    color: isOnline ? AppTheme.success : AppTheme.error,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    isOnline ? 'Online' : 'Offline',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isOnline ? AppTheme.success : AppTheme.error,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (status.telemetry != null && status.telemetry!.hasSensorData) ...[
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      status.telemetry!.tempDisplay,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppTheme.temperature,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      status.telemetry!.humDisplay,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppTheme.humidity,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ] else ...[
+                              Text(
+                                'Loading...',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(context).textTheme.bodySmall?.color,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, color: AppTheme.lightPrimary),
+                    ],
+                  ),
+                ),
               ),
             );
           }).toList(),

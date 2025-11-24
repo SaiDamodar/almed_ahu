@@ -407,11 +407,61 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
   
+  /// Get pending users (admin only)
+  Future<List<User>> getPendingUsers() async {
+    try {
+      return await _apiService.getPendingUsers();
+    } catch (e) {
+      _setError('Failed to load pending users: ${e.toString()}');
+      return [];
+    }
+  }
+
+  /// Get registered users (admin only)
+  Future<List<User>> getRegisteredUsers() async {
+    try {
+      return await _apiService.getRegisteredUsers();
+    } catch (e) {
+      _setError('Failed to load registered users: ${e.toString()}');
+      return [];
+    }
+  }
+
+  /// Approve user (admin only)
+  Future<bool> approveUser(String userId) async {
+    try {
+      return await _apiService.approveUser(userId);
+    } catch (e) {
+      _setError('Failed to approve user: ${e.toString()}');
+      return false;
+    }
+  }
+
+  /// Reject user (admin only)
+  Future<bool> rejectUser(String userId) async {
+    try {
+      return await _apiService.rejectUser(userId);
+    } catch (e) {
+      _setError('Failed to reject user: ${e.toString()}');
+      return false;
+    }
+  }
+
+  /// Assign AHUs to user (admin only)
+  Future<bool> assignAhusToUser(String userId, List<String> ahuIds) async {
+    try {
+      return await _apiService.assignAhusToUser(userId, ahuIds);
+    } catch (e) {
+      _setError('Failed to assign AHUs: ${e.toString()}');
+      return false;
+    }
+  }
+
   void _setError(String? error) {
     _errorMessage = error;
     notifyListeners();
   }
-  
+
   @override
   void dispose() {
     _stopPolling();
