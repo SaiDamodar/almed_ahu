@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
+import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/screen_utils.dart';
 import 'login_screen.dart';
-import 'user_auth_screen.dart';
+import 'user_login_screen.dart';
+import 'home_screen.dart';
+import 'hospitals_screen.dart';
 
 /// Landing screen with Admin and Hospital User options
 class LandingScreen extends StatelessWidget {
@@ -103,13 +106,12 @@ class LandingScreen extends StatelessWidget {
                   _UserTypeCard(
                     title: 'Hospital User',
                     icon: Icons.local_hospital_rounded,
-                    description: 'Coming Soon',
+                    description: 'Login to access your AHU units',
                     color: AppTheme.success,
-                    isComingSoon: true,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (context) => const UserAuthScreen(),
+                          builder: (context) => const UserLoginScreen(),
                         ),
                       );
                     },

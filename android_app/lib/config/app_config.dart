@@ -11,9 +11,8 @@ class AppConfig {
   // Subdomain (api.almedequipments.in) propagates faster (15-30 minutes)
   // 
   // If root domain doesn't work on mobile data, use subdomain:
-  static const String baseUrl = 'https://api.almedequipments.in';
+  static const String baseUrl = 'https://app.almedequipments.in';
   // Or root domain (if DNS fully propagated):
-  // static const String baseUrl = 'https://almedequipments.in';
   static const String apiBaseUrl = '$baseUrl/api';
   
   // Admin credentials

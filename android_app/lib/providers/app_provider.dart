@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../models/hospital.dart';
 import '../models/device_status.dart';
 import '../models/ahu_state.dart';
+import '../models/user.dart';
+import '../models/register_request.dart';
 import '../services/api_service.dart';
 import '../services/aws_iot_service.dart';
 
@@ -14,6 +16,8 @@ class AppProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
   bool _useDirectAws = false; // Toggle between Flask API and direct AWS IoT
+  bool _isAdmin = false; // Track if user is admin or hospital user
+  User? _currentUser; // Current logged-in hospital user
   
   // Data
   Map<String, Hospital> _hospitals = {};
@@ -26,6 +30,8 @@ class AppProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   Map<String, Hospital> get hospitals => _hospitals;
   List<Hospital> get hospitalsList => _hospitals.values.toList();
+  bool get isAdmin => _isAdmin;
+  User? get currentUser => _currentUser;
   
   DeviceStatus? getDeviceStatus(String deviceId) {
     // Try AWS IoT first if connected, otherwise fall back to API cache
@@ -38,7 +44,7 @@ class AppProvider extends ChangeNotifier {
   bool get useDirectAws => _useDirectAws;
   bool get awsConnected => _awsIoTService.isConnected;
   
-  /// Login
+  /// Admin Login
   Future<bool> login(String username, String password) async {
     _setLoading(true);
     _setError(null);
@@ -47,6 +53,8 @@ class AppProvider extends ChangeNotifier {
       final success = await _apiService.login(username, password);
       if (success) {
         _isAuthenticated = true;
+        _isAdmin = true;
+        _currentUser = null; // Admin doesn't have user object
         
         // Connect to AWS IoT Core directly
         await connectToAwsIoT();
@@ -81,6 +89,73 @@ class AppProvider extends ChangeNotifier {
       }
       _setLoading(false);
       return false;
+    }
+  }
+
+  /// Hospital User Registration
+  Future<bool> register(RegisterRequest request) async {
+    _setLoading(true);
+    _setError(null);
+    
+    try {
+      final user = await _apiService.register(request);
+      if (user != null) {
+        _isAuthenticated = true;
+        _isAdmin = false;
+        _currentUser = user;
+        _setLoading(false);
+        notifyListeners();
+        return true;
+      } else {
+        _setError(_apiService.errorMessage ?? 'Registration failed');
+        _setLoading(false);
+        return false;
+      }
+    } catch (e) {
+      _setError('Registration failed: ${e.toString()}');
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Hospital User Login
+  Future<bool> userLogin(String email, String password) async {
+    _setLoading(true);
+    _setError(null);
+    
+    try {
+      final user = await _apiService.userLogin(email, password);
+      if (user != null) {
+        _isAuthenticated = true;
+        _isAdmin = false;
+        _currentUser = user;
+        _setLoading(false);
+        notifyListeners();
+        return true;
+      } else {
+        _setError(_apiService.errorMessage ?? 'Login failed');
+        _setLoading(false);
+        return false;
+      }
+    } catch (e) {
+      _setError('Login failed: ${e.toString()}');
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Check current user status (for hospital users)
+  Future<void> checkUserStatus() async {
+    if (_isAdmin) return; // Admin doesn't need status check
+    
+    try {
+      final user = await _apiService.checkUserStatus();
+      if (user != null) {
+        _currentUser = user;
+        notifyListeners();
+      }
+    } catch (e) {
+      print('Error checking user status: $e');
     }
   }
   
@@ -119,7 +194,9 @@ class AppProvider extends ChangeNotifier {
     _awsIoTService.disconnect();
     _apiService.logout();
     _isAuthenticated = false;
+    _isAdmin = false;
     _useDirectAws = false;
+    _currentUser = null;
     _hospitals.clear();
     _deviceStatuses.clear();
     _setError(null);

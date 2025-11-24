@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../models/hospital.dart';
 import '../models/device_status.dart';
+import '../models/user.dart';
+import '../models/register_request.dart';
 
 /// API Service for communicating with web dashboard
 class ApiService {
@@ -227,6 +229,127 @@ class ApiService {
     ).trim();
   }
   
+  /// Register new hospital user
+  Future<User?> register(RegisterRequest request) async {
+    try {
+      final url = '${AppConfig.apiBaseUrl}/register';
+      final requestBody = jsonEncode(request.toJson());
+      
+      print('Register: Attempting to register at $url');
+      print('Register: Request body: $requestBody');
+      
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: requestBody,
+      );
+
+      print('Register: Response status: ${response.statusCode}');
+      print('Register: Response body: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['user'] != null) {
+          print('Register: Success');
+          return User.fromJson(data['user']);
+        } else {
+          print('Register: Failed - success is false or user is null');
+        }
+      }
+      
+      // Try to parse error message
+      try {
+        final data = jsonDecode(response.body);
+        final errorMsg = data['message'] ?? data['error'] ?? 'Registration failed';
+        _lastError = errorMsg;
+        print('Register: Error message: $errorMsg');
+      } catch (e) {
+        _lastError = 'Registration failed: HTTP ${response.statusCode} - ${response.body}';
+        print('Register: Failed to parse error - ${response.statusCode}');
+      }
+      return null;
+    } on SocketException catch (e) {
+      _lastError = 'Network error: ${e.message}';
+      print('Register: Network error - ${e.message}');
+      return null;
+    } catch (e, stackTrace) {
+      _lastError = 'Registration failed: ${e.toString()}';
+      print('Register: Exception - $e');
+      print('Register: Stack trace - $stackTrace');
+      return null;
+    }
+  }
+
+  /// User login (email/password)
+  Future<User?> userLogin(String email, String password) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/user/login'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          // Extract session cookie
+          final cookies = response.headers['set-cookie'];
+          if (cookies != null) {
+            _sessionCookie = cookies.split(';').first;
+          }
+          
+          if (data['user'] != null) {
+            return User.fromJson(data['user']);
+          }
+        }
+      }
+      
+      // Try to parse error message
+      try {
+        final data = jsonDecode(response.body);
+        _lastError = data['message'] ?? 'Login failed';
+      } catch (e) {
+        _lastError = 'Login failed: ${response.statusCode}';
+      }
+      return null;
+    } on SocketException catch (e) {
+      _lastError = e.message;
+      return null;
+    } catch (e) {
+      _lastError = e.toString();
+      return null;
+    }
+  }
+
+  /// Check current user status
+  Future<User?> checkUserStatus() async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/user/status'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['user'] != null) {
+          return User.fromJson(data['user']);
+        }
+      }
+      return null;
+    } catch (e) {
+      print('Check user status error: $e');
+      return null;
+    }
+  }
+
   /// Logout (clear session)
   void logout() {
     _sessionCookie = null;
