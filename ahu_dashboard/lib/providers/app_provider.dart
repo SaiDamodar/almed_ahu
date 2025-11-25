@@ -18,12 +18,24 @@ class AppProvider extends ChangeNotifier {
   final Map<String, List<AhuLog>> _logData = {};
   final Map<String, String> _statusData = {};
   bool _isConnected = false;
+  
+  // Cache for frequently accessed data
+  List<AhuUnit>? _cachedAhuUnits;
+  bool _ahuUnitsChanged = true;
 
   // Getters
   UserRole? get currentRole => _currentRole;
   bool get isConnected => _isConnected;
-  List<AhuUnit> get ahuUnits => _ahuUnits.values.toList();
   MqttService? get mqttService => _mqttService;
+  
+  /// Get AHU units list with caching
+  List<AhuUnit> get ahuUnits {
+    if (_ahuUnitsChanged || _cachedAhuUnits == null) {
+      _cachedAhuUnits = List.unmodifiable(_ahuUnits.values.toList());
+      _ahuUnitsChanged = false;
+    }
+    return _cachedAhuUnits!;
+  }
 
   /// Get telemetry for specific AHU
   AhuTelemetry? getTelemetry(String ahuId) => _telemetryData[ahuId];
@@ -32,7 +44,7 @@ class AppProvider extends ChangeNotifier {
   AhuState? getState(String ahuId) => _stateData[ahuId];
 
   /// Get logs for specific AHU
-  List<AhuLog> getLogs(String ahuId) => _logData[ahuId] ?? [];
+  List<AhuLog> getLogs(String ahuId) => _logData[ahuId] ?? const [];
 
   /// Get status for specific AHU
   String? getStatus(String ahuId) => _statusData[ahuId];
@@ -44,40 +56,23 @@ class AppProvider extends ChangeNotifier {
   }
 
   /// Initialize MQTT connection
-  /// Automatically detects platform and uses appropriate broker
-  /// ALL PLATFORMS NOW USE LOCAL MQTT BROKER (Raspberry Pi)
-  /// The Raspberry Pi bridge forwards messages to AWS IoT Core
-  /// 
-  /// Tries common Pi IPs in order:
-  /// 1. User-specified broker (if provided)
-  /// 2. 10.42.0.1 (Pi hotspot - most common)
-  /// 3. raspberrypi.local (mDNS name)
-  /// 4. 192.168.1.100 (fallback network IP)
   Future<bool> initializeMqtt({
     String? broker,
     int? port,
     String? username,
     String? password,
   }) async {
-    // ALL platforms connect to LOCAL MQTT broker on Raspberry Pi
-    // The Pi's mqtt_bridge_aws.py handles forwarding to AWS IoT Core
-    
-    // Default broker priority:
-    // 1. User-provided broker
-    // 2. Pi hotspot IP (10.42.0.1) - most common for ESP32 setup
-    // 3. mDNS name (raspberrypi.local) - works if mDNS is enabled
-    // 4. Fallback network IP (192.168.1.100)
-    final defaultBroker = broker ?? '10.42.0.1'; // Pi hotspot IP (most common)
+    final defaultBroker = broker ?? '10.42.0.1';
     
     _mqttService = MqttService(
       broker: defaultBroker,
       port: port ?? 1883,
       username: username ?? 'almed',
       password: password ?? 'Almed1234\$',
-      useTLS: false, // Local connection, no TLS needed
+      useTLS: false,
     );
-    print('AppProvider: Initializing MQTT - Connecting to Raspberry Pi bridge at $defaultBroker:${port ?? 1883}');
-    print('AppProvider: If connection fails, check Pi IP. Common IPs: 10.42.0.1 (hotspot), 192.168.1.x (network), raspberrypi.local (mDNS)');
+    
+    debugPrint('AppProvider: Initializing MQTT - Connecting to Raspberry Pi bridge at $defaultBroker:${port ?? 1883}');
 
     // Listen to connection status
     _mqttService!.connectionStream.listen((connected) {
@@ -87,9 +82,7 @@ class AppProvider extends ChangeNotifier {
 
     // Listen to telemetry updates (debounced for performance)
     _mqttService!.telemetryStream.listen((entry) {
-      final parts = entry.key.split('|');
-      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
-      
+      final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
       _telemetryData[ahuId] = entry.value;
       _debouncedNotify();
@@ -97,56 +90,55 @@ class AppProvider extends ChangeNotifier {
 
     // Listen to state updates
     _mqttService!.stateStream.listen((entry) {
-      final parts = entry.key.split('|');
-      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
-      
+      final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
       _stateData[ahuId] = entry.value;
-      notifyListeners(); // State changes are important, notify immediately
+      notifyListeners();
     });
 
     // Listen to log updates (throttled)
     _mqttService!.logStream.listen((entry) {
-      final parts = entry.key.split('|');
-      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
-      
+      final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
-      if (!_logData.containsKey(ahuId)) {
-        _logData[ahuId] = [];
-      }
-      _logData[ahuId]!.add(entry.value);
+      
+      final logs = _logData.putIfAbsent(ahuId, () => []);
+      logs.add(entry.value);
+      
       // Keep only last 100 logs
-      if (_logData[ahuId]!.length > 100) {
-        _logData[ahuId]!.removeAt(0);
+      if (logs.length > 100) {
+        logs.removeAt(0);
       }
       _debouncedNotify();
     });
 
     // Listen to status updates
     _mqttService!.statusStream.listen((entry) {
-      final parts = entry.key.split('|');
-      final ahuId = parts.isNotEmpty ? parts[0] : entry.key;
-      
+      final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
       _statusData[ahuId] = entry.value;
-      notifyListeners(); // Status changes are important
+      notifyListeners();
     });
 
     final connected = await _mqttService!.connect();
     return connected;
   }
+  
+  /// Extract AHU ID from topic data
+  String _extractAhuId(String topicData) {
+    final parts = topicData.split('|');
+    return parts.isNotEmpty ? parts[0] : topicData;
+  }
 
   /// Debounced notify to reduce UI rebuilds
   void _debouncedNotify() {
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 100), () {
-      notifyListeners();
-    });
+    _debounceTimer = Timer(const Duration(milliseconds: 100), notifyListeners);
   }
 
   /// Add AHU unit to monitor
   void addAhuUnit(AhuUnit ahu) {
     _ahuUnits[ahu.id] = ahu;
+    _ahuUnitsChanged = true;
     _mqttService?.subscribeToAhu(ahu);
     notifyListeners();
   }
@@ -158,12 +150,12 @@ class AppProvider extends ChangeNotifier {
     _stateData.remove(ahuId);
     _logData.remove(ahuId);
     _statusData.remove(ahuId);
+    _ahuUnitsChanged = true;
     notifyListeners();
   }
 
-  /// Load default AHU units (from your ESP32 config)
+  /// Load default AHU units
   void loadDefaultAhus() {
-    // Default AHU from your ESP32 code
     final defaultAhu = AhuUnit(
       id: 'ahu-01',
       name: 'ICU-1 AHU',
@@ -175,9 +167,7 @@ class AppProvider extends ChangeNotifier {
   }
 
   /// Auto-discover and register AHU when data arrives from unknown ID
-  /// topicData format: "ahuId|site|room"
   void _ensureAhuRegistered(String topicData, {String? site, String? room}) {
-    // Parse topic data: format is "ahuId|site|room"
     final parts = topicData.split('|');
     final ahuId = parts.isNotEmpty ? parts[0] : topicData;
     final discoveredSite = parts.length > 1 ? parts[1] : (site ?? 'hospitalA');
@@ -185,7 +175,6 @@ class AppProvider extends ChangeNotifier {
     
     if (_ahuUnits.containsKey(ahuId)) return;
     
-    // Create new AHU unit automatically
     final newAhu = AhuUnit(
       id: ahuId,
       name: 'AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
@@ -195,7 +184,7 @@ class AppProvider extends ChangeNotifier {
     );
     
     addAhuUnit(newAhu);
-    print('AppProvider: Auto-discovered new AHU - $ahuId at $discoveredSite/$discoveredRoom');
+    debugPrint('AppProvider: Auto-discovered new AHU - $ahuId at $discoveredSite/$discoveredRoom');
   }
 
   /// Start AHU
@@ -246,7 +235,7 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  /// Toggle fan speed: LOW → MID → HIGH → LOW (cycles through speeds)
+  /// Toggle fan speed
   void toggleFanSpeed(String ahuId) {
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
@@ -285,8 +274,6 @@ class AppProvider extends ChangeNotifier {
   }
 
   /// Provision motor timings (admin only)
-  /// Note: m2Interval is the WAIT TIME between cycles, not the total interval
-  /// The actual interval sent to ESP32 = m2Interval + m2Run
   void provisionMotorTimings(String ahuId, {
     int? m1Start,
     int? m1Post,
@@ -297,20 +284,17 @@ class AppProvider extends ChangeNotifier {
     if (_currentRole != UserRole.admin) return;
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      // ALWAYS add run time to interval
-      // m2Interval from UI = wait time between motor cycles
-      // Actual interval for ESP32 = wait time + run time
-      int waitTime = m2Interval ?? 30;
-      int m2RunTime = m2Run ?? 10;
-      int actualInterval = waitTime + m2RunTime;
+      final waitTime = m2Interval ?? 30;
+      final m2RunTime = m2Run ?? 10;
+      final actualInterval = waitTime + m2RunTime;
       
-      print('AppProvider: M2 Interval calculation - Wait: ${waitTime}s + Run: ${m2RunTime}s = Actual: ${actualInterval}s');
+      debugPrint('AppProvider: M2 Interval calculation - Wait: ${waitTime}s + Run: ${m2RunTime}s = Actual: ${actualInterval}s');
       
       _mqttService?.provisionMotorTimings(
         ahu,
         m1Start: m1Start,
         m1Post: m1Post,
-        m2Interval: actualInterval,  // Send calculated interval to ESP32
+        m2Interval: actualInterval,
         m2Run: m2Run,
         m2Delay: m2Delay,
       );
@@ -324,6 +308,3 @@ class AppProvider extends ChangeNotifier {
     super.dispose();
   }
 }
-
-
-

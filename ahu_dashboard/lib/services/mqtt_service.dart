@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import '../models/ahu_telemetry.dart';
@@ -45,61 +45,49 @@ class MqttService {
   /// Connect to MQTT broker
   Future<bool> connect() async {
     try {
-      _client = MqttServerClient(broker, 'ahu_dashboard_${DateTime.now().millisecondsSinceEpoch}');
-      _client!.port = port;
-      _client!.logging(on: false);
-      _client!.keepAlivePeriod = 60;
-      _client!.onConnected = _onConnected;
-      _client!.onDisconnected = _onDisconnected;
-      _client!.onSubscribed = _onSubscribed;
-      _client!.pongCallback = _pong;
+      final clientId = 'ahu_dashboard_${DateTime.now().millisecondsSinceEpoch}';
+      _client = MqttServerClient(broker, clientId)
+        ..port = port
+        ..logging(on: false)
+        ..keepAlivePeriod = 60
+        ..onConnected = _onConnected
+        ..onDisconnected = _onDisconnected
+        ..onSubscribed = _onSubscribed
+        ..pongCallback = _pong;
 
-      // Enable TLS for cloud connections
       if (useTLS) {
         _client!.secure = true;
-        if (!kIsWeb) {
-          // SecurityContext is only available on native platforms
-          // Import dart:io conditionally if needed, but for now rely on default
-          print('MQTT: TLS enabled for secure connection (native)');
-        } else {
-          // Web uses WebSocket secure connections (wss://)
-          // The mqtt_client package handles this automatically
-          print('MQTT: TLS enabled for secure WebSocket connection (web)');
-        }
+        debugPrint('MQTT: TLS enabled for ${kIsWeb ? "web" : "native"} connection');
       }
 
-      final connMessage = MqttConnectMessage()
-          .withClientIdentifier('ahu_dashboard_${DateTime.now().millisecondsSinceEpoch}')
-          .authenticateAs(username, password)
-          .withWillTopic('ahu_dashboard/status')
-          .withWillMessage('offline')
-          .startClean()
-          .withWillQos(MqttQos.atLeastOnce);
-
-      _client!.connectionMessage = connMessage;
+      _client!.connectionMessage = MqttConnectMessage()
+        .withClientIdentifier(clientId)
+        .authenticateAs(username, password)
+        .withWillTopic('ahu_dashboard/status')
+        .withWillMessage('offline')
+        .startClean()
+        .withWillQos(MqttQos.atLeastOnce);
 
       await _client!.connect();
 
       if (_client!.connectionStatus!.state == MqttConnectionState.connected) {
-        print('MQTT: Connected to $broker:$port ${useTLS ? "(TLS)" : ""}');
+        debugPrint('MQTT: Connected to $broker:$port ${useTLS ? "(TLS)" : ""}');
         _isConnected = true;
         _connectionController.add(true);
 
-        // Subscribe to all AHU topics (wildcard)
+        // Subscribe to all AHU topics
         _client!.subscribe('almed/ahu/#', MqttQos.atLeastOnce);
-
-        // Listen to messages
         _client!.updates!.listen(_onMessage);
 
         return true;
       } else {
-        print('MQTT: Connection failed - ${_client!.connectionStatus}');
+        debugPrint('MQTT: Connection failed - ${_client!.connectionStatus}');
         _isConnected = false;
         _connectionController.add(false);
         return false;
       }
     } catch (e) {
-      print('MQTT: Connection error - $e');
+      debugPrint('MQTT: Connection error - $e');
       _isConnected = false;
       _connectionController.add(false);
       return false;
@@ -126,55 +114,38 @@ class MqttService {
   void sendCommand(AhuUnit ahu, Map<String, dynamic> command) {
     if (_client == null || !_isConnected) return;
 
-    final payload = jsonEncode(command);
-    final builder = MqttClientPayloadBuilder();
-    builder.addString(payload);
-
-    _client!.publishMessage(
-      ahu.cmdTopic,
-      MqttQos.atLeastOnce,
-      builder.payload!,
-    );
+    final builder = MqttClientPayloadBuilder()..addString(jsonEncode(command));
+    _client!.publishMessage(ahu.cmdTopic, MqttQos.atLeastOnce, builder.payload!);
   }
 
   /// Start AHU
-  void startAhu(AhuUnit ahu) {
-    sendCommand(ahu, {'start': true});
-  }
+  void startAhu(AhuUnit ahu) => sendCommand(ahu, {'start': true});
 
   /// Stop AHU
-  void stopAhu(AhuUnit ahu) {
-    sendCommand(ahu, {'stop': true});
-  }
+  void stopAhu(AhuUnit ahu) => sendCommand(ahu, {'stop': true});
 
   /// Toggle AHU
-  void toggleAhu(AhuUnit ahu) {
-    sendCommand(ahu, {'toggle': true});
-  }
+  void toggleAhu(AhuUnit ahu) => sendCommand(ahu, {'toggle': true});
 
   /// Set temperature setpoint
-  void setTemperature(AhuUnit ahu, double temp) {
-    sendCommand(ahu, {'setpoint': temp});
-  }
+  void setTemperature(AhuUnit ahu, double temp) => sendCommand(ahu, {'setpoint': temp});
 
   /// Set humidity setpoint
-  void setHumidity(AhuUnit ahu, double humidity) {
-    sendCommand(ahu, {'humset': humidity});
-  }
+  void setHumidity(AhuUnit ahu, double humidity) => sendCommand(ahu, {'humset': humidity});
 
   /// Set fan speed (0=OFF, 1=LOW, 2=MED, 3=HIGH)
   void setFanSpeed(AhuUnit ahu, int speed) {
-    if (speed < 0 || speed > 3) return;
-    sendCommand(ahu, {'fan': speed});
+    if (speed >= 0 && speed <= 3) {
+      sendCommand(ahu, {'fan': speed});
+    }
   }
 
-  /// Toggle fan speed: LOW → MID → HIGH → LOW (cycles through speeds)
-  void toggleFanSpeed(AhuUnit ahu) {
-    sendCommand(ahu, {'fanToggle': true});
-  }
+  /// Toggle fan speed
+  void toggleFanSpeed(AhuUnit ahu) => sendCommand(ahu, {'fanToggle': true});
 
   /// Provision WiFi credentials
-  void provisionWifi(AhuUnit ahu, {
+  void provisionWifi(
+    AhuUnit ahu, {
     String? primarySsid,
     String? primaryPass,
     String? secondarySsid,
@@ -182,54 +153,32 @@ class MqttService {
   }) {
     if (_client == null || !_isConnected) return;
 
-    final Map<String, dynamic> payload = {};
+    final payload = <String, dynamic>{};
 
     if (primarySsid != null && primaryPass != null) {
-      payload['primary'] = {
-        'ssid': primarySsid,
-        'pass': primaryPass,
-      };
+      payload['primary'] = {'ssid': primarySsid, 'pass': primaryPass};
     }
 
     if (secondarySsid != null && secondaryPass != null) {
-      payload['secondary'] = {
-        'ssid': secondarySsid,
-        'pass': secondaryPass,
-      };
+      payload['secondary'] = {'ssid': secondarySsid, 'pass': secondaryPass};
     }
 
-    final json = jsonEncode(payload);
-    final builder = MqttClientPayloadBuilder();
-    builder.addString(json);
-
-    _client!.publishMessage(
-      ahu.provWifiTopic,
-      MqttQos.atLeastOnce,
-      builder.payload!,
-    );
+    final builder = MqttClientPayloadBuilder()..addString(jsonEncode(payload));
+    _client!.publishMessage(ahu.provWifiTopic, MqttQos.atLeastOnce, builder.payload!);
   }
 
   /// Provision broker settings
   void provisionBroker(AhuUnit ahu, String host, int port) {
     if (_client == null || !_isConnected) return;
 
-    final payload = jsonEncode({
-      'host': host,
-      'port': port,
-    });
-
-    final builder = MqttClientPayloadBuilder();
-    builder.addString(payload);
-
-    _client!.publishMessage(
-      ahu.provBrokerTopic,
-      MqttQos.atLeastOnce,
-      builder.payload!,
-    );
+    final builder = MqttClientPayloadBuilder()
+      ..addString(jsonEncode({'host': host, 'port': port}));
+    _client!.publishMessage(ahu.provBrokerTopic, MqttQos.atLeastOnce, builder.payload!);
   }
 
-  /// Provision motor timings (Admin only)
-  void provisionMotorTimings(AhuUnit ahu, {
+  /// Provision motor timings
+  void provisionMotorTimings(
+    AhuUnit ahu, {
     int? m1Start,
     int? m1Post,
     int? m2Interval,
@@ -238,39 +187,32 @@ class MqttService {
   }) {
     if (_client == null || !_isConnected) return;
 
-    final Map<String, dynamic> payload = {};
+    final payload = <String, dynamic>{};
     if (m1Start != null) payload['m1_start'] = m1Start;
     if (m1Post != null) payload['m1_post'] = m1Post;
     if (m2Interval != null) payload['m2_interval'] = m2Interval;
     if (m2Run != null) payload['m2_run'] = m2Run;
     if (m2Delay != null) payload['m2_delay'] = m2Delay;
 
-    final json = jsonEncode(payload);
-    final builder = MqttClientPayloadBuilder();
-    builder.addString(json);
-
-    _client!.publishMessage(
-      ahu.provMotorTimingsTopic,
-      MqttQos.atLeastOnce,
-      builder.payload!,
-    );
+    final builder = MqttClientPayloadBuilder()..addString(jsonEncode(payload));
+    _client!.publishMessage(ahu.provMotorTimingsTopic, MqttQos.atLeastOnce, builder.payload!);
   }
 
   // Callbacks
   void _onConnected() {
-    print('MQTT: Connected');
+    debugPrint('MQTT: Connected');
     _isConnected = true;
     _connectionController.add(true);
   }
 
   void _onDisconnected() {
-    print('MQTT: Disconnected');
+    debugPrint('MQTT: Disconnected');
     _isConnected = false;
     _connectionController.add(false);
   }
 
   void _onSubscribed(String topic) {
-    print('MQTT: Subscribed to $topic');
+    debugPrint('MQTT: Subscribed to $topic');
   }
 
   void _pong() {
@@ -279,40 +221,38 @@ class MqttService {
 
   void _onMessage(List<MqttReceivedMessage<MqttMessage>> messages) {
     for (final message in messages) {
-      final topic = message.topic;
-      final payload = message.payload as MqttPublishMessage;
-      final payloadString = MqttPublishPayload.bytesToStringAsString(payload.payload.message);
+      _processMessage(message);
+    }
+  }
 
-      try {
-        // Parse topic to extract AHU metadata
-        // Expected format: almed/ahu/site/room/ahu-id/<type>
-        final parts = topic.split('/');
-        if (parts.length < 5) continue;
+  void _processMessage(MqttReceivedMessage<MqttMessage> message) {
+    final topic = message.topic;
+    final payload = message.payload as MqttPublishMessage;
+    final payloadString = MqttPublishPayload.bytesToStringAsString(payload.payload.message);
 
-        final ahuId = parts[4]; // almed/ahu/site/room/ahu-id/...
-        
-        // Store topic metadata for later use
-        final topicData = '$ahuId|${parts.length > 2 ? parts[2] : 'hospitalA'}|${parts.length > 3 ? parts[3] : 'room1'}';
+    try {
+      final parts = topic.split('/');
+      if (parts.length < 5) return;
 
-        // Determine message type based on topic suffix
-        if (topic.endsWith('/telemetry')) {
-          final data = jsonDecode(payloadString) as Map<String, dynamic>;
-          final telemetry = AhuTelemetry.fromJson(data);
-          _telemetryController.add(MapEntry(topicData, telemetry));
-        } else if (topic.endsWith('/state')) {
-          final data = jsonDecode(payloadString) as Map<String, dynamic>;
-          final state = AhuState.fromJson(data);
-          _stateController.add(MapEntry(topicData, state));
-        } else if (topic.endsWith('/log')) {
-          final data = jsonDecode(payloadString) as Map<String, dynamic>;
-          final log = AhuLog.fromJson(data);
-          _logController.add(MapEntry(topicData, log));
-        } else if (topic.endsWith('/status')) {
-          _statusController.add(MapEntry(topicData, payloadString));
-        }
-      } catch (e) {
-        print('MQTT: Error parsing message from $topic: $e');
+      final ahuId = parts[4];
+      final site = parts.length > 2 ? parts[2] : 'hospitalA';
+      final room = parts.length > 3 ? parts[3] : 'room1';
+      final topicData = '$ahuId|$site|$room';
+
+      if (topic.endsWith('/telemetry')) {
+        final data = jsonDecode(payloadString) as Map<String, dynamic>;
+        _telemetryController.add(MapEntry(topicData, AhuTelemetry.fromJson(data)));
+      } else if (topic.endsWith('/state')) {
+        final data = jsonDecode(payloadString) as Map<String, dynamic>;
+        _stateController.add(MapEntry(topicData, AhuState.fromJson(data)));
+      } else if (topic.endsWith('/log')) {
+        final data = jsonDecode(payloadString) as Map<String, dynamic>;
+        _logController.add(MapEntry(topicData, AhuLog.fromJson(data)));
+      } else if (topic.endsWith('/status')) {
+        _statusController.add(MapEntry(topicData, payloadString));
       }
+    } catch (e) {
+      debugPrint('MQTT: Error parsing message from $topic: $e');
     }
   }
 
@@ -326,6 +266,3 @@ class MqttService {
     _connectionController.close();
   }
 }
-
-
-

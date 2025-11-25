@@ -6,6 +6,7 @@ import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const AhuDashboardApp());
 }
 
@@ -20,7 +21,7 @@ class AhuDashboardApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: Consumer<ThemeProvider>(
-        builder: (context, themeProvider, child) {
+        builder: (context, themeProvider, _) {
           return MaterialApp(
             title: 'AHU Control Dashboard',
             debugShowCheckedModeBanner: false,

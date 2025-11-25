@@ -28,7 +28,17 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'change-this-secret-key-in-production')
 DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
 HOST = os.getenv('HOST', '0.0.0.0')
 # Railway sets PORT automatically, fallback to 5000 for local development
-PORT = int(os.getenv('PORT', 5000))
+PORT = int(os.getenv('PORT', 80))
+
+# SSL Configuration
+SSL_ENABLED = os.getenv('SSL_ENABLED', 'True').lower() == 'true'
+# For Let's Encrypt (recommended for production):
+# SSL_CERT_PATH = os.getenv('SSL_CERT_PATH', '/etc/letsencrypt/live/app.almedequipments.in/fullchain.pem')
+# SSL_KEY_PATH = os.getenv('SSL_KEY_PATH', '/etc/letsencrypt/live/app.almedequipments.in/privkey.pem')
+# For self-signed (development only):
+SSL_CERT_PATH = os.getenv('SSL_CERT_PATH', 'cert.pem')
+SSL_KEY_PATH = os.getenv('SSL_KEY_PATH', 'key.pem')
+HTTPS_PORT = int(os.getenv('HTTPS_PORT', 443))
 
 # Admin Configuration
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')

@@ -17,9 +17,7 @@ class SensorDisplay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -27,16 +25,13 @@ class SensorDisplay extends StatelessWidget {
           children: [
             const Text(
               'Sensor Readings',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
             Row(
               children: [
                 Expanded(
-                  child: _buildSensorCard(
+                  child: _SensorCard(
                     icon: Icons.thermostat,
                     label: 'Temperature',
                     value: telemetry?.tempDisplay ?? 'N/A',
@@ -46,7 +41,7 @@ class SensorDisplay extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: _buildSensorCard(
+                  child: _SensorCard(
                     icon: Icons.water_drop,
                     label: 'Humidity',
                     value: telemetry?.humDisplay ?? 'N/A',
@@ -61,14 +56,25 @@ class SensorDisplay extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildSensorCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    String? setpoint,
-    required Color color,
-  }) {
+class _SensorCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? setpoint;
+  final Color color;
+  
+  const _SensorCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.setpoint,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -90,10 +96,7 @@ class SensorDisplay extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             label,
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey.shade700,
-            ),
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
           ),
           if (setpoint != null) ...[
             const SizedBox(height: 8),
@@ -105,10 +108,7 @@ class SensorDisplay extends StatelessWidget {
               ),
               child: Text(
                 'Setpoint: $setpoint',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade700,
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
               ),
             ),
           ],
@@ -117,5 +117,3 @@ class SensorDisplay extends StatelessWidget {
     );
   }
 }
-
-

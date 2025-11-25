@@ -19,28 +19,10 @@ class LoginScreen extends StatelessWidget {
       body: Stack(
         children: [
           // Background
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDark
-                    ? [
-                        const Color(0xFF0F172A),
-                        const Color(0xFF1E293B),
-                        const Color(0xFF334155),
-                      ]
-                    : [
-                        Colors.white,
-                        Colors.blue.shade50,
-                        Colors.blue.shade100,
-                      ],
-              ),
-            ),
-          ),
+          _LoginBackground(isDark: isDark),
           
           // Theme toggle
-          Positioned(
+          const Positioned(
             top: 48,
             right: 24,
             child: _ThemeToggle(),
@@ -54,45 +36,8 @@ class LoginScreen extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Company Logo (theme-aware)
-                    Container(
-                      constraints: const BoxConstraints(maxWidth: 200),
-                      child: Image.asset(
-                        isDark 
-                            ? 'assets/images/logo_light.png'  // Light text for dark background
-                            : 'assets/images/logo_dark.png',  // Dark text for light background
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          // Fallback if image not found
-                          return Column(
-                            children: [
-                              Container(
-                                width: 120,
-                                height: 120,
-                                decoration: BoxDecoration(
-                                  color: AppTheme.lightPrimary,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: const Icon(
-                                  Icons.air,
-                                  size: 60,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'ALMED',
-                                style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                                  fontSize: 36,
-                                  fontWeight: FontWeight.w300,
-                                  letterSpacing: 6,
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
+                    // Company Logo
+                    _LogoWidget(isDark: isDark),
                     const SizedBox(height: 32),
                     
                     // Title
@@ -108,18 +53,18 @@ class LoginScreen extends StatelessWidget {
                     const SizedBox(height: 64),
 
                     // Role cards
-                    _ModernRoleCard(
+                    const _ModernRoleCard(
                       role: UserRole.hospital,
                       icon: Icons.local_hospital_rounded,
-                      gradient: const LinearGradient(
+                      gradient: LinearGradient(
                         colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
                       ),
                     ),
                     const SizedBox(height: 20),
-                    _ModernRoleCard(
+                    const _ModernRoleCard(
                       role: UserRole.admin,
                       icon: Icons.shield_rounded,
-                      gradient: const LinearGradient(
+                      gradient: LinearGradient(
                         colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
                       ),
                     ),
@@ -140,26 +85,117 @@ class LoginScreen extends StatelessWidget {
   }
 }
 
-class _ThemeToggle extends StatelessWidget {
+class _LoginBackground extends StatelessWidget {
+  final bool isDark;
+  
+  const _LoginBackground({required this.isDark});
+
   @override
   Widget build(BuildContext context) {
-    return Consumer<ThemeProvider>(
-      builder: (context, themeProvider, child) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? const [
+                  Color(0xFF0F172A),
+                  Color(0xFF1E293B),
+                  Color(0xFF334155),
+                ]
+              : [
+                  Colors.white,
+                  Colors.blue.shade50,
+                  Colors.blue.shade100,
+                ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LogoWidget extends StatelessWidget {
+  final bool isDark;
+  
+  const _LogoWidget({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 200),
+      child: Image.asset(
+        isDark 
+            ? 'assets/images/logo_light.png'
+            : 'assets/images/logo_dark.png',
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return _FallbackLogo(isDark: isDark);
+        },
+      ),
+    );
+  }
+}
+
+class _FallbackLogo extends StatelessWidget {
+  final bool isDark;
+  
+  const _FallbackLogo({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: 120,
+          height: 120,
+          decoration: BoxDecoration(
+            color: AppTheme.lightPrimary,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Icon(
+            Icons.air,
+            size: 60,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'ALMED',
+          style: Theme.of(context).textTheme.displayLarge?.copyWith(
+            fontSize: 36,
+            fontWeight: FontWeight.w300,
+            letterSpacing: 6,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ThemeToggle extends StatelessWidget {
+  const _ThemeToggle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<ThemeProvider, bool>(
+      selector: (_, provider) => provider.isDarkMode,
+      builder: (context, isDarkMode, _) {
+        final theme = Theme.of(context);
         return Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
+            color: theme.cardColor,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+              color: theme.dividerColor.withOpacity(0.1),
             ),
           ),
           child: IconButton(
             icon: Icon(
-              themeProvider.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              color: Theme.of(context).colorScheme.primary,
+              isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              color: theme.colorScheme.primary,
             ),
-            onPressed: () => themeProvider.toggleTheme(),
-            tooltip: themeProvider.isDarkMode ? 'Light Mode' : 'Dark Mode',
+            onPressed: () => context.read<ThemeProvider>().toggleTheme(),
+            tooltip: isDarkMode ? 'Light Mode' : 'Dark Mode',
           ),
         );
       },
@@ -180,6 +216,9 @@ class _ModernRoleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderColor = theme.dividerColor.withOpacity(0.1);
+    
     return Container(
       constraints: const BoxConstraints(maxWidth: 500),
       child: Material(
@@ -190,11 +229,9 @@ class _ModernRoleCard extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
+              color: theme.cardColor,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
-              ),
+              border: Border.all(color: borderColor),
             ),
             child: Row(
               children: [
@@ -206,11 +243,7 @@ class _ModernRoleCard extends StatelessWidget {
                     gradient: gradient,
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Icon(
-                    icon,
-                    color: Colors.white,
-                    size: 30,
-                  ),
+                  child: Icon(icon, color: Colors.white, size: 30),
                 ),
                 const SizedBox(width: 20),
                 // Text
@@ -220,14 +253,12 @@ class _ModernRoleCard extends StatelessWidget {
                     children: [
                       Text(
                         role.displayName,
-                        style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                          fontSize: 20,
-                        ),
+                        style: theme.textTheme.displayMedium?.copyWith(fontSize: 20),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         role.description,
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        style: theme.textTheme.bodyMedium,
                       ),
                     ],
                   ),
@@ -235,7 +266,7 @@ class _ModernRoleCard extends StatelessWidget {
                 // Arrow
                 Icon(
                   Icons.arrow_forward_ios_rounded,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: theme.colorScheme.primary,
                   size: 20,
                 ),
               ],
@@ -255,48 +286,19 @@ class _ModernRoleCard extends StatelessWidget {
         builder: (context) => const PasscodeDialog(),
       );
       
-      // If passcode incorrect or cancelled, return without navigating
-      if (result != true) {
-        return;
-      }
+      if (result != true) return;
     }
     
     final provider = Provider.of<AppProvider>(context, listen: false);
 
     // Show loading
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Center(
-        child: Container(
-          padding: const EdgeInsets.all(32),
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Connecting...',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const _LoadingDialog(),
+      );
+    }
 
     provider.setUserRole(role);
     final connected = await provider.initializeMqtt();
@@ -306,37 +308,77 @@ class _ModernRoleCard extends StatelessWidget {
       Navigator.of(context).pop();
 
       if (connected) {
-        // Always navigate to Dashboard (Admin can access Admin screen from there)
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => const DashboardScreen()),
         );
       } else {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: Row(
-              children: [
-                Icon(Icons.error_outline_rounded, color: AppTheme.error),
-                const SizedBox(width: 12),
-                const Text('Connection Failed'),
-              ],
-            ),
-            content: const Text(
-              'Could not connect to MQTT broker. Please check your network.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
+        _showConnectionError(context);
       }
     }
   }
+  
+  void _showConnectionError(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline_rounded, color: AppTheme.error),
+            SizedBox(width: 12),
+            Text('Connection Failed'),
+          ],
+        ),
+        content: const Text(
+          'Could not connect to MQTT broker. Please check your network.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
+class _LoadingDialog extends StatelessWidget {
+  const _LoadingDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Connecting...',
+              style: theme.textTheme.bodyLarge,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -24,11 +24,13 @@ import base64
 from datetime import datetime as dt
 import ssl
 from pymongo import MongoClient, ASCENDING, DESCENDING
-from pymongo.errors import PyMongoError
+from pymongo.errors import PyMongoError, DuplicateKeyError
 from zoneinfo import ZoneInfo
 from github import Github
 from github.GithubException import GithubException
 import requests
+from werkzeug.security import generate_password_hash, check_password_hash
+from bson import ObjectId
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config.SECRET_KEY
@@ -95,6 +97,7 @@ connected_clients = set()
 # MongoDB client (historical data)
 mongo_client = None
 mongo_collection = None
+mongo_users_collection = None  # Users collection
 THROTTLE_SECONDS = 10  # Minimum seconds between MongoDB writes per device/type
 IST_ZONE = ZoneInfo('Asia/Kolkata')
 
@@ -181,7 +184,7 @@ def get_last_telemetry_doc(device_id):
 
 def init_mongo():
     """Initialize MongoDB client for historical data storage"""
-    global mongo_client, mongo_collection
+    global mongo_client, mongo_collection, mongo_users_collection
     try:
         # Increase timeout and add connection options for replica sets
         # The MONGO_URI already contains connection parameters, so we just add timeout options
@@ -200,12 +203,30 @@ def init_mongo():
         )
         mongo_db = mongo_client[config.MONGO_DB_NAME]
         mongo_collection = mongo_db[config.MONGO_COLLECTION]
+        # Initialize users collection
+        mongo_users_collection = mongo_db['users']
+        # Create unique index on email
+        try:
+            mongo_users_collection.create_index([('email', 1)], unique=True)
+        except Exception as e:
+            print(f"Note: Email index may already exist: {e}")
+        
+        # Drop firebase_uid index if it exists (causes duplicate key errors with null values)
+        try:
+            mongo_users_collection.drop_index('firebase_uid_unique')
+            print("Dropped firebase_uid_unique index")
+        except Exception as e:
+            # Index doesn't exist or already dropped
+            pass
+        
         # Force connection test with longer timeout
         mongo_client.admin.command('ping', maxTimeMS=30000)
         print(f"✓ MongoDB: Connected to {config.MONGO_DB_NAME}.{config.MONGO_COLLECTION}")
+        print(f"✓ MongoDB: Users collection initialized")
     except Exception as e:
         mongo_client = None
         mongo_collection = None
+        mongo_users_collection = None
         print(f"❌ MongoDB: Failed to connect - {e}")
         print("   This may be due to:")
         print("   - Network connectivity issues")
@@ -451,11 +472,16 @@ def login_required(f):
 @app.before_request
 def require_login():
     """Ensure user is logged in before accessing any page (except login, API login, and static files)"""
-    # Allow login page and API login endpoint
-    if request.endpoint in ['login', 'api_login', 'verify_admin', 'static']:
+    # Allow login page and API endpoints that don't require authentication
+    allowed_endpoints = ['login', 'api_login', 'verify_admin', 'api_register', 'api_user_login', 'api_register_google', 'api_user_login_google', 'static', 'health_check']
+    if request.endpoint in allowed_endpoints:
         return None
-    # Require authentication for all other routes
-    if not session.get('authenticated'):
+    # Allow public API endpoints (registration and user login)
+    if request.path in ['/api/register', '/api/user/login', '/api/register/google', '/api/user/login/google', '/api/health']:
+        return None
+    # Require authentication for all other routes (admin or user)
+    is_authenticated = session.get('authenticated') or session.get('user_id')
+    if not is_authenticated:
         # For API endpoints, return JSON error
         if request.path.startswith('/api/'):
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
@@ -503,6 +529,9 @@ def devices():
 @login_required
 def users():
     """Users management page"""
+    # Verify admin access
+    if not session.get('authenticated'):
+        return redirect(url_for('login'))
     return render_template('users.html')
 
 @app.route('/reports')
@@ -1030,6 +1059,785 @@ def verify_admin():
             'error': 'Invalid passcode'
         }), 401
 
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    """Register new hospital user"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    try:
+        data = request.json
+        email = data.get('email', '').strip().lower()
+        username = data.get('username', '').strip()
+        phone_number = data.get('phone_number', '').strip()
+        hospital_name = data.get('hospital_name', '').strip()
+        password = data.get('password', '')
+        google_id = data.get('google_id')
+        profile_image_url = data.get('profile_image_url')
+        
+        print(f"Registration attempt - Email: {email}, Username: {username}")
+        
+        # Validation
+        if not email or '@' not in email:
+            return jsonify({
+                'success': False,
+                'message': 'Valid email is required'
+            }), 400
+        
+        if not username:
+            return jsonify({
+                'success': False,
+                'message': 'Username is required'
+            }), 400
+        
+        if not phone_number:
+            return jsonify({
+                'success': False,
+                'message': 'Phone number is required'
+            }), 400
+        
+        if not hospital_name:
+            return jsonify({
+                'success': False,
+                'message': 'Hospital name is required'
+            }), 400
+        
+        # Password is optional for Google users
+        if not google_id and (not password or len(password) < 6):
+            return jsonify({
+                'success': False,
+                'message': 'Password must be at least 6 characters'
+            }), 400
+        
+        # Check if user already exists
+        # Email is already lowercased, so just check exact match
+        existing_user = mongo_users_collection.find_one({'email': email})
+        if existing_user:
+            print(f"Registration failed - Email already exists: {email}")
+            print(f"Existing user: {existing_user.get('_id')}, {existing_user.get('email')}")
+            return jsonify({
+                'success': False,
+                'message': 'Email already registered'
+            }), 400
+        
+        print(f"Email {email} is available, proceeding with registration")
+        
+        # Hash password (only if provided, Google users don't need password)
+        password_hash = None
+        if password:
+            password_hash = generate_password_hash(password)
+        
+        # Create user document
+        user_doc = {
+            'email': email,
+            'username': username,
+            'phone_number': phone_number,
+            'hospital_name': hospital_name,
+            'status': 'pending',  # pending, approved, active, rejected, suspended
+            'assigned_ahu_ids': [],
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        
+        # Only add password if provided (not for Google users)
+        if password_hash:
+            user_doc['password'] = password_hash
+        
+        if google_id:
+            user_doc['google_id'] = google_id
+        
+        if profile_image_url:
+            user_doc['profile_image_url'] = profile_image_url
+        
+        # Insert user
+        try:
+            result = mongo_users_collection.insert_one(user_doc)
+            user_id = str(result.inserted_id)
+            print(f"User registered successfully: {email}, ID: {user_id}")
+        except DuplicateKeyError as e:
+            print(f"DuplicateKeyError during registration: {e}")
+            # Double-check if email exists (race condition)
+            existing_user = mongo_users_collection.find_one({'email': email})
+            if existing_user:
+                print(f"Confirmed duplicate email: {email} (existing user ID: {existing_user.get('_id')})")
+                return jsonify({
+                    'success': False,
+                    'message': 'Email already registered'
+                }), 400
+            else:
+                # Re-raise if it's a different duplicate key error
+                print(f"DuplicateKeyError but email not found in DB - re-raising")
+                raise
+        
+        # Return user data (without password)
+        user_data = {
+            '_id': user_id,
+            'email': email,
+            'username': username,
+            'phone_number': phone_number,
+            'hospital_name': hospital_name,
+            'status': 'pending',
+            'assigned_ahu_ids': [],
+            'created_at': user_doc['created_at'].isoformat(),
+            'updated_at': user_doc['updated_at'].isoformat()
+        }
+        
+        if google_id:
+            user_data['google_id'] = google_id
+        if profile_image_url:
+            user_data['profile_image_url'] = profile_image_url
+        
+        return jsonify({
+            'success': True,
+            'user': user_data,
+            'message': 'Registration successful. Waiting for admin approval.'
+        }), 201
+        
+    except Exception as e:
+        print(f"Registration error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Registration failed: {str(e)}'
+        }), 500
+
+@app.route('/api/register/google', methods=['POST'])
+def api_register_google():
+    """Register new hospital user with Google authentication"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    try:
+        data = request.json
+        if not data:
+            print("Google Registration: No JSON data received")
+            return jsonify({
+                'success': False,
+                'message': 'No data received'
+            }), 400
+        
+        print(f"Google Registration: Received data: {data}")
+        
+        email = data.get('email', '').strip().lower()
+        username = data.get('username', '').strip()
+        phone_number = data.get('phone_number', '').strip()
+        hospital_name = data.get('hospital_name', '').strip()
+        google_id = data.get('google_id', '')
+        profile_image_url = data.get('profile_image_url')
+        id_token = data.get('id_token', '')
+        
+        print(f"Google Registration attempt - Email: '{email}', Google ID: '{google_id}', Username: '{username}'")
+        
+        # Validate required fields
+        if not email or '@' not in email:
+            return jsonify({
+                'success': False,
+                'message': 'Valid email is required'
+            }), 400
+        
+        if not username:
+            return jsonify({
+                'success': False,
+                'message': 'Username is required'
+            }), 400
+        
+        if not phone_number:
+            return jsonify({
+                'success': False,
+                'message': 'Phone number is required'
+            }), 400
+        
+        if not hospital_name:
+            return jsonify({
+                'success': False,
+                'message': 'Hospital name is required'
+            }), 400
+        
+        if not google_id:
+            return jsonify({
+                'success': False,
+                'message': 'Google ID is required'
+            }), 400
+        
+        # TODO: Verify Firebase ID token here
+        # For now, we'll trust the client, but in production you should verify the token
+        # using Firebase Admin SDK
+        
+        # Check if user already exists by email or google_id
+        existing_user = mongo_users_collection.find_one({
+            '$or': [
+                {'email': email},
+                {'google_id': google_id}
+            ]
+        })
+        if existing_user:
+            print(f"Google Registration failed - User already exists: {email}")
+            return jsonify({
+                'success': False,
+                'message': 'Email or Google account already registered'
+            }), 400
+        
+        print(f"Email {email} is available, proceeding with Google registration")
+        
+        # Create user document (no password for Google users)
+        user_doc = {
+            'email': email,
+            'username': username,
+            'phone_number': phone_number,
+            'hospital_name': hospital_name,
+            'google_id': google_id,
+            'status': 'pending',
+            'assigned_ahu_ids': [],
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        
+        if profile_image_url:
+            user_doc['profile_image_url'] = profile_image_url
+        
+        # Insert user
+        try:
+            result = mongo_users_collection.insert_one(user_doc)
+            user_id = str(result.inserted_id)
+            print(f"User registered successfully with Google: {email}, ID: {user_id}")
+        except DuplicateKeyError as e:
+            print(f"DuplicateKeyError during Google registration: {e}")
+            existing_user = mongo_users_collection.find_one({'email': email})
+            if existing_user:
+                return jsonify({
+                    'success': False,
+                    'message': 'Email already registered'
+                }), 400
+            raise
+        
+        # Return user data
+        user_data = {
+            '_id': user_id,
+            'email': email,
+            'username': username,
+            'phone_number': phone_number,
+            'hospital_name': hospital_name,
+            'status': 'pending',
+            'assigned_ahu_ids': [],
+            'created_at': user_doc['created_at'].isoformat(),
+            'updated_at': user_doc['updated_at'].isoformat()
+        }
+        
+        if profile_image_url:
+            user_data['profile_image_url'] = profile_image_url
+        
+        return jsonify({
+            'success': True,
+            'user': user_data,
+            'message': 'Registration successful. Waiting for admin approval.'
+        }), 201
+        
+    except Exception as e:
+        print(f"Google Registration error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Registration failed: {str(e)}'
+        }), 500
+
+@app.route('/api/user/login', methods=['POST'])
+def api_user_login():
+    """Hospital user login"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    try:
+        data = request.json
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        
+        if not email or not password:
+            return jsonify({
+                'success': False,
+                'message': 'Email and password are required'
+            }), 400
+        
+        # Find user
+        user = mongo_users_collection.find_one({'email': email})
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid email or password'
+            }), 401
+        
+        # Check password (skip if user has Google ID and no password)
+        user_password = user.get('password')
+        if user_password:
+            # User has password, verify it
+            if not check_password_hash(user_password, password):
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid email or password'
+                }), 401
+        elif not user.get('google_id'):
+            # User has no password and no Google ID - invalid account
+            return jsonify({
+                'success': False,
+                'message': 'Invalid email or password'
+            }), 401
+        
+        # Create session
+        session['user_id'] = str(user['_id'])
+        session['user_email'] = user['email']
+        session['user_type'] = 'hospital_user'
+        session.permanent = True
+        
+        # Return user data (without password)
+        user_data = {
+            '_id': str(user['_id']),
+            'email': user['email'],
+            'username': user.get('username', ''),
+            'phone_number': user.get('phone_number', ''),
+            'hospital_name': user.get('hospital_name', ''),
+            'status': user.get('status', 'pending'),
+            'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
+            'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', '')),
+            'updated_at': user.get('updated_at', datetime.utcnow()).isoformat() if isinstance(user.get('updated_at'), datetime) else str(user.get('updated_at', ''))
+        }
+        
+        if 'google_id' in user:
+            user_data['google_id'] = user['google_id']
+        if 'profile_image_url' in user:
+            user_data['profile_image_url'] = user['profile_image_url']
+        
+        return jsonify({
+            'success': True,
+            'user': user_data,
+            'message': 'Login successful'
+        })
+        
+    except Exception as e:
+        print(f"User login error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Login failed: {str(e)}'
+        }), 500
+
+@app.route('/api/user/status', methods=['GET'])
+def api_user_status():
+    """Get current logged-in user status"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    # Check if user is logged in
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({
+            'success': False,
+            'message': 'Not authenticated'
+        }), 401
+    
+    try:
+        # Find user
+        user = mongo_users_collection.find_one({'_id': ObjectId(user_id)})
+        if not user:
+            # Clear invalid session
+            session.pop('user_id', None)
+            session.pop('user_email', None)
+            session.pop('user_type', None)
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        
+        # Return user data (without password)
+        user_data = {
+            '_id': str(user['_id']),
+            'email': user['email'],
+            'username': user.get('username', ''),
+            'phone_number': user.get('phone_number', ''),
+            'hospital_name': user.get('hospital_name', ''),
+            'status': user.get('status', 'pending'),
+            'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
+            'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', '')),
+            'updated_at': user.get('updated_at', datetime.utcnow()).isoformat() if isinstance(user.get('updated_at'), datetime) else str(user.get('updated_at', ''))
+        }
+        
+        if 'google_id' in user:
+            user_data['google_id'] = user['google_id']
+        if 'profile_image_url' in user:
+            user_data['profile_image_url'] = user['profile_image_url']
+        
+        return jsonify({
+            'success': True,
+            'user': user_data
+        })
+        
+    except Exception as e:
+        print(f"Get user status error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to get user status: {str(e)}'
+        }), 500
+
+@app.route('/api/user/login/google', methods=['POST'])
+def api_user_login_google():
+    """Hospital user login with Google"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    try:
+        data = request.json
+        google_id = data.get('google_id', '')
+        email = data.get('email', '').strip().lower()
+        id_token = data.get('id_token', '')
+        
+        if not google_id or not email:
+            return jsonify({
+                'success': False,
+                'message': 'Google ID and email are required'
+            }), 400
+        
+        # TODO: Verify Firebase ID token here
+        # For now, we'll trust the client, but in production you should verify the token
+        
+        # Find user by Google ID or email
+        user = mongo_users_collection.find_one({
+            '$or': [
+                {'google_id': google_id},
+                {'email': email}
+            ]
+        })
+        
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'User not found. Please register first.'
+            }), 404
+        
+        # Update Google ID if not set
+        if not user.get('google_id'):
+            mongo_users_collection.update_one(
+                {'_id': user['_id']},
+                {'$set': {'google_id': google_id, 'updated_at': datetime.utcnow()}}
+            )
+        
+        # Create session
+        session['user_id'] = str(user['_id'])
+        session['user_email'] = user['email']
+        session['user_type'] = 'hospital_user'
+        session.permanent = True
+        
+        # Return user data
+        user_data = {
+            '_id': str(user['_id']),
+            'email': user['email'],
+            'username': user.get('username', ''),
+            'phone_number': user.get('phone_number', ''),
+            'hospital_name': user.get('hospital_name', ''),
+            'status': user.get('status', 'pending'),
+            'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
+            'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', '')),
+            'updated_at': user.get('updated_at', datetime.utcnow()).isoformat() if isinstance(user.get('updated_at'), datetime) else str(user.get('updated_at', ''))
+        }
+        
+        if 'google_id' in user:
+            user_data['google_id'] = user['google_id']
+        if 'profile_image_url' in user:
+            user_data['profile_image_url'] = user['profile_image_url']
+        
+        return jsonify({
+            'success': True,
+            'user': user_data,
+            'message': 'Login successful'
+        })
+        
+    except Exception as e:
+        print(f"Google login error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Login failed: {str(e)}'
+        }), 500
+
+# ==================== Admin User Management Endpoints ====================
+
+@app.route('/api/admin/users/pending', methods=['GET'])
+@login_required
+def api_get_pending_users():
+    """Get all pending user registrations (admin only)"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        # Find all users with status 'pending'
+        users = list(mongo_users_collection.find({'status': 'pending'}).sort('created_at', DESCENDING))
+        
+        users_data = []
+        for user in users:
+            user_data = {
+                '_id': str(user['_id']),
+                'email': user['email'],
+                'username': user.get('username', ''),
+                'phone_number': user.get('phone_number', ''),
+                'hospital_name': user.get('hospital_name', ''),
+                'status': user.get('status', 'pending'),
+                'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', ''))
+            }
+            if 'google_id' in user:
+                user_data['google_id'] = user['google_id']
+            if 'profile_image_url' in user:
+                user_data['profile_image_url'] = user['profile_image_url']
+            users_data.append(user_data)
+        
+        return jsonify({
+            'success': True,
+            'users': users_data
+        })
+        
+    except Exception as e:
+        print(f"Get pending users error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to get pending users: {str(e)}'
+        }), 500
+
+@app.route('/api/admin/users/registered', methods=['GET'])
+@login_required
+def api_get_registered_users():
+    """Get all registered/approved users (admin only)"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        # Find all users with status 'approved' or 'active'
+        users = list(mongo_users_collection.find({
+            'status': {'$in': ['approved', 'active']}
+        }).sort('created_at', DESCENDING))
+        
+        users_data = []
+        for user in users:
+            user_data = {
+                '_id': str(user['_id']),
+                'email': user['email'],
+                'username': user.get('username', ''),
+                'phone_number': user.get('phone_number', ''),
+                'hospital_name': user.get('hospital_name', ''),
+                'status': user.get('status', 'approved'),
+                'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
+                'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', ''))
+            }
+            if 'google_id' in user:
+                user_data['google_id'] = user['google_id']
+            if 'profile_image_url' in user:
+                user_data['profile_image_url'] = user['profile_image_url']
+            users_data.append(user_data)
+        
+        return jsonify({
+            'success': True,
+            'users': users_data
+        })
+        
+    except Exception as e:
+        print(f"Get registered users error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to get registered users: {str(e)}'
+        }), 500
+
+@app.route('/api/admin/users/<user_id>/approve', methods=['POST'])
+@login_required
+def api_approve_user(user_id):
+    """Approve a pending user registration (admin only)"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        # Update user status to 'approved'
+        result = mongo_users_collection.update_one(
+            {'_id': ObjectId(user_id), 'status': 'pending'},
+            {
+                '$set': {
+                    'status': 'approved',
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            return jsonify({
+                'success': False,
+                'message': 'User not found or already processed'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'message': 'User approved successfully'
+        })
+        
+    except Exception as e:
+        print(f"Approve user error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to approve user: {str(e)}'
+        }), 500
+
+@app.route('/api/admin/users/<user_id>/reject', methods=['POST'])
+@login_required
+def api_reject_user(user_id):
+    """Reject a pending user registration (admin only)"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        # Update user status to 'rejected'
+        result = mongo_users_collection.update_one(
+            {'_id': ObjectId(user_id), 'status': 'pending'},
+            {
+                '$set': {
+                    'status': 'rejected',
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            return jsonify({
+                'success': False,
+                'message': 'User not found or already processed'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'message': 'User rejected successfully'
+        })
+        
+    except Exception as e:
+        print(f"Reject user error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to reject user: {str(e)}'
+        }), 500
+
+@app.route('/api/admin/users/<user_id>/assign-ahus', methods=['POST'])
+@login_required
+def api_assign_ahus(user_id):
+    """Assign AHU units to a user (admin only)"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        data = request.json
+        ahu_ids = data.get('ahu_ids', [])
+        
+        if not isinstance(ahu_ids, list):
+            return jsonify({
+                'success': False,
+                'message': 'ahu_ids must be a list'
+            }), 400
+        
+        # Update user with assigned AHUs and set status to 'active'
+        result = mongo_users_collection.update_one(
+            {'_id': ObjectId(user_id)},
+            {
+                '$set': {
+                    'assigned_ahu_ids': ahu_ids,
+                    'status': 'active' if ahu_ids else 'approved',
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'message': 'AHUs assigned successfully'
+        })
+        
+    except Exception as e:
+        print(f"Assign AHUs error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to assign AHUs: {str(e)}'
+        }), 500
+
 @app.route('/api/ota/push-to-github', methods=['POST'])
 @login_required
 def push_firmware_to_github():
@@ -1391,7 +2199,63 @@ if __name__ == '__main__':
     print("=" * 50)
     print("ALMED AHU Web Dashboard")
     print("=" * 50)
-    print(f"Server running on http://{config.HOST}:{config.PORT}")
+    
+    # Check if SSL is enabled and certificates exist
+    ssl_context = None
+    if config.SSL_ENABLED:
+        import os
+        if os.path.exists(config.SSL_CERT_PATH) and os.path.exists(config.SSL_KEY_PATH):
+            ssl_context = (config.SSL_CERT_PATH, config.SSL_KEY_PATH)
+            print(f"✓ SSL enabled - HTTPS on port {config.HTTPS_PORT}")
+            print(f"  Certificate: {config.SSL_CERT_PATH}")
+            print(f"  Private Key: {config.SSL_KEY_PATH}")
+        else:
+            print(f"⚠️ SSL enabled but certificates not found:")
+            print(f"  Certificate: {config.SSL_CERT_PATH}")
+            print(f"  Private Key: {config.SSL_KEY_PATH}")
+            print("  Falling back to HTTP only")
+            print("  Run 'python generate_cert.py' to generate certificates")
+            ssl_context = None
+    
+    # HTTP to HTTPS redirect server (runs on port 80 if SSL is enabled)
+    if config.SSL_ENABLED and ssl_context:
+        def http_redirect_server():
+            """Simple HTTP server that redirects all requests to HTTPS"""
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+            
+            class RedirectHandler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    host = self.headers.get("Host", "").replace(f":{config.PORT}", f":{config.HTTPS_PORT}")
+                    if not host:
+                        host = "app.almedequipments.in"
+                    self.send_response(301)
+                    self.send_header('Location', f'https://{host}{self.path}')
+                    self.end_headers()
+                
+                def do_POST(self):
+                    self.do_GET()
+                
+                def do_PUT(self):
+                    self.do_GET()
+                
+                def do_DELETE(self):
+                    self.do_GET()
+                
+                def log_message(self, format, *args):
+                    pass  # Suppress logs
+            
+            server = HTTPServer((config.HOST, config.PORT), RedirectHandler)
+            server.serve_forever()
+        
+        http_thread = Thread(target=http_redirect_server, daemon=True)
+        http_thread.start()
+        print(f"✓ HTTP to HTTPS redirect enabled on port {config.PORT}")
+    
+    if ssl_context:
+        print(f"Server running on https://{config.HOST}:{config.HTTPS_PORT}")
+    else:
+        print(f"Server running on http://{config.HOST}:{config.PORT}")
+    
     print(f"AWS Region: {config.AWS_REGION}")
     print(f"AWS IoT Endpoint: {config.AWS_IOT_ENDPOINT}")
     print(f"MQTT Topic: {config.AWS_IOT_TOPIC_PUBLISH}")
@@ -1399,12 +2263,69 @@ if __name__ == '__main__':
     print(f"WebSocket enabled: SocketIO")
     print("=" * 50)
     
-    socketio.run(
-        app,
-        host=config.HOST,
-        port=config.PORT,
-        debug=config.DEBUG,
-        use_reloader=False,
-        allow_unsafe_werkzeug=True
-    )
+    # Run with SSL if enabled and certificates are available
+    if ssl_context:
+        # For eventlet with SocketIO, use eventlet's wrap_ssl properly
+        import eventlet.wsgi as wsgi_server
+        import os
+        
+        # Verify certificate files exist and are readable
+        if not os.path.exists(config.SSL_CERT_PATH):
+            print(f"❌ Certificate file not found: {config.SSL_CERT_PATH}")
+            ssl_context = None
+        elif not os.path.exists(config.SSL_KEY_PATH):
+            print(f"❌ Key file not found: {config.SSL_KEY_PATH}")
+            ssl_context = None
+        else:
+            # Check file permissions
+            if not os.access(config.SSL_CERT_PATH, os.R_OK):
+                print(f"⚠️  Warning: Certificate file is not readable: {config.SSL_CERT_PATH}")
+                print("   Try: sudo chmod 644 " + config.SSL_CERT_PATH)
+            if not os.access(config.SSL_KEY_PATH, os.R_OK):
+                print(f"⚠️  Warning: Key file is not readable: {config.SSL_KEY_PATH}")
+                print("   Try: sudo chmod 600 " + config.SSL_KEY_PATH)
+            
+            try:
+                # Create socket using eventlet
+                sock = eventlet.listen((config.HOST, config.HTTPS_PORT))
+                
+                # Wrap with SSL using eventlet.wrap_ssl
+                # For Let's Encrypt, fullchain.pem includes the certificate chain
+                # Using minimal SSL options for maximum compatibility
+                try:
+                    sock = eventlet.wrap_ssl(
+                        sock,
+                        certfile=config.SSL_CERT_PATH,
+                        keyfile=config.SSL_KEY_PATH,
+                        server_side=True
+                    )
+                except Exception as wrap_error:
+                    print(f"❌ Error wrapping socket with SSL: {wrap_error}")
+                    print(f"   Certificate: {config.SSL_CERT_PATH}")
+                    print(f"   Key: {config.SSL_KEY_PATH}")
+                    raise
+                
+                print("Starting HTTPS server...")
+                # Flask app is already integrated with SocketIO
+                wsgi_server.server(sock, app, log_output=config.DEBUG)
+            except Exception as e:
+                print(f"❌ SSL Error: {e}")
+                import traceback
+                traceback.print_exc()
+                print("\nTroubleshooting:")
+                print(f"  1. Check certificate: openssl x509 -in {config.SSL_CERT_PATH} -text -noout")
+                print(f"  2. Check key: openssl rsa -in {config.SSL_KEY_PATH} -check")
+                print(f"  3. Verify paths are correct")
+                print("Falling back to HTTP only...")
+                ssl_context = None
+    
+    if not ssl_context:
+        socketio.run(
+            app,
+            host=config.HOST,
+            port=config.PORT,
+            debug=config.DEBUG,
+            use_reloader=False,
+            allow_unsafe_werkzeug=True
+        )
 

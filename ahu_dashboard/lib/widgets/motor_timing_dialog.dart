@@ -4,7 +4,7 @@ import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../services/motor_timing_storage.dart';
 
-/// Motor timing adjustment dialog - similar to temperature/humidity controls
+/// Motor timing adjustment dialog
 class MotorTimingDialog extends StatefulWidget {
   final String ahuId;
   final String motorLabel;
@@ -32,13 +32,10 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
     _loadTimings();
   }
   
-  /// Load motor timings - priority: Local Storage > ESP32 State > Defaults
   Future<void> _loadTimings() async {
-    // 1. Try to load from local storage (Raspberry Pi memory)
     final savedTimings = await MotorTimingStorage.loadTimings(widget.ahuId);
     
     if (savedTimings != null) {
-      // Use locally saved timings (what user last configured)
       setState(() {
         _m1Start = savedTimings['m1_start']!;
         _m1Post = savedTimings['m1_post']!;
@@ -46,11 +43,10 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
         _m2Run = savedTimings['m2_run']!;
         _m2Delay = savedTimings['m2_delay']!;
       });
-      print('MotorTimingDialog: Loaded from local storage');
+      debugPrint('MotorTimingDialog: Loaded from local storage');
       return;
     }
     
-    // 2. Fall back to ESP32 state if no local storage
     if (mounted) {
       final provider = Provider.of<AppProvider>(context, listen: false);
       final state = provider.getState(widget.ahuId);
@@ -62,258 +58,48 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
           _m2Run = state.m2Run ?? 10;
           _m2Delay = state.m2Delay ?? 5;
         });
-        print('MotorTimingDialog: Loaded from ESP32 state');
+        debugPrint('MotorTimingDialog: Loaded from ESP32 state');
         return;
       }
     }
     
-    // 3. Use defaults if nothing available
-    print('MotorTimingDialog: Using default values');
+    debugPrint('MotorTimingDialog: Using default values');
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-      ),
-      backgroundColor: Colors.transparent,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 700),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? [
-                    const Color(0xFF1E293B),
-                    const Color(0xFF0F172A),
-                  ]
-                : [
-                    Colors.white,
-                    Colors.blue.shade50,
-                  ],
-          ),
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 20,
-              spreadRadius: 5,
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppTheme.lightPrimary,
-                    AppTheme.lightPrimary.withValues(alpha: 0.8),
-                  ],
-                ),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(24),
-                  topRight: Radius.circular(24),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.timer_rounded,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Motor Timing Configuration',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        Text(
-                          widget.motorLabel,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white.withValues(alpha: 0.9),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-            ),
-            
-            // Content
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    // M1 Start
-                    _TimingControl(
-                      icon: Icons.play_circle_rounded,
-                      label: 'Motor-1 Start Run',
-                      value: _m1Start,
-                      unit: 's',
-                      color: AppTheme.lightPrimary,
-                      onIncrement: () => setState(() => _m1Start = (_m1Start + 1).clamp(1, 999)),
-                      onDecrement: () => setState(() => _m1Start = (_m1Start - 1).clamp(1, 999)),
-                      helpText: 'Duration Motor-1 runs after system starts',
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // M1 Post
-                    _TimingControl(
-                      icon: Icons.stop_circle_rounded,
-                      label: 'Motor-1 Post Run',
-                      value: _m1Post,
-                      unit: 's',
-                      color: AppTheme.lightPrimary,
-                      onIncrement: () => setState(() => _m1Post = (_m1Post + 1).clamp(1, 999)),
-                      onDecrement: () => setState(() => _m1Post = (_m1Post - 1).clamp(1, 999)),
-                      helpText: 'Duration Motor-1 runs during shutdown',
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // M2 Interval (Wait Time)
-                    _TimingControl(
-                      icon: Icons.refresh_rounded,
-                      label: 'Motor-2 Wait Time',
-                      value: _m2Interval,
-                      unit: 's',
-                      color: AppTheme.humidity,
-                      onIncrement: () => setState(() => _m2Interval = (_m2Interval + 1).clamp(1, 999)),
-                      onDecrement: () => setState(() => _m2Interval = (_m2Interval - 1).clamp(1, 999)),
-                      helpText: 'Wait time between Motor-2 cycles',
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // M2 Run
-                    _TimingControl(
-                      icon: Icons.schedule_rounded,
-                      label: 'Motor-2 Run Time',
-                      value: _m2Run,
-                      unit: 's',
-                      color: AppTheme.humidity,
-                      onIncrement: () => setState(() => _m2Run = (_m2Run + 1).clamp(1, 999)),
-                      onDecrement: () => setState(() => _m2Run = (_m2Run - 1).clamp(1, 999)),
-                      helpText: 'Duration Motor-2 runs each cycle',
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // M2 Delay
-                    _TimingControl(
-                      icon: Icons.hourglass_empty_rounded,
-                      label: 'Motor-2 Delay',
-                      value: _m2Delay,
-                      unit: 's',
-                      color: AppTheme.info,
-                      onIncrement: () => setState(() => _m2Delay = (_m2Delay + 1).clamp(1, 999)),
-                      onDecrement: () => setState(() => _m2Delay = (_m2Delay - 1).clamp(1, 999)),
-                      helpText: 'Delay after Motor-1 stops',
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            
-            // Action buttons
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        setState(() {
-                          _m1Start = 10;
-                          _m1Post = 10;
-                          _m2Interval = 30;
-                          _m2Run = 10;
-                          _m2Delay = 5;
-                        });
-                      },
-                      icon: const Icon(Icons.restore_rounded),
-                      label: const Text('Reset'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: BorderSide(color: AppTheme.lightPrimary),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _saveTimings(context),
-                      icon: const Icon(Icons.check_rounded),
-                      label: const Text('Save Timings'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.success,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  void _resetToDefaults() {
+    setState(() {
+      _m1Start = 10;
+      _m1Post = 10;
+      _m2Interval = 30;
+      _m2Run = 10;
+      _m2Delay = 5;
+    });
   }
-  
-  Future<void> _saveTimings(BuildContext context) async {
+
+  Future<void> _saveTimings() async {
     final provider = Provider.of<AppProvider>(context, listen: false);
     
-    // 1. Save to local storage (Raspberry Pi memory) FIRST
     await MotorTimingStorage.saveTimings(
       widget.ahuId,
       m1Start: _m1Start,
       m1Post: _m1Post,
-      m2WaitTime: _m2Interval,  // Save wait time
+      m2WaitTime: _m2Interval,
       m2Run: _m2Run,
       m2Delay: _m2Delay,
     );
     
-    // 2. Send to ESP32 via MQTT
-    // Note: _m2Interval is the WAIT TIME between cycles
-    // AppProvider will add run time to calculate actual interval for ESP32
     provider.provisionMotorTimings(
       widget.ahuId,
       m1Start: _m1Start,
       m1Post: _m1Post,
-      m2Interval: _m2Interval,  // Wait time (will be converted to actual interval)
+      m2Interval: _m2Interval,
       m2Run: _m2Run,
       m2Delay: _m2Delay,
     );
     
-    if (context.mounted) {
+    if (mounted) {
       Navigator.of(context).pop();
       
-      // Show simple success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -331,9 +117,211 @@ class _MotorTimingDialogState extends State<MotorTimingDialog> {
       );
     }
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 700),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDark
+                ? const [Color(0xFF1E293B), Color(0xFF0F172A)]
+                : [Colors.white, Colors.blue.shade50],
+          ),
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 20,
+              spreadRadius: 5,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _DialogHeader(motorLabel: widget.motorLabel),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    _TimingControl(
+                      icon: Icons.play_circle_rounded,
+                      label: 'Motor-1 Start Run',
+                      value: _m1Start,
+                      unit: 's',
+                      color: AppTheme.lightPrimary,
+                      onIncrement: () => setState(() => _m1Start = (_m1Start + 1).clamp(1, 999)),
+                      onDecrement: () => setState(() => _m1Start = (_m1Start - 1).clamp(1, 999)),
+                      helpText: 'Duration Motor-1 runs after system starts',
+                    ),
+                    const SizedBox(height: 16),
+                    _TimingControl(
+                      icon: Icons.stop_circle_rounded,
+                      label: 'Motor-1 Post Run',
+                      value: _m1Post,
+                      unit: 's',
+                      color: AppTheme.lightPrimary,
+                      onIncrement: () => setState(() => _m1Post = (_m1Post + 1).clamp(1, 999)),
+                      onDecrement: () => setState(() => _m1Post = (_m1Post - 1).clamp(1, 999)),
+                      helpText: 'Duration Motor-1 runs during shutdown',
+                    ),
+                    const SizedBox(height: 16),
+                    _TimingControl(
+                      icon: Icons.refresh_rounded,
+                      label: 'Motor-2 Wait Time',
+                      value: _m2Interval,
+                      unit: 's',
+                      color: AppTheme.humidity,
+                      onIncrement: () => setState(() => _m2Interval = (_m2Interval + 1).clamp(1, 999)),
+                      onDecrement: () => setState(() => _m2Interval = (_m2Interval - 1).clamp(1, 999)),
+                      helpText: 'Wait time between Motor-2 cycles',
+                    ),
+                    const SizedBox(height: 16),
+                    _TimingControl(
+                      icon: Icons.schedule_rounded,
+                      label: 'Motor-2 Run Time',
+                      value: _m2Run,
+                      unit: 's',
+                      color: AppTheme.humidity,
+                      onIncrement: () => setState(() => _m2Run = (_m2Run + 1).clamp(1, 999)),
+                      onDecrement: () => setState(() => _m2Run = (_m2Run - 1).clamp(1, 999)),
+                      helpText: 'Duration Motor-2 runs each cycle',
+                    ),
+                    const SizedBox(height: 16),
+                    _TimingControl(
+                      icon: Icons.hourglass_empty_rounded,
+                      label: 'Motor-2 Delay',
+                      value: _m2Delay,
+                      unit: 's',
+                      color: AppTheme.info,
+                      onIncrement: () => setState(() => _m2Delay = (_m2Delay + 1).clamp(1, 999)),
+                      onDecrement: () => setState(() => _m2Delay = (_m2Delay - 1).clamp(1, 999)),
+                      helpText: 'Delay after Motor-1 stops',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            _DialogActions(
+              onReset: _resetToDefaults,
+              onSave: _saveTimings,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-/// Individual timing control widget (like temperature control)
+class _DialogHeader extends StatelessWidget {
+  final String motorLabel;
+  
+  const _DialogHeader({required this.motorLabel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppTheme.lightPrimary, AppTheme.lightPrimary.withOpacity(0.8)],
+        ),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.timer_rounded, color: Colors.white, size: 32),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Motor Timing Configuration',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  motorLabel,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withOpacity(0.9),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DialogActions extends StatelessWidget {
+  final VoidCallback onReset;
+  final VoidCallback onSave;
+  
+  const _DialogActions({required this.onReset, required this.onSave});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: onReset,
+              icon: const Icon(Icons.restore_rounded),
+              label: const Text('Reset'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: const BorderSide(color: AppTheme.lightPrimary),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton.icon(
+              onPressed: onSave,
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Save Timings'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.success,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TimingControl extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -366,23 +354,14 @@ class _TimingControl extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: isDark
-              ? [
-                  color.withValues(alpha: 0.15),
-                  color.withValues(alpha: 0.2),
-                ]
-              : [
-                  color.withValues(alpha: 0.08),
-                  color.withValues(alpha: 0.12),
-                ],
+              ? [color.withOpacity(0.15), color.withOpacity(0.2)]
+              : [color.withOpacity(0.08), color.withOpacity(0.12)],
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: color.withValues(alpha: 0.4),
-          width: 1.5,
-        ),
+        border: Border.all(color: color.withOpacity(0.4), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.15),
+            color: color.withOpacity(0.15),
             blurRadius: 8,
             spreadRadius: 1,
           ),
@@ -409,14 +388,13 @@ class _TimingControl extends StatelessWidget {
           Text(
             helpText,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+              color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6),
             ),
           ),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Decrement button - exactly like temperature control
               IconButton(
                 onPressed: value > 1 ? onDecrement : null,
                 icon: const Icon(Icons.remove_circle_rounded),
@@ -424,8 +402,6 @@ class _TimingControl extends StatelessWidget {
                 iconSize: 40,
               ),
               const SizedBox(width: 12),
-              
-              // Value display
               Text(
                 '$value$unit',
                 style: TextStyle(
@@ -435,8 +411,6 @@ class _TimingControl extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              
-              // Increment button - exactly like temperature control
               IconButton(
                 onPressed: value < 999 ? onIncrement : null,
                 icon: const Icon(Icons.add_circle_rounded),
@@ -450,4 +424,3 @@ class _TimingControl extends StatelessWidget {
     );
   }
 }
-

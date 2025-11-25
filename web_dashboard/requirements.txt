@@ -10,4 +10,5 @@ eventlet==0.33.3
 pymongo[srv]==4.6.1
 dnspython==2.4.2
 PyGithub==2.1.1
+cryptography==41.0.7
 

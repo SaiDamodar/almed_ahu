@@ -5,6 +5,208 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Users - ALMED AHU Control</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .users-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-top: 24px;
+        }
+        .section-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+        .user-card {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border: 1px solid var(--border-color);
+        }
+        .user-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+        .user-info h4 {
+            margin: 0 0 4px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .user-info p {
+            margin: 0;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .user-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 8px 0;
+        }
+        .user-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-approve {
+            background: #10B981;
+            color: white;
+        }
+        .btn-approve:hover {
+            background: #059669;
+        }
+        .btn-reject {
+            background: #EF4444;
+            color: white;
+        }
+        .btn-reject:hover {
+            background: #DC2626;
+        }
+        .btn-assign {
+            background: #3B82F6;
+            color: white;
+        }
+        .btn-assign:hover {
+            background: #2563EB;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+        .empty-state svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        .ahu-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .ahu-badge {
+            background: var(--primary);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .assign-ahu-dialog {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .assign-ahu-dialog.active {
+            display: flex;
+        }
+        .dialog-content {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .dialog-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .dialog-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+        .ahu-checkbox {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            margin: 6px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 2px solid var(--border-color);
+            transition: all 0.2s;
+        }
+        .ahu-checkbox:hover {
+            background: var(--bg-secondary);
+            border-color: var(--primary);
+        }
+        .ahu-checkbox input[type="checkbox"] {
+            margin-right: 12px;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--primary);
+        }
+        .ahu-checkbox input[type="checkbox"]:checked + span {
+            font-weight: 600;
+            color: var(--primary);
+        }
+        .ahu-checkbox span {
+            flex: 1;
+            font-size: 14px;
+        }
+        .dialog-content {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .dialog-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .dialog-content::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+            border-radius: 4px;
+        }
+        .dialog-content::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+        .dialog-content::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+        @media (max-width: 768px) {
+            .users-container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -20,63 +222,392 @@
                                 <path d="m21 21-4.35-4.35"></path>
                             </svg>
                         </span>
-                        <input type="text" placeholder="Search users...">
+                        <input type="text" id="search-input" placeholder="Search users..." onkeyup="filterUsers()">
                     </div>
                 </div>
                 <div class="header-right">
-                    <button class="icon-btn" title="Notifications">
+                    <button class="icon-btn" onclick="loadUsers()" title="Refresh">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                            <path d="M3 21v-5h5"></path>
                         </svg>
                     </button>
                 </div>
             </div>
 
             <div class="content-container">
-                <h1 class="page-title">Users</h1>
-                <p class="page-subtitle">Manage system users and permissions</p>
+                <h1 class="page-title">Users Management</h1>
+                <p class="page-subtitle">Manage hospital user registrations and AHU assignments</p>
 
-                <div class="section-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h2 class="section-title" style="margin: 0;">User List</h2>
-                        <button class="btn btn-primary">+ Add User</button>
+                <div class="users-container">
+                    <!-- Pending Registrations -->
+                    <div class="section-card">
+                        <h2 class="section-title">Pending Registrations</h2>
+                        <div id="pending-users">
+                            <div class="empty-state">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M12 6v6l4 2"></path>
+                                </svg>
+                                <p>Loading pending registrations...</p>
+                            </div>
+                        </div>
                     </div>
-                    
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>User</th>
-                                <th>Role</th>
-                                <th>Status</th>
-                                <th>Last Active</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="users-table">
-                            <tr>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 12px;">
-                                        <div class="user-avatar" style="width: 32px; height: 32px; font-size: 14px;">A</div>
-                                        <div>
-                                            <div style="font-weight: 600; color: var(--text-primary);">admin</div>
-                                            <div style="font-size: 12px; color: var(--text-secondary);">admin@almed.com</div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td>Administrator</td>
-                                <td><span class="status-badge online"><span class="status-dot"></span> Active</span></td>
-                                <td style="color: var(--text-secondary);">Just now</td>
-                                <td>
-                                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">Edit</button>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+
+                    <!-- Registered Users -->
+                    <div class="section-card">
+                        <h2 class="section-title">Registered Users</h2>
+                        <div id="registered-users">
+                            <div class="empty-state">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M12 6v6l6 2"></path>
+                                </svg>
+                                <p>Loading registered users...</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Assign AHUs Dialog -->
+    <div id="assign-ahu-dialog" class="assign-ahu-dialog">
+        <div class="dialog-content">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Assign AHU Units</h3>
+                <button class="close-btn" onclick="closeAssignDialog()">&times;</button>
+            </div>
+            <div id="ahu-list-container">
+                <p>Loading available AHU units...</p>
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: space-between; align-items: center;">
+                <div>
+                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="selectAllAHUs()">Select All</button>
+                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: 8px;" onclick="deselectAllAHUs()">Deselect All</button>
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn btn-secondary" onclick="closeAssignDialog()">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveAhuAssignment()">Assign Selected</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allDevices = [];
+        let currentUserId = null;
+
+        // Load users on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUsers();
+            loadDevices();
+        });
+
+        // Load pending and registered users
+        async function loadUsers() {
+            try {
+                // Load pending users
+                const pendingResponse = await fetch('/api/admin/users/pending');
+                const pendingData = await pendingResponse.json();
+                
+                const pendingContainer = document.getElementById('pending-users');
+                if (pendingData.success && pendingData.users.length > 0) {
+                    pendingContainer.innerHTML = pendingData.users.map(user => `
+                        <div class="user-card" data-user-id="${user._id}">
+                            <div class="user-header">
+                                <div class="user-info">
+                                    <h4>${escapeHtml(user.username)}</h4>
+                                    <p>${escapeHtml(user.email)}</p>
+                                </div>
+                            </div>
+                            <div class="user-details">
+                                <div><strong>Hospital:</strong> ${escapeHtml(user.hospital_name)}</div>
+                                <div><strong>Phone:</strong> ${escapeHtml(user.phone_number)}</div>
+                                <div><strong>Registered:</strong> ${formatDate(user.created_at)}</div>
+                            </div>
+                            <div class="user-actions">
+                                <button class="btn-small btn-approve" onclick="approveUser('${user._id}')">Approve</button>
+                                <button class="btn-small btn-reject" onclick="rejectUser('${user._id}')">Reject</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    pendingContainer.innerHTML = `
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M12 6v6l4 2"></path>
+                            </svg>
+                            <p>No pending registrations</p>
+                        </div>
+                    `;
+                }
+
+                // Load registered users
+                const registeredResponse = await fetch('/api/admin/users/registered');
+                const registeredData = await registeredResponse.json();
+                
+                const registeredContainer = document.getElementById('registered-users');
+                if (registeredData.success && registeredData.users.length > 0) {
+                    registeredContainer.innerHTML = registeredData.users.map(user => `
+                        <div class="user-card" data-user-id="${user._id}">
+                            <div class="user-header">
+                                <div class="user-info">
+                                    <h4>${escapeHtml(user.username)}</h4>
+                                    <p>${escapeHtml(user.email)}</p>
+                                </div>
+                                <span class="status-badge ${user.status === 'active' ? 'online' : 'offline'}">
+                                    <span class="status-dot"></span> ${user.status}
+                                </span>
+                            </div>
+                            <div class="user-details">
+                                <div><strong>Hospital:</strong> ${escapeHtml(user.hospital_name)}</div>
+                                <div><strong>Phone:</strong> ${escapeHtml(user.phone_number)}</div>
+                                ${user.assigned_ahu_ids && user.assigned_ahu_ids.length > 0 ? `
+                                    <div><strong>Assigned AHUs:</strong></div>
+                                    <div class="ahu-list">
+                                        ${user.assigned_ahu_ids.map(ahuId => `<span class="ahu-badge">${escapeHtml(ahuId)}</span>`).join('')}
+                                    </div>
+                                ` : '<div style="color: #EF4444; font-size: 11px;">No AHUs assigned</div>'}
+                            </div>
+                            <div class="user-actions">
+                                <button class="btn-small btn-assign" onclick="openAssignDialog('${user._id}')">Assign AHUs</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    registeredContainer.innerHTML = `
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M12 6v6l6 2"></path>
+                            </svg>
+                            <p>No registered users</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading users:', error);
+                alert('Failed to load users. Please refresh the page.');
+            }
+        }
+
+        // Load available devices
+        async function loadDevices() {
+            try {
+                const response = await fetch('/api/devices');
+                const data = await response.json();
+                if (data.success && data.hospitals) {
+                    allDevices = [];
+                    // Parse nested structure: hospitals[site][room] = [devices]
+                    Object.entries(data.hospitals).forEach(([siteName, rooms]) => {
+                        if (rooms && typeof rooms === 'object') {
+                            Object.entries(rooms).forEach(([roomName, devices]) => {
+                                if (Array.isArray(devices)) {
+                                    devices.forEach(device => {
+                                        if (device && device.id) {
+                                            allDevices.push({
+                                                id: device.id,
+                                                name: `${siteName} - ${roomName} - ${device.name || device.id}`
+                                            });
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                    });
+                    console.log(`Loaded ${allDevices.length} devices for assignment`);
+                } else {
+                    console.warn('No devices found or invalid response structure');
+                    allDevices = [];
+                }
+            } catch (error) {
+                console.error('Error loading devices:', error);
+                allDevices = [];
+            }
+        }
+
+        // Approve user
+        async function approveUser(userId) {
+            if (!confirm('Approve this user registration?')) return;
+            
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/approve`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('User approved successfully!');
+                    loadUsers();
+                } else {
+                    alert('Failed to approve user: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error approving user:', error);
+                alert('Failed to approve user. Please try again.');
+            }
+        }
+
+        // Reject user
+        async function rejectUser(userId) {
+            if (!confirm('Reject this user registration? This action cannot be undone.')) return;
+            
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/reject`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('User rejected.');
+                    loadUsers();
+                } else {
+                    alert('Failed to reject user: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error rejecting user:', error);
+                alert('Failed to reject user. Please try again.');
+            }
+        }
+
+        // Open assign AHU dialog
+        function openAssignDialog(userId) {
+            currentUserId = userId;
+            const container = document.getElementById('ahu-list-container');
+            
+            // Reload devices to ensure we have the latest list
+            loadDevices().then(() => {
+                if (allDevices.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state" style="padding: 20px;">
+                            <p>No AHU units available.</p>
+                            <p style="font-size: 12px; margin-top: 8px; color: var(--text-secondary);">
+                                Make sure devices are connected and reporting data.
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    // Get current user's assigned AHUs
+                    const userCard = document.querySelector(`[data-user-id="${userId}"]`);
+                    let assignedIds = [];
+                    if (userCard) {
+                        const ahuBadges = userCard.querySelectorAll('.ahu-badge');
+                        assignedIds = Array.from(ahuBadges).map(badge => badge.textContent.trim());
+                    }
+                    
+                    container.innerHTML = `
+                        <div style="margin-bottom: 16px;">
+                            <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
+                                Select AHU units to assign to this user:
+                            </p>
+                            <div style="max-height: 400px; overflow-y: auto;">
+                                ${allDevices.map(device => `
+                                    <label class="ahu-checkbox">
+                                        <input type="checkbox" value="${escapeHtml(device.id)}" ${assignedIds.includes(device.id) ? 'checked' : ''}>
+                                        <span>${escapeHtml(device.name)}</span>
+                                    </label>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('assign-ahu-dialog').classList.add('active');
+            });
+        }
+
+        // Close assign dialog
+        function closeAssignDialog() {
+            document.getElementById('assign-ahu-dialog').classList.remove('active');
+            currentUserId = null;
+        }
+
+        // Close dialog when clicking outside
+        document.getElementById('assign-ahu-dialog').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAssignDialog();
+            }
+        });
+
+        // Select all AHUs
+        function selectAllAHUs() {
+            const checkboxes = document.querySelectorAll('#ahu-list-container input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = true);
+        }
+
+        // Deselect all AHUs
+        function deselectAllAHUs() {
+            const checkboxes = document.querySelectorAll('#ahu-list-container input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = false);
+        }
+
+        // Save AHU assignment
+        async function saveAhuAssignment() {
+            if (!currentUserId) return;
+            
+            const checkboxes = document.querySelectorAll('#ahu-list-container input[type="checkbox"]:checked');
+            const ahuIds = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (ahuIds.length === 0) {
+                if (!confirm('No AHUs selected. This will remove all assigned AHUs. Continue?')) {
+                    return;
+                }
+            }
+            
+            try {
+                const response = await fetch(`/api/admin/users/${currentUserId}/assign-ahus`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ahu_ids: ahuIds})
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Successfully assigned ${ahuIds.length} AHU unit(s)!`);
+                    closeAssignDialog();
+                    loadUsers();
+                } else {
+                    alert('Failed to assign AHUs: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error assigning AHUs:', error);
+                alert('Failed to assign AHUs. Please try again.');
+            }
+        }
+
+        // Filter users (simple search)
+        function filterUsers() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const userCards = document.querySelectorAll('.user-card');
+            userCards.forEach(card => {
+                const text = card.textContent.toLowerCase();
+                card.style.display = text.includes(searchTerm) ? 'block' : 'none';
+            });
+        }
+
+        // Utility functions
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+            } catch (e) {
+                return dateString;
+            }
+        }
+    </script>
 </body>
 </html>
-
