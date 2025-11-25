@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/hospital.dart';
 import '../models/device_status.dart';
 import '../models/ahu_state.dart';
@@ -7,17 +8,20 @@ import '../models/user.dart';
 import '../models/register_request.dart';
 import '../services/api_service.dart';
 import '../services/aws_iot_service.dart';
+import '../services/firebase_auth_service.dart';
 
 /// Main app state provider
 class AppProvider extends ChangeNotifier {
   final ApiService _apiService = ApiService();
   final AwsIoTService _awsIoTService = AwsIoTService();
+  final FirebaseAuthService _firebaseAuth = FirebaseAuthService();
   bool _isAuthenticated = false;
   bool _isLoading = false;
   String? _errorMessage;
   bool _useDirectAws = false; // Toggle between Flask API and direct AWS IoT
   bool _isAdmin = false; // Track if user is admin or hospital user
   User? _currentUser; // Current logged-in hospital user
+  bool _isInitialized = false; // Track if auth state has been loaded
   
   // Data
   Map<String, Hospital> _hospitals = {};
@@ -43,6 +47,85 @@ class AppProvider extends ChangeNotifier {
   
   bool get useDirectAws => _useDirectAws;
   bool get awsConnected => _awsIoTService.isConnected;
+  bool get isInitialized => _isInitialized;
+  
+  /// Initialize authentication state from persistent storage
+  Future<void> initializeAuth() async {
+    if (_isInitialized) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isAuth = prefs.getBool('is_authenticated') ?? false;
+      final isAdmin = prefs.getBool('is_admin') ?? false;
+      
+      if (isAuth) {
+        _isAuthenticated = true;
+        _isAdmin = isAdmin;
+        
+        // If hospital user, try to restore user data
+        if (!isAdmin) {
+          final userJson = prefs.getString('current_user');
+          if (userJson != null) {
+            try {
+              // You might need to import json_serializable or use a different method
+              // For now, we'll just mark as authenticated and reload user status
+              await checkUserStatus();
+            } catch (e) {
+              print('Error restoring user data: $e');
+            }
+          }
+        } else {
+          // Admin - restore session
+          await _apiService.restoreSession();
+        }
+        
+        // Connect to AWS IoT if admin
+        if (isAdmin) {
+          await connectToAwsIoT();
+          await loadHospitals();
+          _startPolling();
+        } else {
+          // Hospital user - load their assigned AHUs
+          await loadHospitals();
+        }
+      }
+      
+      _isInitialized = true;
+      notifyListeners();
+    } catch (e) {
+      print('Error initializing auth: $e');
+      _isInitialized = true;
+      notifyListeners();
+    }
+  }
+  
+  /// Save authentication state to persistent storage
+  Future<void> _saveAuthState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_authenticated', _isAuthenticated);
+      await prefs.setBool('is_admin', _isAdmin);
+      
+      if (_currentUser != null) {
+        // Save user data as JSON string (simplified - you might want to use proper serialization)
+        await prefs.setString('current_user', _currentUser!.email);
+      }
+    } catch (e) {
+      print('Error saving auth state: $e');
+    }
+  }
+  
+  /// Clear authentication state from persistent storage
+  Future<void> _clearAuthState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('is_authenticated');
+      await prefs.remove('is_admin');
+      await prefs.remove('current_user');
+    } catch (e) {
+      print('Error clearing auth state: $e');
+    }
+  }
   
   /// Admin Login
   Future<bool> login(String username, String password) async {
@@ -55,6 +138,9 @@ class AppProvider extends ChangeNotifier {
         _isAuthenticated = true;
         _isAdmin = true;
         _currentUser = null; // Admin doesn't have user object
+        
+        // Save auth state
+        await _saveAuthState();
         
         // Connect to AWS IoT Core directly
         await connectToAwsIoT();
@@ -129,6 +215,10 @@ class AppProvider extends ChangeNotifier {
         _isAuthenticated = true;
         _isAdmin = false;
         _currentUser = user;
+        
+        // Save auth state
+        await _saveAuthState();
+        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -144,6 +234,11 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  /// Check if Google user exists in system
+  Future<User?> checkGoogleUser(String email) async {
+    return await _apiService.checkGoogleUser(email);
+  }
+  
   /// Check current user status (for hospital users)
   Future<void> checkUserStatus() async {
     if (_isAdmin) return; // Admin doesn't need status check
@@ -156,6 +251,118 @@ class AppProvider extends ChangeNotifier {
       }
     } catch (e) {
       print('Error checking user status: $e');
+    }
+  }
+
+  /// Sign in with Google
+  Future<GoogleSignInResult> signInWithGoogle() async {
+    return await _firebaseAuth.signInWithGoogle();
+  }
+
+
+  /// Register with Google (after collecting additional info)
+  Future<bool> registerWithGoogle({
+    required String googleId,
+    required String email,
+    required String username,
+    required String phoneNumber,
+    required String hospitalName,
+    String? profileImageUrl,
+    required String idToken,
+  }) async {
+    _setLoading(true);
+    _setError(null);
+
+    // Validate email before proceeding
+    if (email.isEmpty || !email.contains('@')) {
+      _setError('Valid email is required');
+      _setLoading(false);
+      return false;
+    }
+
+    try {
+      print('AppProvider: registerWithGoogle - Email: $email, GoogleId: $googleId');
+      
+      final registerRequest = RegisterRequest(
+        email: email.trim(),
+        username: username,
+        phoneNumber: phoneNumber,
+        hospitalName: hospitalName,
+        password: '', // No password for Google users
+        googleId: googleId,
+        profileImageUrl: profileImageUrl,
+      );
+      
+      print('AppProvider: RegisterRequest created - Email: ${registerRequest.email}');
+
+      final user = await _apiService.registerWithGoogle(
+        registerRequest: registerRequest,
+        idToken: idToken,
+      );
+
+      if (user != null) {
+        _isAuthenticated = true;
+        _isAdmin = false;
+        _currentUser = user;
+        
+        // Save auth state
+        await _saveAuthState();
+        
+        _setLoading(false);
+        notifyListeners();
+        return true;
+      } else {
+        _setError(_apiService.errorMessage ?? 'Registration failed');
+        _setLoading(false);
+        return false;
+      }
+    } catch (e) {
+      _setError('Registration failed: ${e.toString()}');
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Login with Google (existing user)
+  Future<bool> userLoginWithGoogle(
+    String googleId,
+    String email,
+    String displayName,
+    String? photoUrl,
+    String idToken,
+  ) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final user = await _apiService.userLoginWithGoogle(
+        googleId: googleId,
+        email: email,
+        displayName: displayName,
+        photoUrl: photoUrl,
+        idToken: idToken,
+      );
+
+      if (user != null) {
+        _isAuthenticated = true;
+        _isAdmin = false;
+        _currentUser = user;
+        
+        // Save auth state
+        await _saveAuthState();
+        
+        _setLoading(false);
+        notifyListeners();
+        return true;
+      } else {
+        _setError(_apiService.errorMessage ?? 'Login failed');
+        _setLoading(false);
+        return false;
+      }
+    } catch (e) {
+      _setError('Login failed: ${e.toString()}');
+      _setLoading(false);
+      return false;
     }
   }
   
@@ -189,10 +396,15 @@ class AppProvider extends ChangeNotifier {
   }
   
   /// Logout
-  void logout() {
+  void logout() async {
     _stopPolling();
     _awsIoTService.disconnect();
     _apiService.logout();
+    await _firebaseAuth.signOut(); // Sign out from Firebase
+    
+    // Clear persistent auth state
+    await _clearAuthState();
+    
     _isAuthenticated = false;
     _isAdmin = false;
     _useDirectAws = false;

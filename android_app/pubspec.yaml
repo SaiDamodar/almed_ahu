@@ -39,6 +39,13 @@ dependencies:
   
   # Crypto for AWS SigV4 signing
   crypto: ^3.0.5
+  
+  # Firebase Authentication
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  
+  # Google Sign-In
+  google_sign_in: ^6.2.1
 
 dev_dependencies:
   flutter_test:

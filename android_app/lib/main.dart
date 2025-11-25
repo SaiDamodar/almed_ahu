@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'providers/app_provider.dart';
 import 'providers/theme_provider.dart';
 import 'theme/app_theme.dart';
-import 'screens/landing_screen.dart';
-import 'screens/login_screen.dart';
-import 'screens/user_login_screen.dart';
+import 'screens/welcome_screen.dart';
+import 'screens/unified_login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/hospitals_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const AlmedAhuApp());
 }
 
@@ -33,9 +35,8 @@ class AlmedAhuApp extends StatelessWidget {
             themeMode: themeProvider.themeMode,
             home: const AuthWrapper(),
             routes: {
-              '/landing': (context) => const LandingScreen(),
-              '/admin-login': (context) => const LoginScreen(),
-              '/user-login': (context) => const UserLoginScreen(),
+              '/welcome': (context) => const WelcomeScreen(),
+              '/login': (context) => const UnifiedLoginScreen(),
               '/admin-dashboard': (context) => const HospitalsScreen(),
               '/user-home': (context) => const HomeScreen(),
             },
@@ -47,16 +48,53 @@ class AlmedAhuApp extends StatelessWidget {
 }
 
 /// Wrapper to check authentication state and route accordingly
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  @override
+  void initState() {
+    super.initState();
+    // Initialize auth state on app startup
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final appProvider = Provider.of<AppProvider>(context, listen: false);
+      appProvider.initializeAuth();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AppProvider>(
       builder: (context, appProvider, child) {
-        // If not authenticated, show landing screen
+        // Show loading while initializing auth state
+        if (!appProvider.isInitialized) {
+          return Scaffold(
+            body: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.darkBackground,
+                    AppTheme.darkSurface,
+                    const Color(0xFF334155),
+                  ],
+                ),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          );
+        }
+
+        // If not authenticated, show welcome screen
         if (!appProvider.isAuthenticated) {
-          return const LandingScreen();
+          return const WelcomeScreen();
         }
 
         // If authenticated as admin, show admin dashboard

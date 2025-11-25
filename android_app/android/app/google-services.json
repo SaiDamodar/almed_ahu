@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "53611520350",
+    "project_id": "alemdahu-0107",
+    "storage_bucket": "alemdahu-0107.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:53611520350:android:3bb512e045297a13d16fcf",
+        "android_client_info": {
+          "package_name": "com.almed.ahu_android"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "53611520350-6r6pgjdikm9i0b0sv4r8udh0jg970hh1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.almed.ahu_android",
+            "certificate_hash": "1a921c1be35279455534dfddd0f5e273678b52ec"
+          }
+        },
+        {
+          "client_id": "53611520350-2r9nglfg2dqm2rmh6k11g7i3h3t3j05g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-qnims96-nP2ENx4ZvGFp9U1pR2y9Yz8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "53611520350-2r9nglfg2dqm2rmh6k11g7i3h3t3j05g.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

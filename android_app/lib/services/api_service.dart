@@ -452,9 +452,169 @@ class ApiService {
     }
   }
 
+  /// Register with Google (after Firebase authentication)
+  Future<User?> registerWithGoogle({
+    required RegisterRequest registerRequest,
+    required String idToken,
+  }) async {
+    try {
+      final url = '${AppConfig.apiBaseUrl}/register/google';
+      final requestJson = {
+        ...registerRequest.toJson(),
+        'id_token': idToken,
+      };
+      final requestBody = jsonEncode(requestJson);
+
+      print('Register with Google: Attempting to register at $url');
+      print('Register with Google: Request body: $requestBody');
+      print('Register with Google: Email in request: ${registerRequest.email}');
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: requestBody,
+      );
+
+      print('Register with Google: Response status: ${response.statusCode}');
+      print('Register with Google: Response body: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['user'] != null) {
+          print('Register with Google: Success');
+          return User.fromJson(data['user']);
+        }
+      }
+
+      try {
+        final data = jsonDecode(response.body);
+        final errorMsg = data['message'] ?? data['error'] ?? 'Registration failed';
+        _lastError = errorMsg;
+        print('Register with Google: Error message: $errorMsg');
+      } catch (e) {
+        _lastError = 'Registration failed: HTTP ${response.statusCode}';
+        print('Register with Google: Failed to parse error - ${response.statusCode}');
+      }
+      return null;
+    } on SocketException catch (e) {
+      _lastError = 'Network error: ${e.message}';
+      print('Register with Google: Network error - ${e.message}');
+      return null;
+    } catch (e, stackTrace) {
+      _lastError = 'Registration failed: ${e.toString()}';
+      print('Register with Google: Exception - $e');
+      print('Register with Google: Stack trace - $stackTrace');
+      return null;
+    }
+  }
+
+  /// Login with Google (existing user)
+  Future<User?> userLoginWithGoogle({
+    required String googleId,
+    required String email,
+    required String displayName,
+    String? photoUrl,
+    required String idToken,
+  }) async {
+    try {
+      final url = '${AppConfig.apiBaseUrl}/user/login/google';
+      final requestBody = jsonEncode({
+        'google_id': googleId,
+        'email': email,
+        'display_name': displayName,
+        'profile_image_url': photoUrl,
+        'id_token': idToken,
+      });
+
+      print('Login with Google: Attempting to login at $url');
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: requestBody,
+      );
+
+      print('Login with Google: Response status: ${response.statusCode}');
+      print('Login with Google: Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          // Extract session cookie
+          final cookies = response.headers['set-cookie'];
+          if (cookies != null) {
+            _sessionCookie = cookies.split(';').first;
+          }
+
+          if (data['user'] != null) {
+            return User.fromJson(data['user']);
+          }
+        }
+      }
+
+      // Handle error response
+      try {
+        final data = jsonDecode(response.body);
+        final errorMessage = data['message'] ?? data['error'] ?? 'Login failed';
+        _lastError = errorMessage;
+        print('Login with Google: Error - $errorMessage');
+      } catch (e) {
+        _lastError = 'Login failed: HTTP ${response.statusCode}';
+        print('Login with Google: Failed to parse error - ${response.statusCode}');
+      }
+      return null;
+    } on SocketException catch (e) {
+      _lastError = e.message;
+      return null;
+    } catch (e) {
+      _lastError = e.toString();
+      return null;
+    }
+  }
+
   /// Logout (clear session)
   void logout() {
     _sessionCookie = null;
+    _lastError = null;
+  }
+  
+  /// Restore session (for persistent login)
+  Future<void> restoreSession() async {
+    // Session is managed by cookies, so we just need to verify it's still valid
+    // This is a placeholder - in a real app, you might want to verify the session
+    // by making a request to /api/user/status or similar
+  }
+  
+  /// Check if a Google user exists in the system
+  Future<User?> checkGoogleUser(String email) async {
+    try {
+      // Try to get user status to see if user exists
+      final response = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/user/status'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          if (_sessionCookie != null) 'Cookie': _sessionCookie!,
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['user'] != null) {
+          return User.fromJson(data['user']);
+        }
+      }
+      return null;
+    } catch (e) {
+      print('Error checking Google user: $e');
+      return null;
+    }
   }
 }
 

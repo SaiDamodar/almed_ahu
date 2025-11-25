@@ -3,22 +3,26 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
-import 'register_screen.dart';
+import '../config/app_config.dart';
+import 'hospitals_screen.dart';
 import 'home_screen.dart';
+import 'register_screen.dart';
+import 'google_signin_complete_screen.dart';
 
-/// Login screen for hospital users (email and Google login)
-class UserLoginScreen extends StatefulWidget {
-  const UserLoginScreen({super.key});
+/// Unified login screen for both admin and hospital users
+class UnifiedLoginScreen extends StatefulWidget {
+  const UnifiedLoginScreen({super.key});
 
   @override
-  State<UserLoginScreen> createState() => _UserLoginScreenState();
+  State<UnifiedLoginScreen> createState() => _UnifiedLoginScreenState();
 }
 
-class _UserLoginScreenState extends State<UserLoginScreen> {
+class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -30,34 +34,133 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
   Future<void> _handleEmailLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
+    setState(() => _isLoading = true);
+
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    final success = await appProvider.userLogin(email, password);
+    // Check if admin credentials
+    if (email.toLowerCase() == AppConfig.adminUsername.toLowerCase() && 
+        password == AppConfig.adminPassword) {
+      // Admin login
+      final success = await appProvider.login(AppConfig.adminUsername, password);
 
-    if (success && mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(appProvider.errorMessage ?? 'Login failed'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
+      if (mounted) {
+        setState(() => _isLoading = false);
+
+        if (success) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const HospitalsScreen()),
+            (route) => false,
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(appProvider.errorMessage ?? 'Login failed'),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+        }
+      }
+    } else {
+      // Hospital user login
+      final success = await appProvider.userLogin(email, password);
+
+      if (mounted) {
+        setState(() => _isLoading = false);
+
+        if (success) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            (route) => false,
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(appProvider.errorMessage ?? 'Login failed'),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+        }
+      }
     }
   }
 
   Future<void> _handleGoogleLogin() async {
-    // TODO: Implement Google Sign-In
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Google Sign-In will be implemented soon'),
-        backgroundColor: AppTheme.info,
-      ),
-    );
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+
+    try {
+      final result = await appProvider.signInWithGoogle();
+
+      if (!mounted) return;
+
+      if (result.success && result.user != null) {
+        // Try to login with Google first (user might already exist)
+        final loginSuccess = await appProvider.userLoginWithGoogle(
+          result.googleId ?? '',
+          result.email ?? '',
+          result.displayName ?? '',
+          result.photoUrl,
+          result.idToken ?? '',
+        );
+
+        if (loginSuccess && mounted) {
+          // User exists and logged in successfully
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            (route) => false,
+          );
+        } else {
+          // Check if error is "user not found" - then go to registration
+          final errorMessage = appProvider.errorMessage ?? '';
+          if (errorMessage.contains('not found') || 
+              errorMessage.contains('Please register') ||
+              errorMessage.contains('404')) {
+            // New Google user, navigate to completion screen
+            if (mounted) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => GoogleSignInCompleteScreen(
+                    googleId: result.googleId ?? '',
+                    email: result.email ?? '',
+                    displayName: result.displayName ?? '',
+                    photoUrl: result.photoUrl,
+                    idToken: result.idToken ?? '',
+                  ),
+                ),
+              );
+            }
+          } else if (mounted) {
+            // Other error (network, etc.)
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(errorMessage.isNotEmpty 
+                    ? errorMessage 
+                    : 'Google login failed'),
+                backgroundColor: AppTheme.error,
+              ),
+            );
+          }
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.error ?? 'Google Sign-In failed'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('An unexpected error occurred: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -92,7 +195,6 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // ALMED Logo/Branding
                     Text(
                       'ALMED',
                       style: TextStyle(
@@ -105,7 +207,7 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Hospital User Login',
+                      'Login',
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                             color: isDark
                                 ? AppTheme.darkOnSurfaceVariant
@@ -113,8 +215,6 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
                           ),
                     ),
                     const SizedBox(height: 64),
-
-                    // Login Card
                     Container(
                       padding: const EdgeInsets.all(32),
                       decoration: BoxDecoration(
@@ -140,30 +240,23 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 32),
-
-                          // Email field
                           TextFormField(
                             controller: _emailController,
                             keyboardType: TextInputType.emailAddress,
-                            decoration: InputDecoration(
-                              labelText: 'Email',
-                              prefixIcon: const Icon(Icons.email_outlined),
+                            decoration: const InputDecoration(
+                              labelText: 'Email or Username',
+                              prefixIcon: Icon(Icons.email_outlined),
                               filled: true,
                             ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return 'Please enter email';
-                              }
-                              if (!value.contains('@') || !value.contains('.')) {
-                                return 'Enter a valid email';
+                                return 'Please enter email or username';
                               }
                               return null;
                             },
                             textInputAction: TextInputAction.next,
                           ),
                           const SizedBox(height: 20),
-
-                          // Password field
                           TextFormField(
                             controller: _passwordController,
                             obscureText: _obscurePassword,
@@ -194,47 +287,41 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
                             onFieldSubmitted: (_) => _handleEmailLogin(),
                           ),
                           const SizedBox(height: 32),
-
-                          // Email Login button
-                          Consumer<AppProvider>(
-                            builder: (context, appProvider, child) {
-                              return ElevatedButton(
-                                onPressed: appProvider.isLoading
-                                    ? null
-                                    : _handleEmailLogin,
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                                child: appProvider.isLoading
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(
-                                            Colors.white,
-                                          ),
-                                        ),
-                                      )
-                                    : const Text(
-                                        'Login',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                          ElevatedButton(
+                            onPressed: _isLoading ? null : _handleEmailLogin,
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white,
                                       ),
-                              );
-                            },
+                                    ),
+                                  )
+                                : const Text(
+                                    'Login',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                           ),
-                          const SizedBox(height: 16),
-
-                          // Divider
+                          const SizedBox(height: 20),
                           Row(
                             children: [
-                              Expanded(child: Divider(color: Theme.of(context).dividerColor)),
+                              Expanded(
+                                child: Divider(
+                                  color: Theme.of(context).dividerColor,
+                                ),
+                              ),
                               Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 16),
                                 child: Text(
@@ -242,27 +329,22 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ),
-                              Expanded(child: Divider(color: Theme.of(context).dividerColor)),
+                              Expanded(
+                                child: Divider(
+                                  color: Theme.of(context).dividerColor,
+                                ),
+                              ),
                             ],
                           ),
-                          const SizedBox(height: 16),
-
-                          // Google Login button
+                          const SizedBox(height: 20),
                           OutlinedButton.icon(
-                            onPressed: _handleGoogleLogin,
-                            icon: Image.asset(
-                              'assets/images/google_logo.png',
-                              height: 24,
-                              width: 24,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Icon(Icons.g_mobiledata, size: 24);
-                              },
-                            ),
+                            onPressed: _isLoading ? null : _handleGoogleLogin,
+                            icon: const Icon(Icons.g_mobiledata, size: 24),
                             label: const Text(
                               'Continue with Google',
                               style: TextStyle(
                                 fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                             style: OutlinedButton.styleFrom(
@@ -271,38 +353,24 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               side: BorderSide(
-                                color: Theme.of(context).dividerColor,
-                                width: 1.5,
+                                color: Theme.of(context).dividerColor.withOpacity(0.5),
                               ),
                             ),
+                          ),
+                          const SizedBox(height: 20),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (context) => const RegisterScreen()),
+                              );
+                            },
+                            child: const Text('Don\'t have an account? Sign Up'),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 24),
-
-                    // Register Link
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          "Don't have an account? ",
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => const RegisterScreen(),
-                              ),
-                            );
-                          },
-                          child: const Text('Register'),
-                        ),
-                      ],
-                    ),
-
-                    // Theme toggle
                     Consumer<ThemeProvider>(
                       builder: (context, themeProvider, child) {
                         return IconButton(

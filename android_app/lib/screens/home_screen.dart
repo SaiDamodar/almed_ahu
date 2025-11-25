@@ -5,7 +5,7 @@ import '../theme/app_theme.dart';
 import '../models/user.dart';
 import '../models/device_status.dart';
 import 'ahu_control_screen.dart';
-import 'landing_screen.dart';
+import 'welcome_screen.dart';
 
 /// Home screen for hospital users showing status and assigned AHUs
 class HomeScreen extends StatefulWidget {
@@ -62,7 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
               appProvider.logout();
               if (mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (context) => const LandingScreen()),
+                  MaterialPageRoute(builder: (context) => const WelcomeScreen()),
                   (route) => false,
                 );
               }

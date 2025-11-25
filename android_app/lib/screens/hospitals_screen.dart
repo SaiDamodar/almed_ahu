@@ -5,7 +5,7 @@ import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/hospital.dart';
 import 'ahus_screen.dart';
-import 'login_screen.dart';
+import 'welcome_screen.dart';
 import 'admin_users_screen.dart';
 
 /// Hospitals list screen
@@ -135,7 +135,7 @@ class HospitalsScreen extends StatelessWidget {
                         onPressed: () {
                           Provider.of<AppProvider>(context, listen: false).logout();
                           Navigator.of(context).pushAndRemoveUntil(
-                            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                            MaterialPageRoute(builder: (context) => const WelcomeScreen()),
                             (route) => false,
                           );
                         },
