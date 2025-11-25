@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/hospital.dart';
 import '../models/device_status.dart';
@@ -43,6 +44,7 @@ class ApiService {
           final cookies = response.headers['set-cookie'];
           if (cookies != null) {
             _sessionCookie = cookies.split(';').first;
+            await _saveSessionCookie(_sessionCookie!);
             print('Login: Session cookie stored');
           }
           print('Login: Success');
@@ -305,6 +307,7 @@ class ApiService {
           final cookies = response.headers['set-cookie'];
           if (cookies != null) {
             _sessionCookie = cookies.split(';').first;
+            await _saveSessionCookie(_sessionCookie!);
           }
           
           if (data['user'] != null) {
@@ -550,6 +553,7 @@ class ApiService {
           final cookies = response.headers['set-cookie'];
           if (cookies != null) {
             _sessionCookie = cookies.split(';').first;
+            await _saveSessionCookie(_sessionCookie!);
           }
 
           if (data['user'] != null) {
@@ -578,17 +582,114 @@ class ApiService {
     }
   }
 
+  /// Save session cookie to persistent storage
+  Future<void> _saveSessionCookie(String cookie) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('session_cookie', cookie);
+      print('Session cookie saved to storage');
+    } catch (e) {
+      print('Error saving session cookie: $e');
+    }
+  }
+  
+  /// Load session cookie from persistent storage
+  Future<String?> _loadSessionCookie() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cookie = prefs.getString('session_cookie');
+      if (cookie != null) {
+        print('Session cookie loaded from storage');
+      }
+      return cookie;
+    } catch (e) {
+      print('Error loading session cookie: $e');
+      return null;
+    }
+  }
+  
+  /// Clear session cookie from persistent storage
+  Future<void> _clearSessionCookie() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('session_cookie');
+      print('Session cookie cleared from storage');
+    } catch (e) {
+      print('Error clearing session cookie: $e');
+    }
+  }
+  
   /// Logout (clear session)
   void logout() {
     _sessionCookie = null;
     _lastError = null;
+    _clearSessionCookie();
   }
   
   /// Restore session (for persistent login)
-  Future<void> restoreSession() async {
-    // Session is managed by cookies, so we just need to verify it's still valid
-    // This is a placeholder - in a real app, you might want to verify the session
-    // by making a request to /api/user/status or similar
+  Future<bool> restoreSession() async {
+    try {
+      // Load session cookie from storage
+      final cookie = await _loadSessionCookie();
+      if (cookie == null || cookie.isEmpty) {
+        print('No session cookie found in storage');
+        return false;
+      }
+      
+      _sessionCookie = cookie;
+      
+      // Verify session is still valid by making a test request
+      // For admin, try to get devices; for user, try to get status
+      try {
+        final response = await http.get(
+          Uri.parse('${AppConfig.apiBaseUrl}/devices'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Cookie': _sessionCookie!,
+          },
+        );
+        
+        if (response.statusCode == 200) {
+          print('Session restored and verified');
+          return true;
+        } else {
+          print('Session cookie invalid (status: ${response.statusCode})');
+          _sessionCookie = null;
+          await _clearSessionCookie();
+          return false;
+        }
+      } catch (e) {
+        // If devices endpoint fails, try user status endpoint
+        try {
+          final response = await http.get(
+            Uri.parse('${AppConfig.apiBaseUrl}/user/status'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Cookie': _sessionCookie!,
+            },
+          );
+          
+          if (response.statusCode == 200) {
+            print('Session restored and verified (user)');
+            return true;
+          } else {
+            print('Session cookie invalid (status: ${response.statusCode})');
+            _sessionCookie = null;
+            await _clearSessionCookie();
+            return false;
+          }
+        } catch (e2) {
+          print('Error verifying session: $e2');
+          // Keep the cookie anyway, let the actual API calls handle auth errors
+          return true;
+        }
+      }
+    } catch (e) {
+      print('Error restoring session: $e');
+      return false;
+    }
   }
   
   /// Check if a Google user exists in the system

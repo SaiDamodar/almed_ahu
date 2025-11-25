@@ -59,34 +59,71 @@ class AppProvider extends ChangeNotifier {
       final isAdmin = prefs.getBool('is_admin') ?? false;
       
       if (isAuth) {
+        // Restore session cookie first
+        final sessionRestored = await _apiService.restoreSession();
+        
+        if (!sessionRestored) {
+          // Session invalid or expired, clear auth state
+          print('Session restoration failed, clearing auth state');
+          await _clearAuthState();
+          _isAuthenticated = false;
+          _isAdmin = false;
+          _currentUser = null;
+          _isInitialized = true;
+          notifyListeners();
+          return;
+        }
+        
         _isAuthenticated = true;
         _isAdmin = isAdmin;
         
-        // If hospital user, try to restore user data
+        // If hospital user, restore user data
         if (!isAdmin) {
-          final userJson = prefs.getString('current_user');
-          if (userJson != null) {
-            try {
-              // You might need to import json_serializable or use a different method
-              // For now, we'll just mark as authenticated and reload user status
-              await checkUserStatus();
-            } catch (e) {
-              print('Error restoring user data: $e');
+          try {
+            // Check user status to restore current user data
+            await checkUserStatus();
+            if (_currentUser == null) {
+              // If we can't get user status, session might be invalid
+              print('Failed to restore user status, clearing auth');
+              await _clearAuthState();
+              _isAuthenticated = false;
+              _isAdmin = false;
+              _currentUser = null;
+              _isInitialized = true;
+              notifyListeners();
+              return;
             }
+          } catch (e) {
+            print('Error restoring user data: $e');
+            // If error, clear auth and let user login again
+            await _clearAuthState();
+            _isAuthenticated = false;
+            _isAdmin = false;
+            _currentUser = null;
+            _isInitialized = true;
+            notifyListeners();
+            return;
           }
-        } else {
-          // Admin - restore session
-          await _apiService.restoreSession();
         }
         
         // Connect to AWS IoT if admin
         if (isAdmin) {
-          await connectToAwsIoT();
-          await loadHospitals();
-          _startPolling();
+          try {
+            await connectToAwsIoT();
+            await loadHospitals();
+            _startPolling();
+          } catch (e) {
+            print('Error loading admin data: $e');
+            // Don't clear auth, just log the error - user can refresh
+          }
         } else {
           // Hospital user - load their assigned AHUs
-          await loadHospitals();
+          try {
+            await loadHospitals();
+          } catch (e) {
+            print('Error loading hospital user data: $e');
+            // Don't clear auth, just log the error - user can refresh
+          }
         }
       }
       
@@ -94,6 +131,11 @@ class AppProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       print('Error initializing auth: $e');
+      // On error, clear auth state to be safe
+      await _clearAuthState();
+      _isAuthenticated = false;
+      _isAdmin = false;
+      _currentUser = null;
       _isInitialized = true;
       notifyListeners();
     }
