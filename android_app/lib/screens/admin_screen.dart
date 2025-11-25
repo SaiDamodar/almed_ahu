@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/screen_utils.dart';
 
 /// Admin screen for WiFi provisioning, broker settings, and motor timings
 class AdminScreen extends StatefulWidget {
@@ -21,7 +22,6 @@ class _AdminScreenState extends State<AdminScreen> {
   final _brokerHostController = TextEditingController();
   final _brokerPortController = TextEditingController(text: '1883');
   
-  // Motor timing controllers
   final _m1StartController = TextEditingController(text: '10');
   final _m1PostController = TextEditingController(text: '10');
   final _m2IntervalController = TextEditingController(text: '30');
@@ -50,7 +50,13 @@ class _AdminScreenState extends State<AdminScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Admin Settings'),
+        title: Text(
+          'Admin Settings',
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 18),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
@@ -62,200 +68,43 @@ class _AdminScreenState extends State<AdminScreen> {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: isDark
-                ? [
-                    AppTheme.darkBackground,
-                    AppTheme.darkSurface,
-                    const Color(0xFF334155),
-                  ]
-                : [
-                    Colors.white,
-                    Colors.blue.shade50,
-                    Colors.blue.shade100,
-                  ],
+                ? const [AppTheme.darkBackground, AppTheme.darkSurface, Color(0xFF334155)]
+                : [Colors.white, Colors.blue.shade50, Colors.blue.shade100],
           ),
         ),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // WiFi Provisioning
-              _SectionCard(
-                title: 'WiFi Provisioning',
-                icon: Icons.wifi,
-                iconColor: AppTheme.info,
-                children: [
-                  const Text(
-                    'Primary WiFi (Pi Hotspot)',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _primarySsidController,
-                    decoration: const InputDecoration(
-                      labelText: 'SSID',
-                      prefixIcon: Icon(Icons.wifi),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _primaryPassController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Secondary WiFi (Hospital Network)',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _secondarySsidController,
-                    decoration: const InputDecoration(
-                      labelText: 'SSID',
-                      prefixIcon: Icon(Icons.wifi),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _secondaryPassController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _provisionWifi,
-                    icon: const Icon(Icons.send_rounded),
-                    label: const Text('Provision WiFi'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Broker Provisioning
-              _SectionCard(
-                title: 'MQTT Broker Settings',
-                icon: Icons.dns,
-                iconColor: AppTheme.success,
-                children: [
-                  TextField(
-                    controller: _brokerHostController,
-                    decoration: const InputDecoration(
-                      labelText: 'Broker Host',
-                      hintText: 'e.g., 10.42.0.1 or mqtt-broker.local',
-                      prefixIcon: Icon(Icons.computer),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _brokerPortController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Port',
-                      prefixIcon: Icon(Icons.numbers),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _provisionBroker,
-                    icon: const Icon(Icons.send_rounded),
-                    label: const Text('Provision Broker'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.success,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Motor Timing Configuration
-              _SectionCard(
-                title: 'Motor Timing Configuration',
-                icon: Icons.timer,
-                iconColor: AppTheme.info,
-                children: [
-                  TextField(
-                    controller: _m1StartController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Motor-1 Start Run Time (seconds)',
-                      helperText: 'Duration Motor-1 runs after system starts',
-                      prefixIcon: Icon(Icons.play_circle),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _m1PostController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Motor-1 Post Run Time (seconds)',
-                      helperText: 'Duration Motor-1 runs during shutdown drain',
-                      prefixIcon: Icon(Icons.stop_circle),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _m2IntervalController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Motor-2 Interval (seconds)',
-                      helperText: 'Time between Motor-2 filter clean cycles',
-                      prefixIcon: Icon(Icons.refresh),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _m2RunController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Motor-2 Run Time (seconds)',
-                      helperText: 'Duration Motor-2 runs each cycle',
-                      prefixIcon: Icon(Icons.schedule),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _m2DelayController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Motor-2 Delay After M1 (seconds)',
-                      helperText: 'Delay before Motor-2 starts after Motor-1 stops',
-                      prefixIcon: Icon(Icons.hourglass_empty),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _resetMotorTimings,
-                          icon: const Icon(Icons.restore),
-                          label: const Text('Reset to Defaults'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: _provisionMotorTimings,
-                          icon: const Icon(Icons.send_rounded),
-                          label: const Text('Save Timings'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.info,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
+          padding: ScreenUtils.getScreenPadding(context),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 500),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _WifiSection(
+                  primarySsidController: _primarySsidController,
+                  primaryPassController: _primaryPassController,
+                  secondarySsidController: _secondarySsidController,
+                  secondaryPassController: _secondaryPassController,
+                  onProvision: _provisionWifi,
+                ),
+                SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+                _BrokerSection(
+                  brokerHostController: _brokerHostController,
+                  brokerPortController: _brokerPortController,
+                  onProvision: _provisionBroker,
+                ),
+                SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+                _MotorTimingSection(
+                  m1StartController: _m1StartController,
+                  m1PostController: _m1PostController,
+                  m2IntervalController: _m2IntervalController,
+                  m2RunController: _m2RunController,
+                  m2DelayController: _m2DelayController,
+                  onProvision: _provisionMotorTimings,
+                  onReset: _resetMotorTimings,
+                ),
+                SizedBox(height: ScreenUtils.getSpacing(context, 20)),
+              ],
+            ),
           ),
         ),
       ),
@@ -263,7 +112,7 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   void _provisionWifi() {
-    final provider = Provider.of<AppProvider>(context, listen: false);
+    final provider = context.read<AppProvider>();
     
     final primarySsid = _primarySsidController.text.trim();
     final primaryPass = _primaryPassController.text.trim();
@@ -275,15 +124,10 @@ class _AdminScreenState extends State<AdminScreen> {
       return;
     }
 
-    // Send WiFi provisioning command via API
     final command = {
       'type': 'provision_wifi',
-      'primary': primarySsid.isNotEmpty
-          ? {'ssid': primarySsid, 'pass': primaryPass}
-          : null,
-      'secondary': secondarySsid.isNotEmpty
-          ? {'ssid': secondarySsid, 'pass': secondaryPass}
-          : null,
+      'primary': primarySsid.isNotEmpty ? {'ssid': primarySsid, 'pass': primaryPass} : null,
+      'secondary': secondarySsid.isNotEmpty ? {'ssid': secondarySsid, 'pass': secondaryPass} : null,
     };
 
     provider.sendCommand(widget.deviceId, command);
@@ -291,7 +135,7 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   void _provisionBroker() {
-    final provider = Provider.of<AppProvider>(context, listen: false);
+    final provider = context.read<AppProvider>();
     
     final host = _brokerHostController.text.trim();
     final portStr = _brokerPortController.text.trim();
@@ -307,18 +151,13 @@ class _AdminScreenState extends State<AdminScreen> {
       return;
     }
 
-    final command = {
-      'type': 'provision_broker',
-      'host': host,
-      'port': port,
-    };
-
+    final command = {'type': 'provision_broker', 'host': host, 'port': port};
     provider.sendCommand(widget.deviceId, command);
     _showSuccess('Broker settings sent to AHU');
   }
 
   void _provisionMotorTimings() {
-    final provider = Provider.of<AppProvider>(context, listen: false);
+    final provider = context.read<AppProvider>();
 
     final m1Start = int.tryParse(_m1StartController.text);
     final m1Post = int.tryParse(_m1PostController.text);
@@ -368,6 +207,8 @@ class _AdminScreenState extends State<AdminScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: AppTheme.error,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
       ),
     );
   }
@@ -377,7 +218,226 @@ class _AdminScreenState extends State<AdminScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: AppTheme.success,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
       ),
+    );
+  }
+}
+
+class _WifiSection extends StatelessWidget {
+  final TextEditingController primarySsidController;
+  final TextEditingController primaryPassController;
+  final TextEditingController secondarySsidController;
+  final TextEditingController secondaryPassController;
+  final VoidCallback onProvision;
+
+  const _WifiSection({
+    required this.primarySsidController,
+    required this.primaryPassController,
+    required this.secondarySsidController,
+    required this.secondaryPassController,
+    required this.onProvision,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = ScreenUtils.getSpacing(context, 12);
+
+    return _SectionCard(
+      title: 'WiFi Provisioning',
+      icon: Icons.wifi,
+      iconColor: AppTheme.info,
+      children: [
+        Text(
+          'Primary WiFi (Pi Hotspot)',
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 13),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        SizedBox(height: spacing),
+        _TextField(controller: primarySsidController, label: 'SSID', icon: Icons.wifi),
+        SizedBox(height: spacing),
+        _TextField(controller: primaryPassController, label: 'Password', icon: Icons.lock, obscure: true),
+        SizedBox(height: ScreenUtils.getSpacing(context, 20)),
+        Text(
+          'Secondary WiFi (Hospital Network)',
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 13),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        SizedBox(height: spacing),
+        _TextField(controller: secondarySsidController, label: 'SSID', icon: Icons.wifi),
+        SizedBox(height: spacing),
+        _TextField(controller: secondaryPassController, label: 'Password', icon: Icons.lock, obscure: true),
+        SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+        SizedBox(
+          width: double.infinity,
+          height: ScreenUtils.getButtonHeight(context),
+          child: ElevatedButton.icon(
+            onPressed: onProvision,
+            icon: const Icon(Icons.send_rounded, size: 18),
+            label: const Text('Provision WiFi'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BrokerSection extends StatelessWidget {
+  final TextEditingController brokerHostController;
+  final TextEditingController brokerPortController;
+  final VoidCallback onProvision;
+
+  const _BrokerSection({
+    required this.brokerHostController,
+    required this.brokerPortController,
+    required this.onProvision,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = ScreenUtils.getSpacing(context, 12);
+
+    return _SectionCard(
+      title: 'MQTT Broker Settings',
+      icon: Icons.dns,
+      iconColor: AppTheme.success,
+      children: [
+        _TextField(
+          controller: brokerHostController,
+          label: 'Broker Host',
+          icon: Icons.computer,
+          hint: 'e.g., 10.42.0.1',
+        ),
+        SizedBox(height: spacing),
+        _TextField(
+          controller: brokerPortController,
+          label: 'Port',
+          icon: Icons.numbers,
+          keyboardType: TextInputType.number,
+        ),
+        SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+        SizedBox(
+          width: double.infinity,
+          height: ScreenUtils.getButtonHeight(context),
+          child: ElevatedButton.icon(
+            onPressed: onProvision,
+            icon: const Icon(Icons.send_rounded, size: 18),
+            label: const Text('Provision Broker'),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.success),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MotorTimingSection extends StatelessWidget {
+  final TextEditingController m1StartController;
+  final TextEditingController m1PostController;
+  final TextEditingController m2IntervalController;
+  final TextEditingController m2RunController;
+  final TextEditingController m2DelayController;
+  final VoidCallback onProvision;
+  final VoidCallback onReset;
+
+  const _MotorTimingSection({
+    required this.m1StartController,
+    required this.m1PostController,
+    required this.m2IntervalController,
+    required this.m2RunController,
+    required this.m2DelayController,
+    required this.onProvision,
+    required this.onReset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = ScreenUtils.getSpacing(context, 12);
+
+    return _SectionCard(
+      title: 'Motor Timing Configuration',
+      icon: Icons.timer,
+      iconColor: AppTheme.info,
+      children: [
+        _TextField(
+          controller: m1StartController,
+          label: 'Motor-1 Start Run Time (seconds)',
+          icon: Icons.play_circle,
+          keyboardType: TextInputType.number,
+          helper: 'Duration Motor-1 runs after system starts',
+        ),
+        SizedBox(height: spacing),
+        _TextField(
+          controller: m1PostController,
+          label: 'Motor-1 Post Run Time (seconds)',
+          icon: Icons.stop_circle,
+          keyboardType: TextInputType.number,
+          helper: 'Duration Motor-1 runs during shutdown drain',
+        ),
+        SizedBox(height: spacing),
+        _TextField(
+          controller: m2IntervalController,
+          label: 'Motor-2 Interval (seconds)',
+          icon: Icons.refresh,
+          keyboardType: TextInputType.number,
+          helper: 'Time between Motor-2 filter clean cycles',
+        ),
+        SizedBox(height: spacing),
+        _TextField(
+          controller: m2RunController,
+          label: 'Motor-2 Run Time (seconds)',
+          icon: Icons.schedule,
+          keyboardType: TextInputType.number,
+          helper: 'Duration Motor-2 runs each cycle',
+        ),
+        SizedBox(height: spacing),
+        _TextField(
+          controller: m2DelayController,
+          label: 'Motor-2 Delay After M1 (seconds)',
+          icon: Icons.hourglass_empty,
+          keyboardType: TextInputType.number,
+          helper: 'Delay before Motor-2 starts after Motor-1 stops',
+        ),
+        SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: ScreenUtils.getButtonHeight(context),
+                child: OutlinedButton.icon(
+                  onPressed: onReset,
+                  icon: const Icon(Icons.restore, size: 18),
+                  label: Text(
+                    'Reset',
+                    style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 13)),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(width: ScreenUtils.getPadding(context, 10)),
+            Expanded(
+              flex: 2,
+              child: SizedBox(
+                height: ScreenUtils.getButtonHeight(context),
+                child: ElevatedButton.icon(
+                  onPressed: onProvision,
+                  icon: const Icon(Icons.send_rounded, size: 18),
+                  label: Text(
+                    'Save Timings',
+                    style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 13)),
+                  ),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.info),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -398,28 +458,29 @@ class _SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(ScreenUtils.getPadding(context, 18)),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Theme.of(context).dividerColor.withOpacity(0.1),
-        ),
+        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 18)),
+        border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, color: iconColor),
-              const SizedBox(width: 8),
+              Icon(icon, color: iconColor, size: ScreenUtils.getIconSize(context, 22)),
+              SizedBox(width: ScreenUtils.getPadding(context, 8)),
               Text(
                 title,
-                style: Theme.of(context).textTheme.titleLarge,
+                style: TextStyle(
+                  fontSize: ScreenUtils.getFontSize(context, 16),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: ScreenUtils.getSpacing(context, 16)),
           ...children,
         ],
       ),
@@ -427,3 +488,43 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
+class _TextField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final bool obscure;
+  final String? hint;
+  final String? helper;
+  final TextInputType? keyboardType;
+
+  const _TextField({
+    required this.controller,
+    required this.label,
+    required this.icon,
+    this.obscure = false,
+    this.hint,
+    this.helper,
+    this.keyboardType,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      keyboardType: keyboardType,
+      style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 14)),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        helperText: helper,
+        helperMaxLines: 2,
+        prefixIcon: Icon(icon, size: 20),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: ScreenUtils.getPadding(context, 14),
+          vertical: ScreenUtils.getSpacing(context, 12),
+        ),
+      ),
+    );
+  }
+}

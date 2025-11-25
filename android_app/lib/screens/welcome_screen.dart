@@ -13,6 +13,7 @@ class WelcomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final screenPadding = ScreenUtils.getScreenPadding(context);
 
     return Scaffold(
       body: Container(
@@ -21,10 +22,10 @@ class WelcomeScreen extends StatelessWidget {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: isDark
-                ? [
+                ? const [
                     AppTheme.darkBackground,
                     AppTheme.darkSurface,
-                    const Color(0xFF334155),
+                    Color(0xFF334155),
                   ]
                 : [
                     Colors.white,
@@ -36,158 +37,28 @@ class WelcomeScreen extends StatelessWidget {
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: EdgeInsets.symmetric(
-                horizontal: ScreenUtils.getPadding(context, 24),
-                vertical: ScreenUtils.getSpacing(context, 40),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // ALMED Logo
-                  Container(
-                    constraints: BoxConstraints(
-                      maxWidth: ScreenUtils.getPadding(context, 200),
-                      maxHeight: ScreenUtils.getSpacing(context, 150),
-                    ),
-                    child: Image.asset(
-                      isDark
-                          ? 'assets/images/logo_light.png'
-                          : 'assets/images/logo_dark.png',
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) {
-                        // Fallback to text logo if image not found
-                        return Column(
-                          children: [
-                            Text(
-                              'ALMED',
-                              style: TextStyle(
-                                fontFamily: 'Verdana',
-                                fontSize: ScreenUtils.getFontSize(context, 48),
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                            SizedBox(height: ScreenUtils.getSpacing(context, 8)),
-                            Text(
-                              'AHU Control System',
-                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    fontSize: ScreenUtils.getFontSize(context, 14),
-                                    color: isDark
-                                        ? AppTheme.darkOnSurfaceVariant
-                                        : AppTheme.lightOnSurfaceVariant,
-                                  ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                  SizedBox(height: ScreenUtils.getSpacing(context, 60)),
+              padding: screenPadding,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // ALMED Logo
+                    _LogoSection(isDark: isDark),
+                    SizedBox(height: ScreenUtils.getSpacing(context, 48)),
 
-                  // Welcome Text
-                  Text(
-                    'Welcome',
-                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                          fontSize: ScreenUtils.getFontSize(context, 32),
-                          fontWeight: FontWeight.bold,
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: ScreenUtils.getSpacing(context, 8)),
-                  Text(
-                    'Sign in to your account or create a new one',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          fontSize: ScreenUtils.getFontSize(context, 14),
-                          color: isDark
-                              ? AppTheme.darkOnSurfaceVariant
-                              : AppTheme.lightOnSurfaceVariant,
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: ScreenUtils.getSpacing(context, 48)),
+                    // Welcome Text
+                    _WelcomeText(isDark: isDark),
+                    SizedBox(height: ScreenUtils.getSpacing(context, 40)),
 
-                  // Sign Up Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => const RegisterScreen(),
-                          ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          vertical: ScreenUtils.getSpacing(context, 16),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        backgroundColor: AppTheme.lightPrimary,
-                      ),
-                      child: Text(
-                        'Sign Up',
-                        style: TextStyle(
-                          fontSize: ScreenUtils.getFontSize(context, 16),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+                    // Buttons
+                    _ActionButtons(isDark: isDark),
+                    SizedBox(height: ScreenUtils.getSpacing(context, 32)),
 
-                  // Login Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => const UnifiedLoginScreen(),
-                          ),
-                        );
-                      },
-                      style: OutlinedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          vertical: ScreenUtils.getSpacing(context, 16),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        side: BorderSide(
-                          color: AppTheme.lightPrimary,
-                          width: 2,
-                        ),
-                      ),
-                      child: Text(
-                        'Login',
-                        style: TextStyle(
-                          fontSize: ScreenUtils.getFontSize(context, 16),
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.lightPrimary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: ScreenUtils.getSpacing(context, 40)),
-
-                  // Theme toggle
-                  Consumer<ThemeProvider>(
-                    builder: (context, themeProvider, child) {
-                      return IconButton(
-                        icon: Icon(
-                          themeProvider.isDarkMode
-                              ? Icons.light_mode_rounded
-                              : Icons.dark_mode_rounded,
-                        ),
-                        onPressed: () => themeProvider.toggleTheme(),
-                        tooltip: 'Toggle theme',
-                      );
-                    },
-                  ),
-                ],
+                    // Theme toggle
+                    const _ThemeToggle(),
+                  ],
+                ),
               ),
             ),
           ),
@@ -197,3 +68,178 @@ class WelcomeScreen extends StatelessWidget {
   }
 }
 
+class _LogoSection extends StatelessWidget {
+  final bool isDark;
+
+  const _LogoSection({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(
+        maxWidth: ScreenUtils.getPadding(context, 220),
+        maxHeight: ScreenUtils.getSpacing(context, 160),
+      ),
+      child: Image.asset(
+        isDark ? 'assets/images/logo_light.png' : 'assets/images/logo_dark.png',
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'ALMED',
+                style: TextStyle(
+                  fontFamily: 'Verdana',
+                  fontSize: ScreenUtils.getFontSize(context, 48),
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black,
+                  letterSpacing: 2,
+                ),
+              ),
+              SizedBox(height: ScreenUtils.getSpacing(context, 8)),
+              Text(
+                'AHU Control System',
+                style: TextStyle(
+                  fontSize: ScreenUtils.getFontSize(context, 14),
+                  color: isDark
+                      ? AppTheme.darkOnSurfaceVariant
+                      : AppTheme.lightOnSurfaceVariant,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _WelcomeText extends StatelessWidget {
+  final bool isDark;
+
+  const _WelcomeText({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          'Welcome',
+          style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                fontSize: ScreenUtils.getFontSize(context, 32),
+                fontWeight: FontWeight.bold,
+              ),
+          textAlign: TextAlign.center,
+        ),
+        SizedBox(height: ScreenUtils.getSpacing(context, 8)),
+        Text(
+          'Sign in to your account or create a new one',
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 14),
+            color: isDark
+                ? AppTheme.darkOnSurfaceVariant
+                : AppTheme.lightOnSurfaceVariant,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionButtons extends StatelessWidget {
+  final bool isDark;
+
+  const _ActionButtons({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final buttonHeight = ScreenUtils.getButtonHeight(context);
+    final borderRadius = ScreenUtils.getBorderRadius(context, 16);
+
+    return Column(
+      children: [
+        // Sign Up Button
+        SizedBox(
+          width: double.infinity,
+          height: buttonHeight,
+          child: ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const RegisterScreen()),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(borderRadius),
+              ),
+              backgroundColor: AppTheme.lightPrimary,
+              elevation: 2,
+            ),
+            child: Text(
+              'Sign Up',
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 16),
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+
+        // Login Button
+        SizedBox(
+          width: double.infinity,
+          height: buttonHeight,
+          child: OutlinedButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const UnifiedLoginScreen(),
+                ),
+              );
+            },
+            style: OutlinedButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(borderRadius),
+              ),
+              side: const BorderSide(color: AppTheme.lightPrimary, width: 2),
+            ),
+            child: Text(
+              'Login',
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 16),
+                fontWeight: FontWeight.bold,
+                color: AppTheme.lightPrimary,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ThemeToggle extends StatelessWidget {
+  const _ThemeToggle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<ThemeProvider, bool>(
+      selector: (_, provider) => provider.isDarkMode,
+      builder: (context, isDarkMode, child) {
+        return IconButton(
+          icon: Icon(
+            isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+          ),
+          onPressed: () {
+            context.read<ThemeProvider>().toggleTheme();
+          },
+          tooltip: 'Toggle theme',
+        );
+      },
+    );
+  }
+}

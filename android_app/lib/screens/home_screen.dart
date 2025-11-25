@@ -4,6 +4,7 @@ import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/user.dart';
 import '../models/device_status.dart';
+import '../utils/screen_utils.dart';
 import 'ahu_control_screen.dart';
 import 'welcome_screen.dart';
 
@@ -19,7 +20,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Check user status and load device statuses when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkUserStatus();
       _loadDeviceStatuses();
@@ -35,21 +35,25 @@ class _HomeScreenState extends State<HomeScreen> {
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     final user = appProvider.currentUser;
     if (user != null && user.assignedAhuIds.isNotEmpty) {
-      // Load status for all assigned AHUs
-      for (final ahuId in user.assignedAhuIds) {
-        await appProvider.loadDeviceStatus(ahuId);
-      }
+      await Future.wait(
+        user.assignedAhuIds.map((id) => appProvider.loadDeviceStatus(id)),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final appProvider = Provider.of<AppProvider>(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ALMED AHU'),
+        title: Text(
+          'ALMED AHU',
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 18),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -58,342 +62,448 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () async {
-              appProvider.logout();
-              if (mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                  (route) => false,
-                );
-              }
-            },
+            onPressed: _handleLogout,
             tooltip: 'Logout',
           ),
         ],
       ),
-      body: appProvider.currentUser == null
-          ? const Center(child: CircularProgressIndicator())
-          : _buildContent(context, appProvider.currentUser!, isDark),
-    );
-  }
-
-  Widget _buildContent(BuildContext context, User user, bool isDark) {
-    // Show status message based on user status
-    if (user.status == UserStatus.pending) {
-      return _buildStatusMessage(
-        context,
-        'Waiting for Verification',
-        'Your registration is pending admin approval. Please wait while we verify your account.',
-        Icons.pending_outlined,
-        AppTheme.info,
-        isDark,
-      );
-    }
-
-    if (user.status == UserStatus.rejected) {
-      return _buildStatusMessage(
-        context,
-        'Registration Rejected',
-        'Your registration request has been rejected. Please contact support for more information.',
-        Icons.cancel_outlined,
-        AppTheme.error,
-        isDark,
-      );
-    }
-
-    if (user.status == UserStatus.approved) {
-      return _buildStatusMessage(
-        context,
-        'Waiting for AHU Assignment',
-        'Your account has been approved. Please wait while the admin assigns AHU units to your hospital.',
-        Icons.schedule_outlined,
-        AppTheme.info,
-        isDark,
-      );
-    }
-
-    if (user.status == UserStatus.suspended) {
-      return _buildStatusMessage(
-        context,
-        'Account Suspended',
-        'Your account has been temporarily suspended. Please contact support for assistance.',
-        Icons.block_outlined,
-        AppTheme.error,
-        isDark,
-      );
-    }
-
-    // User is active - show assigned AHUs
-    if (user.assignedAhuIds.isEmpty) {
-      return _buildStatusMessage(
-        context,
-        'No AHUs Assigned',
-        'You don\'t have any AHU units assigned yet. Please contact the admin to assign AHUs to your hospital.',
-        Icons.devices_outlined,
-        AppTheme.info,
-        isDark,
-      );
-    }
-
-    // Show list of assigned AHUs
-    return _buildAhuList(context, user, isDark);
-  }
-
-  Widget _buildStatusMessage(
-    BuildContext context,
-    String title,
-    String message,
-    IconData icon,
-    Color color,
-    bool isDark,
-  ) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
-                size: 64,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: isDark
-                        ? AppTheme.darkOnSurfaceVariant
-                        : AppTheme.lightOnSurfaceVariant,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+      body: Selector<AppProvider, User?>(
+        selector: (_, provider) => provider.currentUser,
+        builder: (context, user, child) {
+          if (user == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return _buildContent(context, user, isDark);
+        },
       ),
     );
   }
 
-  Widget _buildAhuList(BuildContext context, User user, bool isDark) {
-    final appProvider = Provider.of<AppProvider>(context);
-    
-    return RefreshIndicator(
-      onRefresh: () async {
-        await _checkUserStatus();
-        // Refresh device statuses for assigned AHUs
-        for (final ahuId in user.assignedAhuIds) {
-          await appProvider.loadDeviceStatus(ahuId);
-        }
-      },
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // User Info Card
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: AppTheme.lightPrimary.withOpacity(0.1),
-                    child: Icon(
-                      Icons.person,
-                      color: AppTheme.lightPrimary,
-                      size: 30,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          user.username,
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          user.hospitalName,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: isDark
-                                    ? AppTheme.darkOnSurfaceVariant
-                                    : AppTheme.lightOnSurfaceVariant,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
+  Future<void> _handleLogout() async {
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+    await appProvider.logout();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+        (route) => false,
+      );
+    }
+  }
 
-          // Assigned AHUs Section
-          Row(
+  Widget _buildContent(BuildContext context, User user, bool isDark) {
+    switch (user.status) {
+      case UserStatus.pending:
+        return _StatusMessage(
+          title: 'Waiting for Verification',
+          message: 'Your registration is pending admin approval. Please wait while we verify your account.',
+          icon: Icons.pending_outlined,
+          color: AppTheme.info,
+        );
+      case UserStatus.rejected:
+        return _StatusMessage(
+          title: 'Registration Rejected',
+          message: 'Your registration request has been rejected. Please contact support for more information.',
+          icon: Icons.cancel_outlined,
+          color: AppTheme.error,
+        );
+      case UserStatus.approved:
+        return _StatusMessage(
+          title: 'Waiting for AHU Assignment',
+          message: 'Your account has been approved. Please wait while the admin assigns AHU units to your hospital.',
+          icon: Icons.schedule_outlined,
+          color: AppTheme.info,
+        );
+      case UserStatus.suspended:
+        return _StatusMessage(
+          title: 'Account Suspended',
+          message: 'Your account has been temporarily suspended. Please contact support for assistance.',
+          icon: Icons.block_outlined,
+          color: AppTheme.error,
+        );
+      case UserStatus.active:
+        if (user.assignedAhuIds.isEmpty) {
+          return _StatusMessage(
+            title: 'No AHUs Assigned',
+            message: 'You don\'t have any AHU units assigned yet. Please contact the admin to assign AHUs to your hospital.',
+            icon: Icons.devices_outlined,
+            color: AppTheme.info,
+          );
+        }
+        return _AhuList(user: user);
+    }
+  }
+}
+
+class _StatusMessage extends StatelessWidget {
+  final String title;
+  final String message;
+  final IconData icon;
+  final Color color;
+
+  const _StatusMessage({
+    required this.title,
+    required this.message,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Center(
+      child: Padding(
+        padding: ScreenUtils.getScreenPadding(context),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                'Assigned AHU Units',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+              Container(
+                padding: EdgeInsets.all(ScreenUtils.getPadding(context, 24)),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  size: ScreenUtils.getIconSize(context, 56),
+                  color: color,
+                ),
               ),
-              const Spacer(),
+              SizedBox(height: ScreenUtils.getSpacing(context, 20)),
               Text(
-                '${user.assignedAhuIds.length} unit${user.assignedAhuIds.length != 1 ? 's' : ''}',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppTheme.lightPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
+                title,
+                style: TextStyle(
+                  fontSize: ScreenUtils.getFontSize(context, 20),
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: ScreenUtils.getSpacing(context, 12)),
+              Text(
+                message,
+                style: TextStyle(
+                  fontSize: ScreenUtils.getFontSize(context, 14),
+                  color: isDark
+                      ? AppTheme.darkOnSurfaceVariant
+                      : AppTheme.lightOnSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
-          const SizedBox(height: 16),
+        ),
+      ),
+    );
+  }
+}
 
-          // AHU List with status
-          ...user.assignedAhuIds.map((ahuId) {
-            final status = appProvider.getDeviceStatus(ahuId);
-            final isOnline = status?.isOnline ?? false;
-            
-            return Card(
-              elevation: 2,
-              margin: const EdgeInsets.only(bottom: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: InkWell(
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => AhuControlScreen(
-                        deviceId: ahuId,
-                        deviceName: 'AHU Unit $ahuId',
-                      ),
-                    ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      // Status indicator
-                      Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: isOnline ? AppTheme.success : AppTheme.error,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      // Icon
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.lightPrimary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.ac_unit,
-                          color: AppTheme.lightPrimary,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      // Info
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'AHU Unit $ahuId',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            if (status != null) ...[
-                              Row(
-                                children: [
-                                  Icon(
-                                    isOnline ? Icons.check_circle : Icons.error,
-                                    size: 14,
-                                    color: isOnline ? AppTheme.success : AppTheme.error,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    isOnline ? 'Online' : 'Offline',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isOnline ? AppTheme.success : AppTheme.error,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  if (status.telemetry != null && status.telemetry!.hasSensorData) ...[
-                                    const SizedBox(width: 12),
-                                    Text(
-                                      status.telemetry!.tempDisplay,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: AppTheme.temperature,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      status.telemetry!.humDisplay,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: AppTheme.humidity,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ] else ...[
-                              Text(
-                                'Loading...',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Theme.of(context).textTheme.bodySmall?.color,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.chevron_right, color: AppTheme.lightPrimary),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
+class _AhuList extends StatelessWidget {
+  final User user;
+
+  const _AhuList({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await appProvider.checkUserStatus();
+        await Future.wait(
+          user.assignedAhuIds.map((id) => appProvider.loadDeviceStatus(id)),
+        );
+      },
+      child: ListView(
+        padding: ScreenUtils.getScreenPadding(context),
+        children: [
+          _UserInfoCard(user: user, isDark: isDark),
+          SizedBox(height: ScreenUtils.getSpacing(context, 20)),
+          _SectionHeader(
+            title: 'Assigned AHU Units',
+            count: user.assignedAhuIds.length,
+          ),
+          SizedBox(height: ScreenUtils.getSpacing(context, 12)),
+          ...user.assignedAhuIds.map((ahuId) => _AhuCard(ahuId: ahuId)),
         ],
       ),
     );
   }
 }
 
+class _UserInfoCard extends StatelessWidget {
+  final User user;
+  final bool isDark;
+
+  const _UserInfoCard({required this.user, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = ScreenUtils.getBorderRadius(context, 16);
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: Padding(
+        padding: ScreenUtils.getCardPadding(context),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: ScreenUtils.getIconSize(context, 28),
+              backgroundColor: AppTheme.lightPrimary.withOpacity(0.1),
+              child: Icon(
+                Icons.person,
+                color: AppTheme.lightPrimary,
+                size: ScreenUtils.getIconSize(context, 26),
+              ),
+            ),
+            SizedBox(width: ScreenUtils.getPadding(context, 14)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.username,
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 17),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 3)),
+                  Text(
+                    user.hospitalName,
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 13),
+                      color: isDark
+                          ? AppTheme.darkOnSurfaceVariant
+                          : AppTheme.lightOnSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final int count;
+
+  const _SectionHeader({required this.title, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 17),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          '$count unit${count != 1 ? 's' : ''}',
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 13),
+            color: AppTheme.lightPrimary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AhuCard extends StatelessWidget {
+  final String ahuId;
+
+  const _AhuCard({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = ScreenUtils.getBorderRadius(context, 16);
+
+    return Selector<AppProvider, DeviceStatus?>(
+      selector: (_, provider) => provider.getDeviceStatus(ahuId),
+      builder: (context, status, child) {
+        final isOnline = status?.isOnline ?? false;
+
+        return Card(
+          elevation: 2,
+          margin: EdgeInsets.only(bottom: ScreenUtils.getSpacing(context, 10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(borderRadius),
+          ),
+          child: InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => AhuControlScreen(
+                    deviceId: ahuId,
+                    deviceName: 'AHU Unit $ahuId',
+                  ),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(borderRadius),
+            child: Padding(
+              padding: ScreenUtils.getCardPadding(context),
+              child: Row(
+                children: [
+                  _StatusDot(isOnline: isOnline),
+                  SizedBox(width: ScreenUtils.getPadding(context, 12)),
+                  _AhuIcon(),
+                  SizedBox(width: ScreenUtils.getPadding(context, 14)),
+                  Expanded(child: _AhuInfo(ahuId: ahuId, status: status)),
+                  Icon(
+                    Icons.chevron_right,
+                    color: AppTheme.lightPrimary,
+                    size: ScreenUtils.getIconSize(context, 24),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StatusDot extends StatelessWidget {
+  final bool isOnline;
+
+  const _StatusDot({required this.isOnline});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        color: isOnline ? AppTheme.success : AppTheme.error,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
+class _AhuIcon extends StatelessWidget {
+  const _AhuIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(ScreenUtils.getPadding(context, 10)),
+      decoration: BoxDecoration(
+        color: AppTheme.lightPrimary.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+      ),
+      child: Icon(
+        Icons.ac_unit,
+        color: AppTheme.lightPrimary,
+        size: ScreenUtils.getIconSize(context, 22),
+      ),
+    );
+  }
+}
+
+class _AhuInfo extends StatelessWidget {
+  final String ahuId;
+  final DeviceStatus? status;
+
+  const _AhuInfo({required this.ahuId, required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOnline = status?.isOnline ?? false;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'AHU Unit $ahuId',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: ScreenUtils.getFontSize(context, 15),
+          ),
+        ),
+        SizedBox(height: ScreenUtils.getSpacing(context, 4)),
+        if (status != null)
+          Wrap(
+            spacing: ScreenUtils.getPadding(context, 8),
+            runSpacing: ScreenUtils.getSpacing(context, 4),
+            children: [
+              _InfoChip(
+                icon: isOnline ? Icons.check_circle : Icons.error,
+                text: isOnline ? 'Online' : 'Offline',
+                color: isOnline ? AppTheme.success : AppTheme.error,
+              ),
+              if (status?.telemetry != null && status!.telemetry!.hasSensorData) ...[
+                _InfoChip(
+                  text: status!.telemetry!.tempDisplay,
+                  color: AppTheme.temperature,
+                ),
+                _InfoChip(
+                  text: status!.telemetry!.humDisplay,
+                  color: AppTheme.humidity,
+                ),
+              ],
+            ],
+          )
+        else
+          Text(
+            'Loading...',
+            style: TextStyle(
+              fontSize: ScreenUtils.getFontSize(context, 11),
+              color: Theme.of(context).textTheme.bodySmall?.color,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final IconData? icon;
+  final String text;
+  final Color color;
+
+  const _InfoChip({
+    this.icon,
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 12, color: color),
+          SizedBox(width: ScreenUtils.getPadding(context, 3)),
+        ],
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: ScreenUtils.getFontSize(context, 11),
+            color: color,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}

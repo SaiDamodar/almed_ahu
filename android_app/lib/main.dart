@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'providers/app_provider.dart';
 import 'providers/theme_provider.dart';
 import 'theme/app_theme.dart';
 import 'screens/welcome_screen.dart';
-import 'screens/unified_login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/hospitals_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Set preferred orientations
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+  
   await Firebase.initializeApp();
   runApp(const AlmedAhuApp());
 }
@@ -34,12 +41,6 @@ class AlmedAhuApp extends StatelessWidget {
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
             home: const AuthWrapper(),
-            routes: {
-              '/welcome': (context) => const WelcomeScreen(),
-              '/login': (context) => const UnifiedLoginScreen(),
-              '/admin-dashboard': (context) => const HospitalsScreen(),
-              '/user-home': (context) => const HomeScreen(),
-            },
           );
         },
       ),
@@ -68,37 +69,25 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AppProvider>(
-      builder: (context, appProvider, child) {
+    return Selector<AppProvider, _AuthState>(
+      selector: (_, provider) => _AuthState(
+        isInitialized: provider.isInitialized,
+        isAuthenticated: provider.isAuthenticated,
+        isAdmin: provider.isAdmin,
+      ),
+      builder: (context, state, child) {
         // Show loading while initializing auth state
-        if (!appProvider.isInitialized) {
-          return Scaffold(
-            body: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppTheme.darkBackground,
-                    AppTheme.darkSurface,
-                    const Color(0xFF334155),
-                  ],
-                ),
-              ),
-              child: const Center(
-                child: CircularProgressIndicator(),
-              ),
-            ),
-          );
+        if (!state.isInitialized) {
+          return const _LoadingScreen();
         }
 
         // If not authenticated, show welcome screen
-        if (!appProvider.isAuthenticated) {
+        if (!state.isAuthenticated) {
           return const WelcomeScreen();
         }
 
         // If authenticated as admin, show admin dashboard
-        if (appProvider.isAdmin) {
+        if (state.isAdmin) {
           return const HospitalsScreen();
         }
 
@@ -109,3 +98,83 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 }
 
+/// Immutable auth state for efficient comparisons
+class _AuthState {
+  final bool isInitialized;
+  final bool isAuthenticated;
+  final bool isAdmin;
+
+  const _AuthState({
+    required this.isInitialized,
+    required this.isAuthenticated,
+    required this.isAdmin,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _AuthState &&
+          runtimeType == other.runtimeType &&
+          isInitialized == other.isInitialized &&
+          isAuthenticated == other.isAuthenticated &&
+          isAdmin == other.isAdmin;
+
+  @override
+  int get hashCode =>
+      isInitialized.hashCode ^ isAuthenticated.hashCode ^ isAdmin.hashCode;
+}
+
+/// Loading screen widget
+class _LoadingScreen extends StatelessWidget {
+  const _LoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDark
+                ? [
+                    AppTheme.darkBackground,
+                    AppTheme.darkSurface,
+                    const Color(0xFF334155),
+                  ]
+                : [
+                    Colors.white,
+                    Colors.blue.shade50,
+                    Colors.blue.shade100,
+                  ],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'ALMED',
+                style: TextStyle(
+                  fontFamily: 'Verdana',
+                  fontSize: 42,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const SizedBox(
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(strokeWidth: 3),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

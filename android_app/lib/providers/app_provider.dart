@@ -15,18 +15,20 @@ class AppProvider extends ChangeNotifier {
   final ApiService _apiService = ApiService();
   final AwsIoTService _awsIoTService = AwsIoTService();
   final FirebaseAuthService _firebaseAuth = FirebaseAuthService();
+  
   bool _isAuthenticated = false;
   bool _isLoading = false;
   String? _errorMessage;
-  bool _useDirectAws = false; // Toggle between Flask API and direct AWS IoT
-  bool _isAdmin = false; // Track if user is admin or hospital user
-  User? _currentUser; // Current logged-in hospital user
-  bool _isInitialized = false; // Track if auth state has been loaded
+  bool _useDirectAws = false;
+  bool _isAdmin = false;
+  User? _currentUser;
+  bool _isInitialized = false;
   
   // Data
   Map<String, Hospital> _hospitals = {};
   Map<String, DeviceStatus> _deviceStatuses = {};
   Timer? _statusPollTimer;
+  Timer? _notifyDebounceTimer;
   
   // Getters
   bool get isAuthenticated => _isAuthenticated;
@@ -36,18 +38,24 @@ class AppProvider extends ChangeNotifier {
   List<Hospital> get hospitalsList => _hospitals.values.toList();
   bool get isAdmin => _isAdmin;
   User? get currentUser => _currentUser;
+  bool get useDirectAws => _useDirectAws;
+  bool get awsConnected => _awsIoTService.isConnected;
+  bool get isInitialized => _isInitialized;
   
   DeviceStatus? getDeviceStatus(String deviceId) {
-    // Try AWS IoT first if connected, otherwise fall back to API cache
     if (_useDirectAws && _awsIoTService.isConnected) {
       return _awsIoTService.getDeviceStatus(deviceId) ?? _deviceStatuses[deviceId];
     }
     return _deviceStatuses[deviceId];
   }
   
-  bool get useDirectAws => _useDirectAws;
-  bool get awsConnected => _awsIoTService.isConnected;
-  bool get isInitialized => _isInitialized;
+  /// Debounced notify to prevent excessive rebuilds
+  void _debouncedNotify() {
+    _notifyDebounceTimer?.cancel();
+    _notifyDebounceTimer = Timer(const Duration(milliseconds: 50), () {
+      notifyListeners();
+    });
+  }
   
   /// Initialize authentication state from persistent storage
   Future<void> initializeAuth() async {
@@ -59,12 +67,9 @@ class AppProvider extends ChangeNotifier {
       final isAdmin = prefs.getBool('is_admin') ?? false;
       
       if (isAuth) {
-        // Restore session cookie first
         final sessionRestored = await _apiService.restoreSession();
         
         if (!sessionRestored) {
-          // Session invalid or expired, clear auth state
-          print('Session restoration failed, clearing auth state');
           await _clearAuthState();
           _isAuthenticated = false;
           _isAdmin = false;
@@ -77,25 +82,19 @@ class AppProvider extends ChangeNotifier {
         _isAuthenticated = true;
         _isAdmin = isAdmin;
         
-        // If hospital user, restore user data
         if (!isAdmin) {
           try {
-            // Check user status to restore current user data
             await checkUserStatus();
             if (_currentUser == null) {
-              // If we can't get user status, session might be invalid
-              print('Failed to restore user status, clearing auth');
               await _clearAuthState();
               _isAuthenticated = false;
               _isAdmin = false;
-              _currentUser = null;
               _isInitialized = true;
               notifyListeners();
               return;
             }
           } catch (e) {
-            print('Error restoring user data: $e');
-            // If error, clear auth and let user login again
+            debugPrint('Error restoring user data: $e');
             await _clearAuthState();
             _isAuthenticated = false;
             _isAdmin = false;
@@ -106,23 +105,19 @@ class AppProvider extends ChangeNotifier {
           }
         }
         
-        // Connect to AWS IoT if admin
         if (isAdmin) {
           try {
             await connectToAwsIoT();
             await loadHospitals();
             _startPolling();
           } catch (e) {
-            print('Error loading admin data: $e');
-            // Don't clear auth, just log the error - user can refresh
+            debugPrint('Error loading admin data: $e');
           }
         } else {
-          // Hospital user - load their assigned AHUs
           try {
             await loadHospitals();
           } catch (e) {
-            print('Error loading hospital user data: $e');
-            // Don't clear auth, just log the error - user can refresh
+            debugPrint('Error loading hospital user data: $e');
           }
         }
       }
@@ -130,8 +125,7 @@ class AppProvider extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      print('Error initializing auth: $e');
-      // On error, clear auth state to be safe
+      debugPrint('Error initializing auth: $e');
       await _clearAuthState();
       _isAuthenticated = false;
       _isAdmin = false;
@@ -149,11 +143,10 @@ class AppProvider extends ChangeNotifier {
       await prefs.setBool('is_admin', _isAdmin);
       
       if (_currentUser != null) {
-        // Save user data as JSON string (simplified - you might want to use proper serialization)
         await prefs.setString('current_user', _currentUser!.email);
       }
     } catch (e) {
-      print('Error saving auth state: $e');
+      debugPrint('Error saving auth state: $e');
     }
   }
   
@@ -165,7 +158,7 @@ class AppProvider extends ChangeNotifier {
       await prefs.remove('is_admin');
       await prefs.remove('current_user');
     } catch (e) {
-      print('Error clearing auth state: $e');
+      debugPrint('Error clearing auth state: $e');
     }
   }
   
@@ -179,26 +172,21 @@ class AppProvider extends ChangeNotifier {
       if (success) {
         _isAuthenticated = true;
         _isAdmin = true;
-        _currentUser = null; // Admin doesn't have user object
+        _currentUser = null;
         
-        // Save auth state
         await _saveAuthState();
-        
-        // Connect to AWS IoT Core directly
         await connectToAwsIoT();
-        
         await loadHospitals();
         _startPolling();
         _setLoading(false);
         notifyListeners();
         return true;
       } else {
-        // Check if it's a network/DNS error
         final apiError = _apiService.errorMessage ?? '';
         if (apiError.contains('SocketException') || 
             apiError.contains('Failed host lookup') ||
             apiError.contains('No address associated with hostname')) {
-          _setError('Network error: Cannot resolve Railway domain. Your mobile carrier may be blocking DNS. Try using WiFi or change DNS to Google (8.8.8.8). See DNS_ISSUE_SOLUTION.md for details.');
+          _setError('Network error: Cannot connect. Try using WiFi or check DNS settings.');
         } else {
           _setError('Invalid username or password');
         }
@@ -206,12 +194,10 @@ class AppProvider extends ChangeNotifier {
         return false;
       }
     } catch (e) {
-      // Check if it's a network/DNS error
       final errorStr = e.toString();
       if (errorStr.contains('SocketException') || 
-          errorStr.contains('Failed host lookup') ||
-          errorStr.contains('No address associated with hostname')) {
-        _setError('Network error: Cannot resolve Railway domain. Your mobile carrier may be blocking it. Try using WiFi or change DNS settings (see DNS_ISSUE_SOLUTION.md).');
+          errorStr.contains('Failed host lookup')) {
+        _setError('Network error: Cannot connect. Try using WiFi.');
       } else {
         _setError('Login failed: ${e.toString()}');
       }
@@ -258,9 +244,7 @@ class AppProvider extends ChangeNotifier {
         _isAdmin = false;
         _currentUser = user;
         
-        // Save auth state
         await _saveAuthState();
-        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -283,7 +267,7 @@ class AppProvider extends ChangeNotifier {
   
   /// Check current user status (for hospital users)
   Future<void> checkUserStatus() async {
-    if (_isAdmin) return; // Admin doesn't need status check
+    if (_isAdmin) return;
     
     try {
       final user = await _apiService.checkUserStatus();
@@ -292,7 +276,7 @@ class AppProvider extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      print('Error checking user status: $e');
+      debugPrint('Error checking user status: $e');
     }
   }
 
@@ -300,7 +284,6 @@ class AppProvider extends ChangeNotifier {
   Future<GoogleSignInResult> signInWithGoogle() async {
     return await _firebaseAuth.signInWithGoogle();
   }
-
 
   /// Register with Google (after collecting additional info)
   Future<bool> registerWithGoogle({
@@ -315,7 +298,6 @@ class AppProvider extends ChangeNotifier {
     _setLoading(true);
     _setError(null);
 
-    // Validate email before proceeding
     if (email.isEmpty || !email.contains('@')) {
       _setError('Valid email is required');
       _setLoading(false);
@@ -323,19 +305,15 @@ class AppProvider extends ChangeNotifier {
     }
 
     try {
-      print('AppProvider: registerWithGoogle - Email: $email, GoogleId: $googleId');
-      
       final registerRequest = RegisterRequest(
         email: email.trim(),
         username: username,
         phoneNumber: phoneNumber,
         hospitalName: hospitalName,
-        password: '', // No password for Google users
+        password: '',
         googleId: googleId,
         profileImageUrl: profileImageUrl,
       );
-      
-      print('AppProvider: RegisterRequest created - Email: ${registerRequest.email}');
 
       final user = await _apiService.registerWithGoogle(
         registerRequest: registerRequest,
@@ -347,9 +325,7 @@ class AppProvider extends ChangeNotifier {
         _isAdmin = false;
         _currentUser = user;
         
-        // Save auth state
         await _saveAuthState();
-        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -390,9 +366,7 @@ class AppProvider extends ChangeNotifier {
         _isAdmin = false;
         _currentUser = user;
         
-        // Save auth state
         await _saveAuthState();
-        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -411,10 +385,9 @@ class AppProvider extends ChangeNotifier {
   /// Connect to AWS IoT Core directly
   Future<void> connectToAwsIoT() async {
     try {
-      // Set up callbacks
       _awsIoTService.onDeviceUpdate = (deviceId, status) {
         _deviceStatuses[deviceId] = status;
-        notifyListeners();
+        _debouncedNotify();
       };
       
       _awsIoTService.onConnectionChanged = (connected) {
@@ -422,29 +395,26 @@ class AppProvider extends ChangeNotifier {
         notifyListeners();
       };
       
-      // Connect
       final connected = await _awsIoTService.connect();
       if (connected) {
         _useDirectAws = true;
-        print('Connected to AWS IoT Core directly');
+        debugPrint('Connected to AWS IoT Core directly');
       } else {
-        print('Failed to connect to AWS IoT Core, using Flask API');
+        debugPrint('Failed to connect to AWS IoT Core, using Flask API');
         _useDirectAws = false;
       }
     } catch (e) {
-      print('AWS IoT connection error: $e');
+      debugPrint('AWS IoT connection error: $e');
       _useDirectAws = false;
     }
   }
   
   /// Logout
-  void logout() async {
+  Future<void> logout() async {
     _stopPolling();
     _awsIoTService.disconnect();
     _apiService.logout();
-    await _firebaseAuth.signOut(); // Sign out from Firebase
-    
-    // Clear persistent auth state
+    await _firebaseAuth.signOut();
     await _clearAuthState();
     
     _isAuthenticated = false;
@@ -463,12 +433,14 @@ class AppProvider extends ChangeNotifier {
       final hospitals = await _apiService.getDevices();
       _hospitals = hospitals;
       
-      // Load status for all devices
+      // Load status for all devices in parallel
+      final futures = <Future>[];
       for (final hospital in hospitals.values) {
         for (final ahu in hospital.allAhus) {
-          await loadDeviceStatus(ahu.id);
+          futures.add(loadDeviceStatus(ahu.id));
         }
       }
+      await Future.wait(futures);
       
       notifyListeners();
     } catch (e) {
@@ -482,26 +454,24 @@ class AppProvider extends ChangeNotifier {
       final status = await _apiService.getDeviceStatus(deviceId);
       if (status != null) {
         _deviceStatuses[deviceId] = status;
-        notifyListeners();
+        // Use debounced notify to batch updates
+        _debouncedNotify();
       }
     } catch (e) {
-      print('Error loading device status: $e');
+      debugPrint('Error loading device status: $e');
     }
   }
   
   /// Send command to device
   Future<bool> sendCommand(String deviceId, Map<String, dynamic> command) async {
     try {
-      // Try AWS IoT first if connected, otherwise use Flask API
       if (_useDirectAws && _awsIoTService.isConnected) {
         final success = await _awsIoTService.publishCommand(deviceId, command);
         if (success) {
-          // Wait a bit for status update
           await Future.delayed(const Duration(milliseconds: 500));
         }
         return success;
       } else {
-        // Fall back to Flask API
         final success = await _apiService.sendCommand(deviceId, command);
         if (success) {
           await loadDeviceStatus(deviceId);
@@ -519,7 +489,6 @@ class AppProvider extends ChangeNotifier {
     final status = _deviceStatuses[deviceId];
     if (status == null) return;
     
-    // ESP32 expects "start": true or "stop": true, not "run"
     final command = status.isRunning
         ? {'stop': true}
         : {'start': true};
@@ -527,19 +496,17 @@ class AppProvider extends ChangeNotifier {
     await sendCommand(deviceId, command);
   }
   
-  /// Set temperature setpoint
+  /// Set temperature setpoint with optimistic update
   Future<void> setTemperature(String deviceId, double temp) async {
-    // Optimistic update: Update UI immediately
     final status = _deviceStatuses[deviceId];
-    if (status != null && status.state != null) {
-      // Create updated status with new setpoint
-      final updatedStatus = DeviceStatus(
-        deviceId: status.deviceId,
+    if (status?.state != null) {
+      _deviceStatuses[deviceId] = DeviceStatus(
+        deviceId: status!.deviceId,
         status: status.status,
         telemetry: status.telemetry,
         state: AhuState(
           run: status.state!.run,
-          tempSet: temp, // Update setpoint immediately
+          tempSet: temp,
           humSet: status.state!.humSet,
           fan: status.state!.fan,
           fanSpeed: status.state!.fanSpeed,
@@ -556,33 +523,24 @@ class AppProvider extends ChangeNotifier {
         ),
         lastUpdate: status.lastUpdate,
       );
-      _deviceStatuses[deviceId] = updatedStatus;
-      notifyListeners(); // Update UI instantly
+      notifyListeners();
     }
     
-    // Send command in background
-    // ESP32 expects "setpoint" not "tempSet"
-    final command = {
-      'setpoint': temp,
-    };
-    
-    sendCommand(deviceId, command); // Don't await - send in background
+    sendCommand(deviceId, {'setpoint': temp});
   }
   
-  /// Set humidity setpoint
+  /// Set humidity setpoint with optimistic update
   Future<void> setHumidity(String deviceId, double hum) async {
-    // Optimistic update: Update UI immediately
     final status = _deviceStatuses[deviceId];
-    if (status != null && status.state != null) {
-      // Create updated status with new setpoint
-      final updatedStatus = DeviceStatus(
-        deviceId: status.deviceId,
+    if (status?.state != null) {
+      _deviceStatuses[deviceId] = DeviceStatus(
+        deviceId: status!.deviceId,
         status: status.status,
         telemetry: status.telemetry,
         state: AhuState(
           run: status.state!.run,
           tempSet: status.state!.tempSet,
-          humSet: hum, // Update humidity setpoint immediately
+          humSet: hum,
           fan: status.state!.fan,
           fanSpeed: status.state!.fanSpeed,
           cp: status.state!.cp,
@@ -598,39 +556,24 @@ class AppProvider extends ChangeNotifier {
         ),
         lastUpdate: status.lastUpdate,
       );
-      _deviceStatuses[deviceId] = updatedStatus;
-      notifyListeners(); // Update UI instantly
+      notifyListeners();
     }
     
-    // Send command in background
-    // ESP32 expects "humset" (lowercase) not "humSet"
-    final command = {
-      'humset': hum,
-    };
-    
-    sendCommand(deviceId, command); // Don't await - send in background
+    sendCommand(deviceId, {'humset': hum});
   }
   
   /// Set fan speed (0=OFF, 1=LOW, 2=MED, 3=HIGH)
   Future<void> setFanSpeed(String deviceId, int speed) async {
     if (speed < 0 || speed > 3) return;
-    
-    // ESP32 expects "fan" not "fanSpeed"
-    final command = {
-      'fan': speed,
-    };
-    
-    await sendCommand(deviceId, command);
+    await sendCommand(deviceId, {'fan': speed});
   }
   
   /// Start polling for device status updates
   void _startPolling() {
     _stopPolling();
-    // Poll every 3 seconds for faster updates
     _statusPollTimer = Timer.periodic(
       const Duration(seconds: 3),
       (timer) {
-        // Poll all devices
         for (final hospital in _hospitals.values) {
           for (final ahu in hospital.allAhus) {
             loadDeviceStatus(ahu.id);
@@ -642,11 +585,13 @@ class AppProvider extends ChangeNotifier {
   
   /// Force refresh all device statuses
   Future<void> refreshAllDevices() async {
+    final futures = <Future>[];
     for (final hospital in _hospitals.values) {
       for (final ahu in hospital.allAhus) {
-        await loadDeviceStatus(ahu.id);
+        futures.add(loadDeviceStatus(ahu.id));
       }
     }
+    await Future.wait(futures);
     notifyListeners();
   }
   
@@ -719,8 +664,8 @@ class AppProvider extends ChangeNotifier {
   @override
   void dispose() {
     _stopPolling();
+    _notifyDebounceTimer?.cancel();
     _awsIoTService.disconnect();
     super.dispose();
   }
 }
-
