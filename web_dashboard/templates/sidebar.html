@@ -47,7 +47,16 @@
                     <path d="M3 9h18M9 21V9"></path>
                 </svg>
             </span>
-            <span class="nav-label">Reports</span>
+            <span class="nav-label">Support Tickets</span>
+        </a>
+        <a href="/notifications" class="nav-item {% if request.endpoint == 'notifications_page' %}active{% endif %}">
+            <span class="nav-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+            </span>
+            <span class="nav-label">Notifications</span>
         </a>
         <a href="/calendar" class="nav-item {% if request.endpoint == 'calendar' %}active{% endif %}">
             <span class="nav-icon">

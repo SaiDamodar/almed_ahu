@@ -2,12 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'providers/app_provider.dart';
 import 'providers/theme_provider.dart';
 import 'theme/app_theme.dart';
 import 'screens/welcome_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/hospitals_screen.dart';
+import 'screens/client_dashboard.dart';
+import 'screens/admin_dashboard.dart';
+import 'services/notification_service.dart';
+
+/// Background message handler - must be top-level function
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print('Handling background message: ${message.messageId}');
+  await NotificationService.showLocalNotification(message);
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,7 +28,16 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
   
+  // Initialize Firebase
   await Firebase.initializeApp();
+  
+  // Set up background message handler
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  
+  // Initialize notification service
+  final notificationService = NotificationService();
+  await notificationService.initialize();
+  
   runApp(const AlmedAhuApp());
 }
 
@@ -88,11 +107,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // If authenticated as admin, show admin dashboard
         if (state.isAdmin) {
-          return const HospitalsScreen();
+          return const AdminDashboard();
         }
 
-        // If authenticated as hospital user, show home screen
-        return const HomeScreen();
+        // If authenticated as hospital user, show client dashboard
+        return const ClientDashboard();
       },
     );
   }

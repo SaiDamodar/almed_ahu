@@ -31,6 +31,35 @@ from github.GithubException import GithubException
 import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson import ObjectId
+import os
+
+# Firebase Admin SDK for push notifications
+firebase_app = None
+try:
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+    
+    # Initialize Firebase Admin SDK
+    if config.FIREBASE_SERVICE_ACCOUNT_JSON:
+        # Use inline credentials (base64 encoded)
+        import base64
+        cred_json = json.loads(base64.b64decode(config.FIREBASE_SERVICE_ACCOUNT_JSON))
+        cred = credentials.Certificate(cred_json)
+        firebase_app = firebase_admin.initialize_app(cred)
+        print("✓ Firebase Admin SDK initialized (from inline JSON)")
+    elif os.path.exists(config.FIREBASE_SERVICE_ACCOUNT_PATH):
+        # Use service account file
+        cred = credentials.Certificate(config.FIREBASE_SERVICE_ACCOUNT_PATH)
+        firebase_app = firebase_admin.initialize_app(cred)
+        print(f"✓ Firebase Admin SDK initialized (from {config.FIREBASE_SERVICE_ACCOUNT_PATH})")
+    else:
+        print("⚠ Firebase: No service account found. Push notifications disabled.")
+        print(f"  - Looked for file: {config.FIREBASE_SERVICE_ACCOUNT_PATH}")
+        print("  - FIREBASE_SERVICE_ACCOUNT_JSON env var is empty")
+except ImportError:
+    print("⚠ Firebase Admin SDK not installed. Push notifications disabled.")
+except Exception as e:
+    print(f"❌ Firebase initialization error: {e}")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config.SECRET_KEY
@@ -98,6 +127,7 @@ connected_clients = set()
 mongo_client = None
 mongo_collection = None
 mongo_users_collection = None  # Users collection
+mongo_tickets_collection = None  # Support tickets collection
 THROTTLE_SECONDS = 10  # Minimum seconds between MongoDB writes per device/type
 IST_ZONE = ZoneInfo('Asia/Kolkata')
 
@@ -184,7 +214,7 @@ def get_last_telemetry_doc(device_id):
 
 def init_mongo():
     """Initialize MongoDB client for historical data storage"""
-    global mongo_client, mongo_collection, mongo_users_collection
+    global mongo_client, mongo_collection, mongo_users_collection, mongo_tickets_collection
     try:
         # Increase timeout and add connection options for replica sets
         # The MONGO_URI already contains connection parameters, so we just add timeout options
@@ -205,11 +235,21 @@ def init_mongo():
         mongo_collection = mongo_db[config.MONGO_COLLECTION]
         # Initialize users collection
         mongo_users_collection = mongo_db['users']
+        # Initialize tickets collection
+        mongo_tickets_collection = mongo_db['support_tickets']
         # Create unique index on email
         try:
             mongo_users_collection.create_index([('email', 1)], unique=True)
         except Exception as e:
             print(f"Note: Email index may already exist: {e}")
+        
+        # Create indexes for tickets
+        try:
+            mongo_tickets_collection.create_index([('user_id', 1)])
+            mongo_tickets_collection.create_index([('status', 1)])
+            mongo_tickets_collection.create_index([('created_at', -1)])
+        except Exception as e:
+            print(f"Note: Tickets indexes may already exist: {e}")
         
         # Drop firebase_uid index if it exists (causes duplicate key errors with null values)
         try:
@@ -223,10 +263,12 @@ def init_mongo():
         mongo_client.admin.command('ping', maxTimeMS=30000)
         print(f"✓ MongoDB: Connected to {config.MONGO_DB_NAME}.{config.MONGO_COLLECTION}")
         print(f"✓ MongoDB: Users collection initialized")
+        print(f"✓ MongoDB: Tickets collection initialized")
     except Exception as e:
         mongo_client = None
         mongo_collection = None
         mongo_users_collection = None
+        mongo_tickets_collection = None
         print(f"❌ MongoDB: Failed to connect - {e}")
         print("   This may be due to:")
         print("   - Network connectivity issues")
@@ -1837,6 +1879,569 @@ def api_assign_ahus(user_id):
             'success': False,
             'message': f'Failed to assign AHUs: {str(e)}'
         }), 500
+
+
+# ============================================================================
+# Support Tickets API
+# ============================================================================
+
+@app.route('/api/tickets', methods=['POST'])
+def api_create_ticket():
+    """Create a new support ticket (for hospital users)"""
+    if mongo_tickets_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    # Check if user is logged in
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({
+            'success': False,
+            'message': 'Authentication required'
+        }), 401
+    
+    try:
+        data = request.json
+        title = data.get('title', '').strip()
+        description = data.get('description', '').strip()
+        ahu_id = data.get('ahu_id', '').strip()
+        priority = data.get('priority', 'medium').lower()
+        
+        if not title:
+            return jsonify({
+                'success': False,
+                'message': 'Title is required'
+            }), 400
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'Description is required'
+            }), 400
+        
+        if priority not in ['low', 'medium', 'high', 'critical']:
+            priority = 'medium'
+        
+        # Get user info
+        user = mongo_users_collection.find_one({'_id': ObjectId(user_id)})
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        
+        ticket_doc = {
+            'user_id': user_id,
+            'user_email': user.get('email', ''),
+            'user_name': user.get('username', ''),
+            'hospital_name': user.get('hospital_name', ''),
+            'title': title,
+            'description': description,
+            'ahu_id': ahu_id if ahu_id else None,
+            'priority': priority,
+            'status': 'open',
+            'admin_response': None,
+            'resolved_at': None,
+            'resolved_by': None,
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        
+        result = mongo_tickets_collection.insert_one(ticket_doc)
+        ticket_id = str(result.inserted_id)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Ticket created successfully',
+            'ticket_id': ticket_id
+        })
+        
+    except Exception as e:
+        print(f"Create ticket error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to create ticket: {str(e)}'
+        }), 500
+
+
+@app.route('/api/tickets', methods=['GET'])
+def api_get_user_tickets():
+    """Get tickets for the current user"""
+    if mongo_tickets_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({
+            'success': False,
+            'message': 'Authentication required'
+        }), 401
+    
+    try:
+        tickets = list(mongo_tickets_collection.find(
+            {'user_id': user_id}
+        ).sort('created_at', -1))
+        
+        ticket_list = []
+        for ticket in tickets:
+            ticket_list.append({
+                'id': str(ticket['_id']),
+                'title': ticket.get('title', ''),
+                'description': ticket.get('description', ''),
+                'ahu_id': ticket.get('ahu_id'),
+                'priority': ticket.get('priority', 'medium'),
+                'status': ticket.get('status', 'open'),
+                'admin_response': ticket.get('admin_response'),
+                'created_at': ticket.get('created_at').isoformat() if ticket.get('created_at') else None,
+                'resolved_at': ticket.get('resolved_at').isoformat() if ticket.get('resolved_at') else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'tickets': ticket_list
+        })
+        
+    except Exception as e:
+        print(f"Get user tickets error: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to get tickets: {str(e)}'
+        }), 500
+
+
+@app.route('/api/admin/tickets', methods=['GET'])
+@login_required
+def api_get_all_tickets():
+    """Get all tickets (admin only)"""
+    if mongo_tickets_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        status_filter = request.args.get('status', None)
+        query = {}
+        if status_filter and status_filter != 'all':
+            query['status'] = status_filter
+        
+        tickets = list(mongo_tickets_collection.find(query).sort('created_at', -1))
+        
+        ticket_list = []
+        for ticket in tickets:
+            ticket_list.append({
+                'id': str(ticket['_id']),
+                'user_id': ticket.get('user_id', ''),
+                'user_email': ticket.get('user_email', ''),
+                'user_name': ticket.get('user_name', ''),
+                'hospital_name': ticket.get('hospital_name', ''),
+                'title': ticket.get('title', ''),
+                'description': ticket.get('description', ''),
+                'ahu_id': ticket.get('ahu_id'),
+                'priority': ticket.get('priority', 'medium'),
+                'status': ticket.get('status', 'open'),
+                'admin_response': ticket.get('admin_response'),
+                'resolved_by': ticket.get('resolved_by'),
+                'created_at': ticket.get('created_at').isoformat() if ticket.get('created_at') else None,
+                'resolved_at': ticket.get('resolved_at').isoformat() if ticket.get('resolved_at') else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'tickets': ticket_list
+        })
+        
+    except Exception as e:
+        print(f"Get all tickets error: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to get tickets: {str(e)}'
+        }), 500
+
+
+@app.route('/api/admin/tickets/<ticket_id>/respond', methods=['POST'])
+@login_required
+def api_respond_ticket(ticket_id):
+    """Respond to a ticket (admin only)"""
+    if mongo_tickets_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        data = request.json
+        response = data.get('response', '').strip()
+        status = data.get('status', 'in_progress')
+        
+        if not response:
+            return jsonify({
+                'success': False,
+                'message': 'Response is required'
+            }), 400
+        
+        if status not in ['open', 'in_progress', 'resolved', 'closed']:
+            status = 'in_progress'
+        
+        update_data = {
+            'admin_response': response,
+            'status': status,
+            'updated_at': datetime.utcnow()
+        }
+        
+        if status in ['resolved', 'closed']:
+            update_data['resolved_at'] = datetime.utcnow()
+            update_data['resolved_by'] = 'admin'
+        
+        result = mongo_tickets_collection.update_one(
+            {'_id': ObjectId(ticket_id)},
+            {'$set': update_data}
+        )
+        
+        if result.matched_count == 0:
+            return jsonify({
+                'success': False,
+                'message': 'Ticket not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'message': 'Ticket updated successfully'
+        })
+        
+    except Exception as e:
+        print(f"Respond to ticket error: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to update ticket: {str(e)}'
+        }), 500
+
+
+# ============================================================================
+# Push Notifications API
+# ============================================================================
+
+@app.route('/api/user/fcm-token', methods=['POST'])
+def api_register_fcm_token():
+    """Register FCM token for push notifications"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    user_id = session.get('user_id')
+    is_admin = session.get('authenticated', False)
+    
+    # Allow both admin and regular users
+    if not user_id and not is_admin:
+        return jsonify({
+            'success': False,
+            'message': 'Authentication required'
+        }), 401
+    
+    try:
+        data = request.json
+        fcm_token = data.get('fcm_token', '').strip()
+        
+        if not fcm_token:
+            return jsonify({
+                'success': False,
+                'message': 'FCM token is required'
+            }), 400
+        
+        # First, remove this token from any other users (prevents duplicate notifications)
+        # Remove from users collection
+        mongo_users_collection.update_many(
+            {'fcm_token': fcm_token},
+            {'$unset': {'fcm_token': '', 'fcm_token_updated': ''}}
+        )
+        # Remove from admin tokens collection
+        if mongo_client is not None:
+            try:
+                mongo_db = mongo_client[config.MONGO_DB_NAME]
+                admin_tokens_col = mongo_db['admin_fcm_tokens']
+                admin_tokens_col.delete_many({'token': fcm_token})
+            except:
+                pass
+        
+        # Store token based on user type
+        if user_id:
+            # Regular user - store in their user document
+            print(f"Registering FCM token for user: {user_id}")
+            mongo_users_collection.update_one(
+                {'_id': ObjectId(user_id)},
+                {
+                    '$set': {
+                        'fcm_token': fcm_token,
+                        'fcm_token_updated': datetime.utcnow()
+                    }
+                }
+            )
+            print(f"✓ FCM token stored for user {user_id}")
+        elif is_admin:
+            # Admin - store in admin tokens collection or separate field
+            print(f"Registering FCM token for admin")
+            mongo_db = mongo_client[config.MONGO_DB_NAME]
+            admin_tokens = mongo_db['admin_fcm_tokens']
+            admin_tokens.update_one(
+                {'token': fcm_token},
+                {
+                    '$set': {
+                        'token': fcm_token,
+                        'updated_at': datetime.utcnow()
+                    }
+                },
+                upsert=True
+            )
+            print(f"✓ FCM token stored for admin")
+        
+        return jsonify({
+            'success': True,
+            'message': 'FCM token registered successfully'
+        })
+        
+    except Exception as e:
+        print(f"Register FCM token error: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to register token: {str(e)}'
+        }), 500
+
+
+@app.route('/api/user/fcm-token', methods=['DELETE'])
+def api_unregister_fcm_token():
+    """Unregister FCM token (on logout)"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    user_id = session.get('user_id')
+    
+    try:
+        if user_id:
+            mongo_users_collection.update_one(
+                {'_id': ObjectId(user_id)},
+                {'$unset': {'fcm_token': '', 'fcm_token_updated': ''}}
+            )
+        
+        return jsonify({
+            'success': True,
+            'message': 'FCM token unregistered'
+        })
+        
+    except Exception as e:
+        print(f"Unregister FCM token error: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to unregister token: {str(e)}'
+        }), 500
+
+
+@app.route('/api/admin/notifications/send', methods=['POST'])
+@login_required
+def api_send_notification():
+    """Send push notification to users (admin only)"""
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    if firebase_app is None:
+        return jsonify({
+            'success': False,
+            'message': 'Push notifications are not configured. Please add Firebase service account.'
+        }), 500
+    
+    try:
+        from firebase_admin import messaging
+        
+        data = request.json
+        title = data.get('title', '').strip()
+        body = data.get('body', '').strip()
+        target = data.get('target', 'all')  # 'all', 'hospital_users', 'specific', or user_id
+        user_ids = data.get('user_ids', [])  # For specific targeting
+        
+        if not title or not body:
+            return jsonify({
+                'success': False,
+                'message': 'Title and body are required'
+            }), 400
+        
+        # Collect FCM tokens based on target
+        tokens = []
+        
+        if target == 'all' or target == 'hospital_users':
+            # Get all users with FCM tokens
+            if mongo_users_collection is not None:
+                users = mongo_users_collection.find({'fcm_token': {'$exists': True, '$ne': None}})
+                for user in users:
+                    if user.get('fcm_token'):
+                        tokens.append(user['fcm_token'])
+        
+        if target == 'all':
+            # Also get admin tokens
+            if mongo_client is not None:
+                try:
+                    mongo_db = mongo_client[config.MONGO_DB_NAME]
+                    admin_tokens_col = mongo_db['admin_fcm_tokens']
+                    admin_tokens = admin_tokens_col.find({'token': {'$exists': True, '$ne': None}})
+                    for at in admin_tokens:
+                        if at.get('token'):
+                            tokens.append(at['token'])
+                except Exception as e:
+                    print(f"Error getting admin tokens: {e}")
+        
+        if target == 'specific' and user_ids:
+            # Get specific users
+            if mongo_users_collection is not None:
+                for uid in user_ids:
+                    try:
+                        user = mongo_users_collection.find_one({'_id': ObjectId(uid)})
+                        if user and user.get('fcm_token'):
+                            tokens.append(user['fcm_token'])
+                    except:
+                        pass
+        
+        if not tokens:
+            return jsonify({
+                'success': False,
+                'message': 'No users with push notification tokens found'
+            }), 400
+        
+        # Send notifications
+        success_count = 0
+        failure_count = 0
+        
+        # FCM allows max 500 tokens per multicast
+        for i in range(0, len(tokens), 500):
+            batch_tokens = tokens[i:i+500]
+            
+            message = messaging.MulticastMessage(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                data={
+                    'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+                    'type': 'admin_notification',
+                    'timestamp': str(int(time.time()))
+                },
+                tokens=batch_tokens,
+            )
+            
+            response = messaging.send_each_for_multicast(message)
+            success_count += response.success_count
+            failure_count += response.failure_count
+        
+        # Log the notification
+        if mongo_client is not None:
+            mongo_db = mongo_client[config.MONGO_DB_NAME]
+            notifications_log = mongo_db['notifications_log']
+            notifications_log.insert_one({
+                'title': title,
+                'body': body,
+                'target': target,
+                'sent_count': success_count,
+                'failed_count': failure_count,
+                'sent_at': datetime.utcnow(),
+                'sent_by': 'admin'
+            })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Notification sent to {success_count} devices ({failure_count} failed)',
+            'success_count': success_count,
+            'failure_count': failure_count
+        })
+        
+    except Exception as e:
+        print(f"Send notification error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to send notification: {str(e)}'
+        }), 500
+
+
+@app.route('/api/admin/notifications/history', methods=['GET'])
+@login_required
+def api_get_notification_history():
+    """Get notification history (admin only)"""
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        if mongo_client is not None:
+            mongo_db = mongo_client[config.MONGO_DB_NAME]
+            notifications_log = mongo_db['notifications_log']
+            
+            notifications = list(notifications_log.find().sort('sent_at', -1).limit(50))
+            
+            history = []
+            for notif in notifications:
+                history.append({
+                    'id': str(notif['_id']),
+                    'title': notif.get('title', ''),
+                    'body': notif.get('body', ''),
+                    'target': notif.get('target', 'all'),
+                    'sent_count': notif.get('sent_count', 0),
+                    'failed_count': notif.get('failed_count', 0),
+                    'sent_at': notif.get('sent_at').isoformat() if notif.get('sent_at') else None
+                })
+            
+            return jsonify({
+                'success': True,
+                'notifications': history
+            })
+        
+        return jsonify({
+            'success': True,
+            'notifications': []
+        })
+        
+    except Exception as e:
+        print(f"Get notification history error: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to get history: {str(e)}'
+        }), 500
+
+
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    """Notifications management page"""
+    if not session.get('authenticated'):
+        return redirect(url_for('login'))
+    return render_template('notifications.html')
+
 
 @app.route('/api/ota/push-to-github', methods=['POST'])
 @login_required

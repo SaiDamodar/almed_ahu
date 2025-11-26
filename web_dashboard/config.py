@@ -36,8 +36,8 @@ SSL_ENABLED = os.getenv('SSL_ENABLED', 'True').lower() == 'true'
 # SSL_CERT_PATH = os.getenv('SSL_CERT_PATH', '/etc/letsencrypt/live/app.almedequipments.in/fullchain.pem')
 # SSL_KEY_PATH = os.getenv('SSL_KEY_PATH', '/etc/letsencrypt/live/app.almedequipments.in/privkey.pem')
 # For self-signed (development only):
-SSL_CERT_PATH = os.getenv('SSL_CERT_PATH', 'cert.pem')
-SSL_KEY_PATH = os.getenv('SSL_KEY_PATH', 'key.pem')
+SSL_CERT_PATH = '/etc/letsencrypt/live/app.almedequipments.in/fullchain.pem'
+SSL_KEY_PATH = '/etc/letsencrypt/live/app.almedequipments.in/privkey.pem'
 HTTPS_PORT = int(os.getenv('HTTPS_PORT', 443))
 
 # Admin Configuration
@@ -57,4 +57,10 @@ GITHUB_REPO_NAME = os.getenv('GITHUB_REPO_NAME', 'almed-esp32-firmware')  # Repo
 GITHUB_REPO_BRANCH = os.getenv('GITHUB_REPO_BRANCH', 'main')  # Branch to push firmware to
 GITHUB_FIRMWARE_PATH = os.getenv('GITHUB_FIRMWARE_PATH', 'firmware/esp32_main.ino')  # Path in repo for firmware file
 GITHUB_FIRMWARE_ASSET_NAME = os.getenv('GITHUB_FIRMWARE_ASSET_NAME', 'esp32_main.ino.bin')  # Name of .bin file in GitHub Releases
+
+# Firebase Cloud Messaging Configuration
+# Path to Firebase service account JSON file (download from Firebase Console > Project Settings > Service Accounts)
+FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH', 'firebase-service-account.json')
+# Or use inline credentials (base64 encoded JSON)
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON', '')
 

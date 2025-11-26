@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/screen_utils.dart';
-import 'home_screen.dart';
+import 'client_dashboard.dart';
 
 /// Screen to collect additional info after Google Sign-In
 class GoogleSignInCompleteScreen extends StatefulWidget {
@@ -77,8 +77,9 @@ class _GoogleSignInCompleteScreenState
     setState(() => _isLoading = false);
 
     if (success) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const ClientDashboard()),
+        (route) => false,
       );
     } else {
       _showError(appProvider.errorMessage ?? 'Registration failed');

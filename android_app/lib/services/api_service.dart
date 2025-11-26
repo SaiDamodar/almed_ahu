@@ -717,5 +717,107 @@ class ApiService {
       return null;
     }
   }
+
+  // ============================================================================
+  // Support Tickets API
+  // ============================================================================
+
+  /// Create a new support ticket
+  Future<Map<String, dynamic>> createTicket({
+    required String title,
+    required String description,
+    String? ahuId,
+    String priority = 'medium',
+  }) async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/tickets'),
+        method: 'POST',
+        body: jsonEncode({
+          'title': title,
+          'description': description,
+          'ahu_id': ahuId,
+          'priority': priority,
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+      return {
+        'success': data['success'] == true,
+        'message': data['message'] ?? 'Unknown error',
+        'ticket_id': data['ticket_id'],
+      };
+    } catch (e) {
+      print('Create ticket error: $e');
+      return {
+        'success': false,
+        'message': 'Failed to create ticket: $e',
+      };
+    }
+  }
+
+  /// Get tickets for the current user
+  Future<List<Map<String, dynamic>>> getMyTickets() async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/tickets'),
+        method: 'GET',
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['tickets'] != null) {
+          return List<Map<String, dynamic>>.from(data['tickets']);
+        }
+      }
+      return [];
+    } catch (e) {
+      print('Get tickets error: $e');
+      return [];
+    }
+  }
+
+  // ============================================================================
+  // Push Notifications API
+  // ============================================================================
+
+  /// Register FCM token with backend
+  Future<bool> registerFCMToken(String token) async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/user/fcm-token'),
+        method: 'POST',
+        body: jsonEncode({'fcm_token': token}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      print('Register FCM token error: $e');
+      return false;
+    }
+  }
+
+  /// Unregister FCM token (on logout)
+  Future<bool> unregisterFCMToken() async {
+    try {
+      final response = await _authenticatedRequest(
+        Uri.parse('${AppConfig.apiBaseUrl}/user/fcm-token'),
+        method: 'DELETE',
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      print('Unregister FCM token error: $e');
+      return false;
+    }
+  }
 }
 

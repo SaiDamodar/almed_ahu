@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../models/hospital.dart';
 import '../models/device_status.dart';
 import '../models/ahu_state.dart';
@@ -9,6 +10,7 @@ import '../models/register_request.dart';
 import '../services/api_service.dart';
 import '../services/aws_iot_service.dart';
 import '../services/firebase_auth_service.dart';
+import '../services/notification_service.dart';
 
 /// Main app state provider
 class AppProvider extends ChangeNotifier {
@@ -178,6 +180,10 @@ class AppProvider extends ChangeNotifier {
         await connectToAwsIoT();
         await loadHospitals();
         _startPolling();
+        
+        // Register FCM token for push notifications
+        await _registerFCMToken();
+        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -245,6 +251,10 @@ class AppProvider extends ChangeNotifier {
         _currentUser = user;
         
         await _saveAuthState();
+        
+        // Register FCM token for push notifications
+        await _registerFCMToken();
+        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -326,6 +336,10 @@ class AppProvider extends ChangeNotifier {
         _currentUser = user;
         
         await _saveAuthState();
+        
+        // Register FCM token for push notifications
+        await _registerFCMToken();
+        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -367,6 +381,10 @@ class AppProvider extends ChangeNotifier {
         _currentUser = user;
         
         await _saveAuthState();
+        
+        // Register FCM token for push notifications
+        await _registerFCMToken();
+        
         _setLoading(false);
         notifyListeners();
         return true;
@@ -413,6 +431,10 @@ class AppProvider extends ChangeNotifier {
   Future<void> logout() async {
     _stopPolling();
     _awsIoTService.disconnect();
+    
+    // Unregister FCM token before logout
+    await _apiService.unregisterFCMToken();
+    
     _apiService.logout();
     await _firebaseAuth.signOut();
     await _clearAuthState();
@@ -653,6 +675,77 @@ class AppProvider extends ChangeNotifier {
     } catch (e) {
       _setError('Failed to assign AHUs: ${e.toString()}');
       return false;
+    }
+  }
+
+  // ============================================================================
+  // Support Tickets
+  // ============================================================================
+
+  /// Create a new support ticket
+  Future<Map<String, dynamic>> createTicket({
+    required String title,
+    required String description,
+    String? ahuId,
+    String priority = 'medium',
+  }) async {
+    try {
+      return await _apiService.createTicket(
+        title: title,
+        description: description,
+        ahuId: ahuId,
+        priority: priority,
+      );
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Failed to create ticket: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Get tickets for the current user
+  Future<List<Map<String, dynamic>>> getMyTickets() async {
+    try {
+      return await _apiService.getMyTickets();
+    } catch (e) {
+      _setError('Failed to get tickets: ${e.toString()}');
+      return [];
+    }
+  }
+
+  /// Register FCM token with backend for push notifications
+  Future<void> _registerFCMToken() async {
+    try {
+      final notificationService = NotificationService();
+      
+      // Try to get token - first from memory, then from storage
+      String? token = notificationService.fcmToken;
+      
+      if (token == null) {
+        token = await notificationService.getStoredFCMToken();
+      }
+      
+      // If still null, try to get fresh token from Firebase
+      if (token == null) {
+        debugPrint('FCM token not available, requesting fresh token...');
+        token = await FirebaseMessaging.instance.getToken();
+        debugPrint('Fresh FCM token obtained: ${token != null ? "yes" : "no"}');
+      }
+      
+      if (token != null && token.isNotEmpty) {
+        debugPrint('Registering FCM token with backend...');
+        final success = await _apiService.registerFCMToken(token);
+        if (success) {
+          debugPrint('✓ FCM token registered successfully');
+        } else {
+          debugPrint('✗ Failed to register FCM token with backend');
+        }
+      } else {
+        debugPrint('✗ No FCM token available to register');
+      }
+    } catch (e) {
+      debugPrint('Error registering FCM token: $e');
     }
   }
 

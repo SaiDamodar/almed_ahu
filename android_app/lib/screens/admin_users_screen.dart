@@ -171,75 +171,68 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        title: Text(
-          'Users Management',
-          style: TextStyle(
-            fontSize: ScreenUtils.getFontSize(context, 18),
-            fontWeight: FontWeight.bold,
+    return Column(
+      children: [
+        // Tab bar header
+        Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: ScreenUtils.getPadding(context, 16),
+            vertical: ScreenUtils.getPadding(context, 8),
           ),
-        ),
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: AppTheme.lightPrimary,
-          labelColor: AppTheme.lightPrimary,
-          unselectedLabelColor: Theme.of(context).textTheme.bodyMedium?.color,
-          labelStyle: TextStyle(
-            fontSize: ScreenUtils.getFontSize(context, 13),
-            fontWeight: FontWeight.w600,
-          ),
-          tabs: [
-            _TabItem(label: 'Pending', count: _pendingUsers.length, color: AppTheme.info),
-            _TabItem(label: 'Registered', count: _registeredUsers.length, color: AppTheme.success),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadUsers,
-            tooltip: 'Refresh',
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? const [AppTheme.darkBackground, AppTheme.darkSurface, Color(0xFF334155)]
-                : [Colors.white, Colors.blue.shade50, Colors.blue.shade100],
-          ),
-        ),
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : TabBarView(
-                controller: _tabController,
-                children: [
-                  _UserList(
-                    users: _pendingUsers,
-                    emptyIcon: Icons.pending_outlined,
-                    emptyMessage: 'No pending registrations',
-                    onApprove: _approveUser,
-                    onReject: _rejectUser,
-                    showActions: true,
-                    onRefresh: _loadUsers,
+          child: Row(
+            children: [
+              Expanded(
+                child: TabBar(
+                  controller: _tabController,
+                  indicatorColor: AppTheme.lightPrimary,
+                  labelColor: AppTheme.lightPrimary,
+                  unselectedLabelColor: Theme.of(context).textTheme.bodyMedium?.color,
+                  labelStyle: TextStyle(
+                    fontSize: ScreenUtils.getFontSize(context, 13),
+                    fontWeight: FontWeight.w600,
                   ),
-                  _UserList(
-                    users: _registeredUsers,
-                    emptyIcon: Icons.people_outlined,
-                    emptyMessage: 'No registered users',
-                    onAssignAhus: _assignAhus,
-                    showActions: false,
-                    onRefresh: _loadUsers,
-                  ),
-                ],
+                  tabs: [
+                    _TabItem(label: 'Pending', count: _pendingUsers.length, color: AppTheme.info),
+                    _TabItem(label: 'Registered', count: _registeredUsers.length, color: AppTheme.success),
+                  ],
+                ),
               ),
-      ),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: _loadUsers,
+                tooltip: 'Refresh',
+              ),
+            ],
+          ),
+        ),
+        // Tab content
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _UserList(
+                      users: _pendingUsers,
+                      emptyIcon: Icons.pending_outlined,
+                      emptyMessage: 'No pending registrations',
+                      onApprove: _approveUser,
+                      onReject: _rejectUser,
+                      showActions: true,
+                      onRefresh: _loadUsers,
+                    ),
+                    _UserList(
+                      users: _registeredUsers,
+                      emptyIcon: Icons.people_outlined,
+                      emptyMessage: 'No registered users',
+                      onAssignAhus: _assignAhus,
+                      showActions: false,
+                      onRefresh: _loadUsers,
+                    ),
+                  ],
+                ),
+        ),
+      ],
     );
   }
 }

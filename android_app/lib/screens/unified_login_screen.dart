@@ -5,8 +5,8 @@ import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../config/app_config.dart';
 import '../utils/screen_utils.dart';
-import 'hospitals_screen.dart';
-import 'home_screen.dart';
+import 'admin_dashboard.dart';
+import 'client_dashboard.dart';
 import 'register_screen.dart';
 import 'google_signin_complete_screen.dart';
 
@@ -51,7 +51,7 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
 
       if (success) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const HospitalsScreen()),
+          MaterialPageRoute(builder: (context) => const AdminDashboard()),
           (route) => false,
         );
       } else {
@@ -65,7 +65,7 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
 
       if (success) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          MaterialPageRoute(builder: (context) => const ClientDashboard()),
           (route) => false,
         );
       } else {
@@ -95,7 +95,7 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
 
         if (loginSuccess) {
           Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            MaterialPageRoute(builder: (context) => const ClientDashboard()),
             (route) => false,
           );
         } else {

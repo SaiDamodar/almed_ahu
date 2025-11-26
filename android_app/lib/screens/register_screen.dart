@@ -4,7 +4,7 @@ import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/register_request.dart';
 import '../utils/screen_utils.dart';
-import 'home_screen.dart';
+import 'client_dashboard.dart';
 
 /// Registration screen for hospital users
 class RegisterScreen extends StatefulWidget {
@@ -59,8 +59,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = false);
     
     if (success) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const ClientDashboard()),
+        (route) => false,
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
