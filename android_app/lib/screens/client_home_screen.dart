@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
-import '../models/user.dart';
 import '../models/device_status.dart';
 import '../utils/screen_utils.dart';
 import 'ahu_control_screen.dart';
 
-/// Client Home Screen - Shows overview of assigned AHUs
+/// Client Home Screen - Shows online AHUs overview
 class ClientHomeScreen extends StatelessWidget {
   const ClientHomeScreen({super.key});
 
@@ -16,7 +15,6 @@ class ClientHomeScreen extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: () async {
         final appProvider = context.read<AppProvider>();
-        await appProvider.checkUserStatus();
         final user = appProvider.currentUser;
         if (user != null) {
           await Future.wait(
@@ -29,10 +27,10 @@ class ClientHomeScreen extends StatelessWidget {
         padding: ScreenUtils.getScreenPadding(context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            _StatsOverview(),
-            SizedBox(height: 20),
-            _OnlineAhusSection(),
+          children: [
+            const _StatsOverview(),
+            SizedBox(height: ScreenUtils.getSpacing(context, 20)),
+            const _OnlineAhusSection(),
           ],
         ),
       ),
@@ -48,42 +46,27 @@ class _StatsOverview extends StatelessWidget {
     return Selector<AppProvider, _StatsData>(
       selector: (_, provider) {
         final user = provider.currentUser;
-        if (user == null) return _StatsData(total: 0, online: 0, running: 0, avgTemp: 0, avgHum: 0);
+        int totalAhus = user?.assignedAhuIds.length ?? 0;
+        int onlineAhus = 0;
+        int runningAhus = 0;
 
-        int online = 0;
-        int running = 0;
-        double totalTemp = 0;
-        double totalHum = 0;
-        int tempCount = 0;
-        int humCount = 0;
-
-        for (final ahuId in user.assignedAhuIds) {
-          final status = provider.getDeviceStatus(ahuId);
-          if (status?.isOnline ?? false) {
-            online++;
-            if (status?.isRunning ?? false) running++;
-            if (status?.telemetry?.temp != null) {
-              totalTemp += status!.telemetry!.temp!;
-              tempCount++;
-            }
-            if (status?.telemetry?.hum != null) {
-              totalHum += status!.telemetry!.hum!;
-              humCount++;
+        if (user != null) {
+          for (final ahuId in user.assignedAhuIds) {
+            final status = provider.getDeviceStatus(ahuId);
+            if (status?.isOnline ?? false) {
+              onlineAhus++;
+              if (status?.isRunning ?? false) runningAhus++;
             }
           }
         }
 
         return _StatsData(
-          total: user.assignedAhuIds.length,
-          online: online,
-          running: running,
-          avgTemp: tempCount > 0 ? totalTemp / tempCount : 0,
-          avgHum: humCount > 0 ? totalHum / humCount : 0,
+          totalAhus: totalAhus,
+          onlineAhus: onlineAhus,
+          runningAhus: runningAhus,
         );
       },
       builder: (context, stats, child) {
-        final uptime = stats.total > 0 ? (stats.online / stats.total * 100).round() : 0;
-        
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -95,65 +78,45 @@ class _StatsOverview extends StatelessWidget {
               ),
             ),
             SizedBox(height: ScreenUtils.getSpacing(context, 12)),
-            // First row - AHU counts
             Row(
               children: [
                 Expanded(
                   child: _StatCard(
                     icon: Icons.air_rounded,
-                    label: 'Total',
-                    value: '${stats.total}',
+                    label: 'Total AHUs',
+                    value: '${stats.totalAhus}',
                     color: AppTheme.lightPrimary,
                   ),
                 ),
-                SizedBox(width: ScreenUtils.getPadding(context, 10)),
+                SizedBox(width: ScreenUtils.getPadding(context, 12)),
                 Expanded(
                   child: _StatCard(
                     icon: Icons.wifi_rounded,
                     label: 'Online',
-                    value: '${stats.online}',
+                    value: '${stats.onlineAhus}',
                     color: AppTheme.success,
-                  ),
-                ),
-                SizedBox(width: ScreenUtils.getPadding(context, 10)),
-                Expanded(
-                  child: _StatCard(
-                    icon: Icons.play_circle_rounded,
-                    label: 'Running',
-                    value: '${stats.running}',
-                    color: AppTheme.warning,
                   ),
                 ),
               ],
             ),
-            SizedBox(height: ScreenUtils.getSpacing(context, 10)),
-            // Second row - Quick stats
+            SizedBox(height: ScreenUtils.getSpacing(context, 12)),
             Row(
               children: [
                 Expanded(
                   child: _StatCard(
-                    icon: Icons.speed_rounded,
-                    label: 'Uptime',
-                    value: '$uptime%',
+                    icon: Icons.play_circle_rounded,
+                    label: 'Running',
+                    value: '${stats.runningAhus}',
+                    color: AppTheme.warning,
+                  ),
+                ),
+                SizedBox(width: ScreenUtils.getPadding(context, 12)),
+                Expanded(
+                  child: _StatCard(
+                    icon: Icons.pause_circle_rounded,
+                    label: 'Standby',
+                    value: '${stats.onlineAhus - stats.runningAhus}',
                     color: AppTheme.info,
-                  ),
-                ),
-                SizedBox(width: ScreenUtils.getPadding(context, 10)),
-                Expanded(
-                  child: _StatCard(
-                    icon: Icons.thermostat_rounded,
-                    label: 'Avg Temp',
-                    value: stats.avgTemp > 0 ? '${stats.avgTemp.toStringAsFixed(1)}°' : '--',
-                    color: AppTheme.error,
-                  ),
-                ),
-                SizedBox(width: ScreenUtils.getPadding(context, 10)),
-                Expanded(
-                  child: _StatCard(
-                    icon: Icons.water_drop_rounded,
-                    label: 'Avg Hum',
-                    value: stats.avgHum > 0 ? '${stats.avgHum.toStringAsFixed(1)}%' : '--',
-                    color: AppTheme.humidity,
                   ),
                 ),
               ],
@@ -166,37 +129,30 @@ class _StatsOverview extends StatelessWidget {
 }
 
 class _StatsData {
-  final int total;
-  final int online;
-  final int running;
-  final double avgTemp;
-  final double avgHum;
+  final int totalAhus;
+  final int onlineAhus;
+  final int runningAhus;
 
   _StatsData({
-    required this.total,
-    required this.online,
-    required this.running,
-    required this.avgTemp,
-    required this.avgHum,
+    required this.totalAhus,
+    required this.onlineAhus,
+    required this.runningAhus,
   });
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is _StatsData &&
-          total == other.total &&
-          online == other.online &&
-          running == other.running &&
-          avgTemp == other.avgTemp &&
-          avgHum == other.avgHum;
+          runtimeType == other.runtimeType &&
+          totalAhus == other.totalAhus &&
+          onlineAhus == other.onlineAhus &&
+          runningAhus == other.runningAhus;
 
   @override
   int get hashCode =>
-      total.hashCode ^
-      online.hashCode ^
-      running.hashCode ^
-      avgTemp.hashCode ^
-      avgHum.hashCode;
+      totalAhus.hashCode ^
+      onlineAhus.hashCode ^
+      runningAhus.hashCode;
 }
 
 class _StatCard extends StatelessWidget {
@@ -220,8 +176,8 @@ class _StatCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 16)),
       ),
       child: Padding(
-        padding: EdgeInsets.all(ScreenUtils.getPadding(context, 14)),
-        child: Column(
+        padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
+        child: Row(
           children: [
             Container(
               padding: EdgeInsets.all(ScreenUtils.getPadding(context, 10)),
@@ -229,23 +185,29 @@ class _StatCard extends StatelessWidget {
                 color: color.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
               ),
-              child: Icon(icon, color: color, size: ScreenUtils.getIconSize(context, 22)),
+              child: Icon(icon, color: color, size: ScreenUtils.getIconSize(context, 24)),
             ),
-            SizedBox(height: ScreenUtils.getSpacing(context, 10)),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: ScreenUtils.getFontSize(context, 24),
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            SizedBox(height: ScreenUtils.getSpacing(context, 2)),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: ScreenUtils.getFontSize(context, 11),
-                color: Theme.of(context).textTheme.bodySmall?.color,
+            SizedBox(width: ScreenUtils.getPadding(context, 12)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 22),
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
+                  ),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 12),
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -260,19 +222,22 @@ class _OnlineAhusSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, List<_AhuStatusData>>(
+    return Selector<AppProvider, List<_OnlineAhuData>>(
       selector: (_, provider) {
         final user = provider.currentUser;
         if (user == null) return [];
-
-        final ahuList = <_AhuStatusData>[];
+        
+        final onlineAhus = <_OnlineAhuData>[];
         for (final ahuId in user.assignedAhuIds) {
           final status = provider.getDeviceStatus(ahuId);
           if (status?.isOnline ?? false) {
-            ahuList.add(_AhuStatusData(ahuId: ahuId, status: status!));
+            onlineAhus.add(_OnlineAhuData(
+              ahuId: ahuId,
+              status: status!,
+            ));
           }
         }
-        return ahuList;
+        return onlineAhus;
       },
       builder: (context, onlineAhus, child) {
         return Column(
@@ -332,7 +297,10 @@ class _OnlineAhusSection extends StatelessWidget {
                 itemCount: onlineAhus.length,
                 itemBuilder: (context, index) {
                   final data = onlineAhus[index];
-                  return _OnlineAhuCard(ahuId: data.ahuId, status: data.status);
+                  return _OnlineAhuCard(
+                    ahuId: data.ahuId,
+                    status: data.status,
+                  );
                 },
               ),
           ],
@@ -342,11 +310,14 @@ class _OnlineAhusSection extends StatelessWidget {
   }
 }
 
-class _AhuStatusData {
+class _OnlineAhuData {
   final String ahuId;
   final DeviceStatus status;
 
-  _AhuStatusData({required this.ahuId, required this.status});
+  _OnlineAhuData({
+    required this.ahuId,
+    required this.status,
+  });
 }
 
 class _EmptyOnlineState extends StatelessWidget {
@@ -376,7 +347,7 @@ class _EmptyOnlineState extends StatelessWidget {
             ),
             SizedBox(height: ScreenUtils.getSpacing(context, 4)),
             Text(
-              'All your AHU units are currently offline',
+              'All devices are currently offline',
               style: TextStyle(
                 fontSize: ScreenUtils.getFontSize(context, 12),
                 color: Colors.grey.shade500,
@@ -393,7 +364,10 @@ class _OnlineAhuCard extends StatelessWidget {
   final String ahuId;
   final DeviceStatus status;
 
-  const _OnlineAhuCard({required this.ahuId, required this.status});
+  const _OnlineAhuCard({
+    required this.ahuId,
+    required this.status,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -437,7 +411,7 @@ class _OnlineAhuCard extends StatelessWidget {
                 child: Icon(
                   isRunning ? Icons.play_circle_rounded : Icons.pause_circle_rounded,
                   color: isRunning ? AppTheme.success : AppTheme.warning,
-                  size: ScreenUtils.getIconSize(context, 26),
+                  size: ScreenUtils.getIconSize(context, 28),
                 ),
               ),
               SizedBox(width: ScreenUtils.getPadding(context, 14)),
@@ -521,4 +495,3 @@ class _OnlineAhuCard extends StatelessWidget {
     );
   }
 }
-

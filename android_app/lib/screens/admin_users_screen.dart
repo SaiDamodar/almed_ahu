@@ -16,9 +16,13 @@ class AdminUsersScreen extends StatefulWidget {
 class _AdminUsersScreenState extends State<AdminUsersScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final TextEditingController _searchController = TextEditingController();
   List<User> _pendingUsers = [];
   List<User> _registeredUsers = [];
+  List<User> _filteredPendingUsers = [];
+  List<User> _filteredRegisteredUsers = [];
   bool _isLoading = false;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -30,7 +34,32 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _filterUsers() {
+    final query = _searchQuery.toLowerCase().trim();
+    
+    if (query.isEmpty) {
+      _filteredPendingUsers = List.from(_pendingUsers);
+      _filteredRegisteredUsers = List.from(_registeredUsers);
+    } else {
+      _filteredPendingUsers = _pendingUsers.where((user) {
+        return user.username.toLowerCase().contains(query) ||
+               user.email.toLowerCase().contains(query) ||
+               user.hospitalName.toLowerCase().contains(query) ||
+               user.phoneNumber.toLowerCase().contains(query);
+      }).toList();
+      
+      _filteredRegisteredUsers = _registeredUsers.where((user) {
+        return user.username.toLowerCase().contains(query) ||
+               user.email.toLowerCase().contains(query) ||
+               user.hospitalName.toLowerCase().contains(query) ||
+               user.phoneNumber.toLowerCase().contains(query);
+      }).toList();
+    }
+    setState(() {});
   }
 
   Future<void> _loadUsers() async {
@@ -46,13 +75,14 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
         _registeredUsers = registered;
         _isLoading = false;
       });
+      _filterUsers();
     }
   }
 
   Future<void> _approveUser(User user) async {
     final confirmed = await _showConfirmDialog(
       title: 'Approve User',
-      message: 'Approve registration for ${user.username} (${user.email})?',
+      message: 'Approve registration for ${user.username}?',
       confirmText: 'Approve',
     );
 
@@ -72,7 +102,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
   Future<void> _rejectUser(User user) async {
     final confirmed = await _showConfirmDialog(
       title: 'Reject User',
-      message: 'Reject registration for ${user.username} (${user.email})? This action cannot be undone.',
+      message: 'Reject registration for ${user.username}?',
       confirmText: 'Reject',
       isDestructive: true,
     );
@@ -127,6 +157,15 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
     }
   }
 
+  void _showUserDetails(User user) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _UserDetailsSheet(user: user),
+    );
+  }
+
   Future<bool?> _showConfirmDialog({
     required String title,
     required String message,
@@ -173,11 +212,73 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Search bar
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            ScreenUtils.getPadding(context, 16),
+            ScreenUtils.getPadding(context, 12),
+            ScreenUtils.getPadding(context, 16),
+            ScreenUtils.getPadding(context, 8),
+          ),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (value) {
+              _searchQuery = value;
+              _filterUsers();
+            },
+            decoration: InputDecoration(
+              hintText: 'Search by name, email, hospital, phone...',
+              hintStyle: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 14),
+                color: Theme.of(context).hintColor,
+              ),
+              prefixIcon: Icon(
+                Icons.search,
+                size: ScreenUtils.getIconSize(context, 22),
+                color: AppTheme.lightPrimary,
+              ),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: Icon(
+                        Icons.clear,
+                        size: ScreenUtils.getIconSize(context, 20),
+                      ),
+                      onPressed: () {
+                        _searchController.clear();
+                        _searchQuery = '';
+                        _filterUsers();
+                      },
+                    )
+                  : null,
+              filled: true,
+              fillColor: Theme.of(context).cardColor,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+                borderSide: BorderSide(
+                  color: Theme.of(context).dividerColor.withOpacity(0.3),
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+                borderSide: const BorderSide(color: AppTheme.lightPrimary, width: 1.5),
+              ),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: ScreenUtils.getPadding(context, 16),
+                vertical: ScreenUtils.getPadding(context, 12),
+              ),
+            ),
+            style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 14)),
+          ),
+        ),
         // Tab bar header
         Container(
           padding: EdgeInsets.symmetric(
             horizontal: ScreenUtils.getPadding(context, 16),
-            vertical: ScreenUtils.getPadding(context, 8),
+            vertical: ScreenUtils.getPadding(context, 4),
           ),
           child: Row(
             children: [
@@ -192,8 +293,8 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
                     fontWeight: FontWeight.w600,
                   ),
                   tabs: [
-                    _TabItem(label: 'Pending', count: _pendingUsers.length, color: AppTheme.info),
-                    _TabItem(label: 'Registered', count: _registeredUsers.length, color: AppTheme.success),
+                    _TabItem(label: 'Pending', count: _filteredPendingUsers.length, color: AppTheme.info),
+                    _TabItem(label: 'Registered', count: _filteredRegisteredUsers.length, color: AppTheme.success),
                   ],
                 ),
               ),
@@ -212,21 +313,29 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
               : TabBarView(
                   controller: _tabController,
                   children: [
-                    _UserList(
-                      users: _pendingUsers,
+                    // Pending Users
+                    _CompactUserList(
+                      users: _filteredPendingUsers,
                       emptyIcon: Icons.pending_outlined,
-                      emptyMessage: 'No pending registrations',
+                      emptyMessage: _searchQuery.isEmpty 
+                          ? 'No pending registrations' 
+                          : 'No matching users found',
                       onApprove: _approveUser,
                       onReject: _rejectUser,
-                      showActions: true,
+                      onTap: _showUserDetails,
+                      isPending: true,
                       onRefresh: _loadUsers,
                     ),
-                    _UserList(
-                      users: _registeredUsers,
+                    // Registered Users
+                    _CompactUserList(
+                      users: _filteredRegisteredUsers,
                       emptyIcon: Icons.people_outlined,
-                      emptyMessage: 'No registered users',
+                      emptyMessage: _searchQuery.isEmpty 
+                          ? 'No registered users' 
+                          : 'No matching users found',
                       onAssignAhus: _assignAhus,
-                      showActions: false,
+                      onTap: _showUserDetails,
+                      isPending: false,
                       onRefresh: _loadUsers,
                     ),
                   ],
@@ -278,24 +387,26 @@ class _TabItem extends StatelessWidget {
   }
 }
 
-class _UserList extends StatelessWidget {
+class _CompactUserList extends StatelessWidget {
   final List<User> users;
   final IconData emptyIcon;
   final String emptyMessage;
   final Function(User)? onApprove;
   final Function(User)? onReject;
   final Function(User)? onAssignAhus;
-  final bool showActions;
+  final Function(User) onTap;
+  final bool isPending;
   final VoidCallback onRefresh;
 
-  const _UserList({
+  const _CompactUserList({
     required this.users,
     required this.emptyIcon,
     required this.emptyMessage,
     this.onApprove,
     this.onReject,
     this.onAssignAhus,
-    required this.showActions,
+    required this.onTap,
+    required this.isPending,
     required this.onRefresh,
   });
 
@@ -324,16 +435,20 @@ class _UserList extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: () async => onRefresh(),
       child: ListView.builder(
-        padding: ScreenUtils.getScreenPadding(context),
+        padding: EdgeInsets.symmetric(
+          horizontal: ScreenUtils.getPadding(context, 16),
+          vertical: ScreenUtils.getPadding(context, 8),
+        ),
         itemCount: users.length,
         itemBuilder: (context, index) {
           final user = users[index];
-          return _UserCard(
+          return _CompactUserCard(
             user: user,
             onApprove: onApprove,
             onReject: onReject,
             onAssignAhus: onAssignAhus,
-            showActions: showActions,
+            onTap: () => onTap(user),
+            isPending: isPending,
           );
         },
       ),
@@ -341,326 +456,332 @@ class _UserList extends StatelessWidget {
   }
 }
 
-class _UserCard extends StatelessWidget {
+class _CompactUserCard extends StatelessWidget {
   final User user;
   final Function(User)? onApprove;
   final Function(User)? onReject;
   final Function(User)? onAssignAhus;
-  final bool showActions;
+  final VoidCallback onTap;
+  final bool isPending;
 
-  const _UserCard({
+  const _CompactUserCard({
     required this.user,
     this.onApprove,
     this.onReject,
     this.onAssignAhus,
-    required this.showActions,
+    required this.onTap,
+    required this.isPending,
   });
 
   @override
   Widget build(BuildContext context) {
-    final borderRadius = ScreenUtils.getBorderRadius(context, 16);
-
     return Card(
-      elevation: 2,
-      margin: EdgeInsets.only(bottom: ScreenUtils.getSpacing(context, 14)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(borderRadius)),
-      child: Padding(
-        padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _UserHeader(user: user),
-            SizedBox(height: ScreenUtils.getSpacing(context, 14)),
-            _UserInfo(user: user),
-            if (user.assignedAhuIds.isNotEmpty) ...[
-              SizedBox(height: ScreenUtils.getSpacing(context, 14)),
-              _AssignedAhus(ahuIds: user.assignedAhuIds),
-            ],
-            if (showActions && (onApprove != null || onReject != null)) ...[
-              SizedBox(height: ScreenUtils.getSpacing(context, 14)),
-              _ActionButtons(
-                onApprove: onApprove != null ? () => onApprove!(user) : null,
-                onReject: onReject != null ? () => onReject!(user) : null,
-              ),
-            ],
-            if (!showActions && onAssignAhus != null) ...[
-              SizedBox(height: ScreenUtils.getSpacing(context, 14)),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => onAssignAhus!(user),
-                  icon: Icon(Icons.assignment, size: ScreenUtils.getIconSize(context, 18)),
-                  label: Text(
-                    'Assign AHUs',
-                    style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 14)),
+      elevation: 1,
+      margin: EdgeInsets.only(bottom: ScreenUtils.getSpacing(context, 8)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: ScreenUtils.getPadding(context, 12),
+            vertical: ScreenUtils.getPadding(context, 10),
+          ),
+          child: Row(
+            children: [
+              // Avatar
+              Container(
+                width: ScreenUtils.getIconSize(context, 40),
+                height: ScreenUtils.getIconSize(context, 40),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.lightPrimary.withOpacity(0.2),
+                      AppTheme.lightPrimary.withOpacity(0.1),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 10)),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  user.username.isNotEmpty ? user.username[0].toUpperCase() : 'U',
+                  style: TextStyle(
+                    color: AppTheme.lightPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: ScreenUtils.getFontSize(context, 16),
                   ),
                 ),
               ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _UserHeader extends StatelessWidget {
-  final User user;
-
-  const _UserHeader({required this.user});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          padding: EdgeInsets.all(ScreenUtils.getPadding(context, 12)),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.lightPrimary.withOpacity(0.2),
-                AppTheme.lightPrimary.withOpacity(0.1),
+              SizedBox(width: ScreenUtils.getPadding(context, 12)),
+              // Username and hospital hint
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user.username,
+                      style: TextStyle(
+                        fontSize: ScreenUtils.getFontSize(context, 14),
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      user.hospitalName,
+                      style: TextStyle(
+                        fontSize: ScreenUtils.getFontSize(context, 11),
+                        color: Theme.of(context).textTheme.bodySmall?.color,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // Actions
+              if (isPending) ...[
+                // Approve button
+                IconButton(
+                  onPressed: onApprove != null ? () => onApprove!(user) : null,
+                  icon: Icon(
+                    Icons.check_circle_outline,
+                    color: AppTheme.success,
+                    size: ScreenUtils.getIconSize(context, 24),
+                  ),
+                  tooltip: 'Approve',
+                  constraints: const BoxConstraints(),
+                  padding: EdgeInsets.all(ScreenUtils.getPadding(context, 8)),
+                ),
+                // Reject button
+                IconButton(
+                  onPressed: onReject != null ? () => onReject!(user) : null,
+                  icon: Icon(
+                    Icons.cancel_outlined,
+                    color: AppTheme.error,
+                    size: ScreenUtils.getIconSize(context, 24),
+                  ),
+                  tooltip: 'Reject',
+                  constraints: const BoxConstraints(),
+                  padding: EdgeInsets.all(ScreenUtils.getPadding(context, 8)),
+                ),
+              ] else ...[
+                // Assign AHUs button
+                TextButton.icon(
+                  onPressed: onAssignAhus != null ? () => onAssignAhus!(user) : null,
+                  icon: Icon(
+                    Icons.assignment,
+                    size: ScreenUtils.getIconSize(context, 16),
+                  ),
+                  label: Text(
+                    user.assignedAhuIds.isNotEmpty 
+                        ? 'AHUs (${user.assignedAhuIds.length})' 
+                        : 'Assign',
+                    style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 12)),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: ScreenUtils.getPadding(context, 12),
+                      vertical: ScreenUtils.getPadding(context, 6),
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ],
-            ),
-            borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
-          ),
-          child: Text(
-            user.username.isNotEmpty ? user.username[0].toUpperCase() : 'U',
-            style: TextStyle(
-              color: AppTheme.lightPrimary,
-              fontWeight: FontWeight.bold,
-              fontSize: ScreenUtils.getFontSize(context, 18),
-            ),
-          ),
-        ),
-        SizedBox(width: ScreenUtils.getPadding(context, 14)),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                user.username,
-                style: TextStyle(
-                  fontSize: ScreenUtils.getFontSize(context, 16),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: ScreenUtils.getSpacing(context, 3)),
-              Text(
-                user.email,
-                style: TextStyle(
-                  fontSize: ScreenUtils.getFontSize(context, 12),
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                ),
+              // Info icon
+              Icon(
+                Icons.chevron_right,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+                size: ScreenUtils.getIconSize(context, 20),
               ),
             ],
           ),
         ),
-        if (user.status == UserStatus.active) _ActiveBadge(),
-      ],
-    );
-  }
-}
-
-class _ActiveBadge extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: ScreenUtils.getPadding(context, 10),
-        vertical: ScreenUtils.getSpacing(context, 5),
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.success.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
-        border: Border.all(color: AppTheme.success.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: const BoxDecoration(
-              color: AppTheme.success,
-              shape: BoxShape.circle,
-            ),
-          ),
-          SizedBox(width: ScreenUtils.getPadding(context, 5)),
-          Text(
-            'Active',
-            style: TextStyle(
-              color: AppTheme.success,
-              fontSize: ScreenUtils.getFontSize(context, 11),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ),
     );
   }
 }
 
-class _UserInfo extends StatelessWidget {
+class _UserDetailsSheet extends StatelessWidget {
   final User user;
 
-  const _UserInfo({required this.user});
+  const _UserDetailsSheet({required this.user});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.all(ScreenUtils.getPadding(context, 12)),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(ScreenUtils.getBorderRadius(context, 24)),
+        ),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _InfoRow(icon: Icons.local_hospital, label: 'Hospital', value: user.hospitalName),
-          SizedBox(height: ScreenUtils.getSpacing(context, 10)),
-          _InfoRow(icon: Icons.phone, label: 'Phone', value: user.phoneNumber),
+          // Handle
+          Container(
+            margin: EdgeInsets.only(top: ScreenUtils.getPadding(context, 12)),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Theme.of(context).dividerColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // Content
+          Padding(
+            padding: EdgeInsets.all(ScreenUtils.getPadding(context, 20)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      width: ScreenUtils.getIconSize(context, 56),
+                      height: ScreenUtils.getIconSize(context, 56),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.lightPrimary.withOpacity(0.2),
+                            AppTheme.lightPrimary.withOpacity(0.1),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 14)),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        user.username.isNotEmpty ? user.username[0].toUpperCase() : 'U',
+                        style: TextStyle(
+                          color: AppTheme.lightPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: ScreenUtils.getFontSize(context, 24),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: ScreenUtils.getPadding(context, 16)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user.username,
+                            style: TextStyle(
+                              fontSize: ScreenUtils.getFontSize(context, 20),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (user.status == UserStatus.active)
+                            Container(
+                              margin: EdgeInsets.only(top: ScreenUtils.getSpacing(context, 6)),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: ScreenUtils.getPadding(context, 8),
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.success.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'Active',
+                                style: TextStyle(
+                                  color: AppTheme.success,
+                                  fontSize: ScreenUtils.getFontSize(context, 11),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: ScreenUtils.getSpacing(context, 20)),
+                // Details
+                _DetailItem(icon: Icons.email_outlined, label: 'Email', value: user.email),
+                _DetailItem(icon: Icons.phone_outlined, label: 'Phone', value: user.phoneNumber),
+                _DetailItem(icon: Icons.local_hospital_outlined, label: 'Hospital', value: user.hospitalName),
+                if (user.assignedAhuIds.isNotEmpty) ...[
+                  SizedBox(height: ScreenUtils.getSpacing(context, 12)),
+                  Text(
+                    'Assigned AHUs (${user.assignedAhuIds.length})',
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 13),
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.lightPrimary,
+                    ),
+                  ),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 8)),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: user.assignedAhuIds.map((id) => Chip(
+                      avatar: Icon(Icons.ac_unit, size: 14, color: AppTheme.lightPrimary),
+                      label: Text(id, style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 12))),
+                      backgroundColor: AppTheme.lightPrimary.withOpacity(0.1),
+                      side: BorderSide.none,
+                      padding: EdgeInsets.zero,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    )).toList(),
+                  ),
+                ],
+                SizedBox(height: ScreenUtils.getSpacing(context, 20)),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _InfoRow extends StatelessWidget {
+class _DetailItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
 
-  const _InfoRow({required this.icon, required this.label, required this.value});
+  const _DetailItem({required this.icon, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: ScreenUtils.getIconSize(context, 16), color: Theme.of(context).textTheme.bodySmall?.color),
-        SizedBox(width: ScreenUtils.getPadding(context, 8)),
-        Text(
-          '$label: ',
-          style: TextStyle(
-            fontSize: ScreenUtils.getFontSize(context, 12),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 12)),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AssignedAhus extends StatelessWidget {
-  final List<String> ahuIds;
-
-  const _AssignedAhus({required this.ahuIds});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Assigned AHUs (${ahuIds.length})',
-          style: TextStyle(
-            fontSize: ScreenUtils.getFontSize(context, 12),
-            fontWeight: FontWeight.w600,
+    return Padding(
+      padding: EdgeInsets.only(bottom: ScreenUtils.getSpacing(context, 12)),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: ScreenUtils.getIconSize(context, 20),
             color: AppTheme.lightPrimary,
           ),
-        ),
-        SizedBox(height: ScreenUtils.getSpacing(context, 8)),
-        Wrap(
-          spacing: ScreenUtils.getPadding(context, 8),
-          runSpacing: ScreenUtils.getSpacing(context, 8),
-          children: ahuIds.map((id) => _AhuChip(ahuId: id)).toList(),
-        ),
-      ],
-    );
-  }
-}
-
-class _AhuChip extends StatelessWidget {
-  final String ahuId;
-
-  const _AhuChip({required this.ahuId});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: ScreenUtils.getPadding(context, 10),
-        vertical: ScreenUtils.getSpacing(context, 5),
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.lightPrimary.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 8)),
-        border: Border.all(color: AppTheme.lightPrimary.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.ac_unit, size: ScreenUtils.getIconSize(context, 14), color: AppTheme.lightPrimary),
-          SizedBox(width: ScreenUtils.getPadding(context, 5)),
-          Text(
-            ahuId,
-            style: TextStyle(
-              color: AppTheme.lightPrimary,
-              fontSize: ScreenUtils.getFontSize(context, 11),
-              fontWeight: FontWeight.w600,
+          SizedBox(width: ScreenUtils.getPadding(context, 12)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: ScreenUtils.getFontSize(context, 11),
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                ),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: ScreenUtils.getFontSize(context, 14),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ActionButtons extends StatelessWidget {
-  final VoidCallback? onApprove;
-  final VoidCallback? onReject;
-
-  const _ActionButtons({this.onApprove, this.onReject});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        if (onApprove != null)
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: onApprove,
-              icon: Icon(Icons.check, size: ScreenUtils.getIconSize(context, 18)),
-              label: Text(
-                'Approve',
-                style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 13)),
-              ),
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.success),
-            ),
-          ),
-        if (onApprove != null && onReject != null)
-          SizedBox(width: ScreenUtils.getPadding(context, 10)),
-        if (onReject != null)
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: onReject,
-              icon: Icon(Icons.close, size: ScreenUtils.getIconSize(context, 18)),
-              label: Text(
-                'Reject',
-                style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 13)),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.error,
-                side: const BorderSide(color: AppTheme.error),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }

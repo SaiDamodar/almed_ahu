@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
-import '../models/user.dart';
 import '../utils/screen_utils.dart';
 import 'client_home_screen.dart';
 import 'client_ahus_screen.dart';
@@ -21,91 +20,16 @@ class ClientDashboard extends StatefulWidget {
 class _ClientDashboardState extends State<ClientDashboard> {
   int _currentIndex = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeData();
-    });
-  }
-
-  Future<void> _initializeData() async {
-    final appProvider = Provider.of<AppProvider>(context, listen: false);
-    await appProvider.checkUserStatus();
-    await _loadDeviceStatuses();
-  }
-
-  Future<void> _loadDeviceStatuses() async {
-    final appProvider = Provider.of<AppProvider>(context, listen: false);
-    final user = appProvider.currentUser;
-    if (user != null && user.assignedAhuIds.isNotEmpty) {
-      await Future.wait(
-        user.assignedAhuIds.map((id) => appProvider.loadDeviceStatus(id)),
-      );
-    }
-  }
+  final List<Widget> _screens = const [
+    ClientHomeScreen(),
+    ClientAhusScreen(),
+    ClientReportsScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Selector<AppProvider, User?>(
-      selector: (_, provider) => provider.currentUser,
-      builder: (context, user, child) {
-        // Show status screens for non-active users
-        if (user == null) {
-          return _buildLoadingScreen(isDark);
-        }
-
-        if (user.status != UserStatus.active || user.assignedAhuIds.isEmpty) {
-          return _buildStatusScreen(user, isDark);
-        }
-
-        // Active user with assigned AHUs - show dashboard
-        return Scaffold(
-          body: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDark
-                    ? const [
-                        AppTheme.darkBackground,
-                        AppTheme.darkSurface,
-                        Color(0xFF334155),
-                      ]
-                    : [
-                        Colors.white,
-                        Colors.blue.shade50,
-                        Colors.blue.shade100,
-                      ],
-              ),
-            ),
-            child: SafeArea(
-              child: Column(
-                children: [
-                  _ClientTopBar(user: user, isDark: isDark),
-                  Expanded(
-                    child: IndexedStack(
-                      index: _currentIndex,
-                      children: const [
-                        ClientHomeScreen(),
-                        ClientAhusScreen(),
-                        ClientReportsScreen(),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          bottomNavigationBar: _buildBottomNav(isDark),
-        );
-      },
-    );
-  }
-
-  Widget _buildLoadingScreen(bool isDark) {
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
@@ -113,121 +37,33 @@ class _ClientDashboardState extends State<ClientDashboard> {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: isDark
-                ? const [AppTheme.darkBackground, AppTheme.darkSurface]
-                : [Colors.white, Colors.blue.shade50],
-          ),
-        ),
-        child: const Center(child: CircularProgressIndicator()),
-      ),
-    );
-  }
-
-  Widget _buildStatusScreen(User user, bool isDark) {
-    String title;
-    String message;
-    IconData icon;
-    Color color;
-
-    switch (user.status) {
-      case UserStatus.pending:
-        title = 'Waiting for Verification';
-        message = 'Your registration is pending admin approval. Please wait while we verify your account.';
-        icon = Icons.pending_outlined;
-        color = AppTheme.info;
-        break;
-      case UserStatus.rejected:
-        title = 'Registration Rejected';
-        message = 'Your registration request has been rejected. Please contact support for more information.';
-        icon = Icons.cancel_outlined;
-        color = AppTheme.error;
-        break;
-      case UserStatus.approved:
-        title = 'Waiting for AHU Assignment';
-        message = 'Your account has been approved. Please wait while the admin assigns AHU units to your hospital.';
-        icon = Icons.schedule_outlined;
-        color = AppTheme.info;
-        break;
-      case UserStatus.suspended:
-        title = 'Account Suspended';
-        message = 'Your account has been temporarily suspended. Please contact support for assistance.';
-        icon = Icons.block_outlined;
-        color = AppTheme.error;
-        break;
-      case UserStatus.active:
-        title = 'No AHUs Assigned';
-        message = 'You don\'t have any AHU units assigned yet. Please contact the admin.';
-        icon = Icons.devices_outlined;
-        color = AppTheme.info;
-        break;
-    }
-
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? const [AppTheme.darkBackground, AppTheme.darkSurface, Color(0xFF334155)]
-                : [Colors.white, Colors.blue.shade50, Colors.blue.shade100],
+                ? const [
+                    AppTheme.darkBackground,
+                    AppTheme.darkSurface,
+                    Color(0xFF334155),
+                  ]
+                : [
+                    Colors.white,
+                    Colors.blue.shade50,
+                    Colors.blue.shade100,
+                  ],
           ),
         ),
         child: SafeArea(
           child: Column(
             children: [
-              _StatusTopBar(user: user, isDark: isDark),
+              _ClientTopBar(isDark: isDark),
               Expanded(
-                child: Center(
-                  child: Padding(
-                    padding: ScreenUtils.getScreenPadding(context),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: EdgeInsets.all(ScreenUtils.getPadding(context, 28)),
-                          decoration: BoxDecoration(
-                            color: color.withOpacity(0.12),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(icon, size: 64, color: color),
-                        ),
-                        SizedBox(height: ScreenUtils.getSpacing(context, 24)),
-                        Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: ScreenUtils.getFontSize(context, 22),
-                            fontWeight: FontWeight.bold,
-                            color: color,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        SizedBox(height: ScreenUtils.getSpacing(context, 12)),
-                        Text(
-                          message,
-                          style: TextStyle(
-                            fontSize: ScreenUtils.getFontSize(context, 14),
-                            color: Theme.of(context).textTheme.bodySmall?.color,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        SizedBox(height: ScreenUtils.getSpacing(context, 32)),
-                        ElevatedButton.icon(
-                          onPressed: () async {
-                            final appProvider = Provider.of<AppProvider>(context, listen: false);
-                            await appProvider.checkUserStatus();
-                          },
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Refresh Status'),
-                        ),
-                      ],
-                    ),
-                  ),
+                child: IndexedStack(
+                  index: _currentIndex,
+                  children: _screens,
                 ),
               ),
             ],
           ),
         ),
       ),
+      bottomNavigationBar: _buildBottomNav(isDark),
     );
   }
 
@@ -266,8 +102,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
                 onTap: () => setState(() => _currentIndex = 1),
               ),
               _NavItem(
-                icon: Icons.assessment_rounded,
-                label: 'Reports',
+                icon: Icons.support_agent_rounded,
+                label: 'Support',
                 isSelected: _currentIndex == 2,
                 onTap: () => setState(() => _currentIndex = 2),
               ),
@@ -336,10 +172,9 @@ class _NavItem extends StatelessWidget {
 }
 
 class _ClientTopBar extends StatelessWidget {
-  final User user;
   final bool isDark;
 
-  const _ClientTopBar({required this.user, required this.isDark});
+  const _ClientTopBar({required this.isDark});
 
   @override
   Widget build(BuildContext context) {
@@ -364,13 +199,15 @@ class _ClientTopBar extends StatelessWidget {
             padding: EdgeInsets.all(ScreenUtils.getPadding(context, 10)),
             decoration: BoxDecoration(
               color: AppTheme.lightPrimary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+              borderRadius: BorderRadius.circular(
+                ScreenUtils.getBorderRadius(context, 12),
+              ),
             ),
             child: Text(
               'ALMED',
               style: TextStyle(
                 fontFamily: 'Verdana',
-                fontSize: ScreenUtils.getFontSize(context, 16),
+                fontSize: ScreenUtils.getFontSize(context, 18),
                 fontWeight: FontWeight.w600,
                 color: AppTheme.lightPrimary,
                 letterSpacing: 1.5,
@@ -382,21 +219,41 @@ class _ClientTopBar extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  user.hospitalName,
-                  style: TextStyle(
-                    fontSize: ScreenUtils.getFontSize(context, 16),
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                Selector<AppProvider, String>(
+                  selector: (_, provider) => provider.currentUser?.hospitalName ?? 'Dashboard',
+                  builder: (context, hospitalName, child) {
+                    return Text(
+                      hospitalName,
+                      style: TextStyle(
+                        fontSize: ScreenUtils.getFontSize(context, 18),
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    );
+                  },
                 ),
                 SizedBox(height: ScreenUtils.getSpacing(context, 2)),
-                Text(
-                  'Welcome, ${user.username}',
-                  style: TextStyle(
-                    fontSize: ScreenUtils.getFontSize(context, 12),
-                    color: Theme.of(context).textTheme.bodySmall?.color,
-                  ),
+                Selector<AppProvider, int>(
+                  selector: (_, provider) {
+                    final user = provider.currentUser;
+                    if (user == null) return 0;
+                    int onlineCount = 0;
+                    for (final ahuId in user.assignedAhuIds) {
+                      final status = provider.getDeviceStatus(ahuId);
+                      if (status?.isOnline ?? false) onlineCount++;
+                    }
+                    return onlineCount;
+                  },
+                  builder: (context, onlineCount, child) {
+                    return Text(
+                      '$onlineCount AHUs Online',
+                      style: TextStyle(
+                        fontSize: ScreenUtils.getFontSize(context, 12),
+                        color: AppTheme.success,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -422,71 +279,6 @@ class _ClientTopBar extends StatelessWidget {
   }
 }
 
-class _StatusTopBar extends StatelessWidget {
-  final User user;
-  final bool isDark;
-
-  const _StatusTopBar({required this.user, required this.isDark});
-
-  @override
-  Widget build(BuildContext context) {
-    final padding = ScreenUtils.getPadding(context, 16);
-    final appProvider = Provider.of<AppProvider>(context, listen: false);
-
-    return Container(
-      padding: EdgeInsets.all(padding),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor.withOpacity(0.5),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: EdgeInsets.all(ScreenUtils.getPadding(context, 10)),
-            decoration: BoxDecoration(
-              color: AppTheme.lightPrimary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
-            ),
-            child: Text(
-              'ALMED',
-              style: TextStyle(
-                fontFamily: 'Verdana',
-                fontSize: ScreenUtils.getFontSize(context, 16),
-                fontWeight: FontWeight.w600,
-                color: AppTheme.lightPrimary,
-                letterSpacing: 1.5,
-              ),
-            ),
-          ),
-          SizedBox(width: ScreenUtils.getPadding(context, 12)),
-          Expanded(
-            child: Text(
-              user.hospitalName,
-              style: TextStyle(
-                fontSize: ScreenUtils.getFontSize(context, 16),
-                fontWeight: FontWeight.bold,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          _ActionButton(
-            icon: Icons.logout_rounded,
-            onPressed: () async {
-              await appProvider.logout();
-              if (context.mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                  (route) => false,
-                );
-              }
-            },
-            tooltip: 'Logout',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ActionButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onPressed;
@@ -504,7 +296,9 @@ class _ActionButton extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
-        border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.1)),
+        border: Border.all(
+          color: Theme.of(context).dividerColor.withOpacity(0.1),
+        ),
       ),
       child: IconButton(
         icon: Icon(icon, size: ScreenUtils.getIconSize(context, 22)),
@@ -529,7 +323,9 @@ class _ThemeToggleButton extends StatelessWidget {
           decoration: BoxDecoration(
             color: Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.1)),
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withOpacity(0.1),
+            ),
           ),
           child: IconButton(
             icon: Icon(
@@ -545,4 +341,3 @@ class _ThemeToggleButton extends StatelessWidget {
     );
   }
 }
-

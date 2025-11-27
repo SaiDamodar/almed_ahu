@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -292,10 +293,12 @@ class _StartStopButton extends StatelessWidget {
         return _StartStopData(
           isRunning: status?.isRunning ?? false,
           isOnline: status?.isOnline ?? false,
+          isPending: provider.isCommandPending(deviceId, 'toggle'),
         );
       },
       builder: (context, data, child) {
-        return Container(
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
           height: buttonHeight,
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -304,25 +307,46 @@ class _StartStopButton extends StatelessWidget {
                   : [AppTheme.success, const Color(0xFF059669)],
             ),
             borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+            boxShadow: data.isPending
+                ? [
+                    BoxShadow(
+                      color: (data.isRunning ? AppTheme.error : AppTheme.success).withOpacity(0.5),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : null,
           ),
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: data.isOnline
+              onTap: (data.isOnline && !data.isPending)
                   ? () => context.read<AppProvider>().toggleAhu(deviceId)
                   : null,
               borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    data.isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
-                    color: Colors.white,
-                    size: ScreenUtils.getIconSize(context, 20),
-                  ),
+                  if (data.isPending)
+                    SizedBox(
+                      width: ScreenUtils.getIconSize(context, 18),
+                      height: ScreenUtils.getIconSize(context, 18),
+                      child: const CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  else
+                    Icon(
+                      data.isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: ScreenUtils.getIconSize(context, 20),
+                    ),
                   SizedBox(width: ScreenUtils.getPadding(context, 8)),
                   Text(
-                    data.isRunning ? 'Stop' : 'Start',
+                    data.isPending
+                        ? (data.isRunning ? 'Starting...' : 'Stopping...')
+                        : (data.isRunning ? 'Stop' : 'Start'),
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -342,18 +366,20 @@ class _StartStopButton extends StatelessWidget {
 class _StartStopData {
   final bool isRunning;
   final bool isOnline;
+  final bool isPending;
 
-  _StartStopData({required this.isRunning, required this.isOnline});
+  _StartStopData({required this.isRunning, required this.isOnline, required this.isPending});
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is _StartStopData &&
           isRunning == other.isRunning &&
-          isOnline == other.isOnline;
+          isOnline == other.isOnline &&
+          isPending == other.isPending;
 
   @override
-  int get hashCode => isRunning.hashCode ^ isOnline.hashCode;
+  int get hashCode => isRunning.hashCode ^ isOnline.hashCode ^ isPending.hashCode;
 }
 
 class _SettingsButton extends StatelessWidget {
@@ -412,11 +438,13 @@ class _SensorControls extends StatelessWidget {
 
         return Column(
           children: [
-            _SensorControl(
+            _SmoothSensorControl(
+              key: ValueKey('temp_$deviceId'),
+              deviceId: deviceId,
               icon: Icons.thermostat_rounded,
               label: 'Temperature',
               actual: status.telemetry?.temp?.toStringAsFixed(1) ?? '--',
-              setpoint: status.tempSetpoint,
+              initialSetpoint: status.tempSetpoint,
               unit: '°C',
               color: AppTheme.temperature,
               min: 15,
@@ -426,11 +454,13 @@ class _SensorControls extends StatelessWidget {
               },
             ),
             SizedBox(height: ScreenUtils.getSpacing(context, 14)),
-            _SensorControl(
+            _SmoothSensorControl(
+              key: ValueKey('hum_$deviceId'),
+              deviceId: deviceId,
               icon: Icons.water_drop_rounded,
               label: 'Humidity',
               actual: status.telemetry?.hum?.toStringAsFixed(1) ?? '--',
-              setpoint: status.humSetpoint,
+              initialSetpoint: status.humSetpoint,
               unit: '%',
               color: AppTheme.humidity,
               min: 30,
@@ -446,28 +476,83 @@ class _SensorControls extends StatelessWidget {
   }
 }
 
-class _SensorControl extends StatelessWidget {
+/// Smooth sensor control with local state for instant UI updates
+class _SmoothSensorControl extends StatefulWidget {
+  final String deviceId;
   final IconData icon;
   final String label;
   final String actual;
-  final double setpoint;
+  final double initialSetpoint;
   final String unit;
   final Color color;
   final double min;
   final double max;
   final ValueChanged<double> onChanged;
 
-  const _SensorControl({
+  const _SmoothSensorControl({
+    super.key,
+    required this.deviceId,
     required this.icon,
     required this.label,
     required this.actual,
-    required this.setpoint,
+    required this.initialSetpoint,
     required this.unit,
     required this.color,
     required this.min,
     required this.max,
     required this.onChanged,
   });
+
+  @override
+  State<_SmoothSensorControl> createState() => _SmoothSensorControlState();
+}
+
+class _SmoothSensorControlState extends State<_SmoothSensorControl> {
+  late double _localSetpoint;
+  Timer? _debounceTimer;
+  bool _isUserEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _localSetpoint = widget.initialSetpoint;
+  }
+
+  @override
+  void didUpdateWidget(_SmoothSensorControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only sync from provider if user is not actively editing
+    if (!_isUserEditing && widget.initialSetpoint != oldWidget.initialSetpoint) {
+      _localSetpoint = widget.initialSetpoint;
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  void _updateSetpoint(double newValue) {
+    if (newValue < widget.min || newValue > widget.max) return;
+    
+    setState(() {
+      _localSetpoint = newValue;
+      _isUserEditing = true;
+    });
+
+    // Debounce API call - wait 300ms after last tap
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      widget.onChanged(_localSetpoint);
+      // Reset editing state after a short delay
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() => _isUserEditing = false);
+        }
+      });
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -481,11 +566,11 @@ class _SensorControl extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: isDark
-              ? [color.withOpacity(0.15), color.withOpacity(0.08)]
-              : [Colors.white, color.withOpacity(0.05)],
+              ? [widget.color.withOpacity(0.15), widget.color.withOpacity(0.08)]
+              : [Colors.white, widget.color.withOpacity(0.05)],
         ),
         borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: color.withOpacity(0.3), width: 1.5),
+        border: Border.all(color: widget.color.withOpacity(0.3), width: 1.5),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
@@ -495,17 +580,18 @@ class _SensorControl extends StatelessWidget {
             padding: EdgeInsets.all(padding),
             child: Column(
               children: [
-                _SensorHeader(icon: icon, label: label, color: color),
+                _SensorHeader(icon: widget.icon, label: widget.label, color: widget.color),
                 SizedBox(height: ScreenUtils.getSpacing(context, 14)),
-                _ActualValue(actual: actual, unit: unit, color: color),
+                _ActualValue(actual: widget.actual, unit: widget.unit, color: widget.color),
                 SizedBox(height: ScreenUtils.getSpacing(context, 16)),
-                _SetpointControls(
-                  setpoint: setpoint,
-                  unit: unit,
-                  color: color,
-                  min: min,
-                  max: max,
-                  onChanged: onChanged,
+                _SmoothSetpointControls(
+                  setpoint: _localSetpoint,
+                  unit: widget.unit,
+                  color: widget.color,
+                  min: widget.min,
+                  max: widget.max,
+                  onIncrement: () => _updateSetpoint(_localSetpoint + 0.5),
+                  onDecrement: () => _updateSetpoint(_localSetpoint - 0.5),
                 ),
               ],
             ),
@@ -602,21 +688,24 @@ class _ActualValue extends StatelessWidget {
   }
 }
 
-class _SetpointControls extends StatelessWidget {
+/// Smooth setpoint controls with instant feedback
+class _SmoothSetpointControls extends StatelessWidget {
   final double setpoint;
   final String unit;
   final Color color;
   final double min;
   final double max;
-  final ValueChanged<double> onChanged;
+  final VoidCallback onIncrement;
+  final VoidCallback onDecrement;
 
-  const _SetpointControls({
+  const _SmoothSetpointControls({
     required this.setpoint,
     required this.unit,
     required this.color,
     required this.min,
     required this.max,
-    required this.onChanged,
+    required this.onIncrement,
+    required this.onDecrement,
   });
 
   @override
@@ -649,10 +738,11 @@ class _SetpointControls extends StatelessWidget {
               _ControlButton(
                 icon: Icons.remove,
                 color: color,
-                onPressed: setpoint > min ? () => onChanged(setpoint - 0.5) : null,
+                onPressed: setpoint > min ? onDecrement : null,
               ),
               SizedBox(width: ScreenUtils.getPadding(context, 14)),
-              Container(
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 100),
                 padding: EdgeInsets.symmetric(
                   horizontal: ScreenUtils.getPadding(context, 14),
                   vertical: ScreenUtils.getSpacing(context, 8),
@@ -661,12 +751,20 @@ class _SetpointControls extends StatelessWidget {
                   color: Colors.white.withOpacity(0.9),
                   borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 10)),
                 ),
-                child: Text(
-                  '${setpoint.toStringAsFixed(1)}$unit',
-                  style: TextStyle(
-                    fontSize: ScreenUtils.getFontSize(context, 16),
-                    fontWeight: FontWeight.bold,
-                    color: color,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 100),
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: child,
+                  ),
+                  child: Text(
+                    '${setpoint.toStringAsFixed(1)}$unit',
+                    key: ValueKey(setpoint),
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 16),
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
                   ),
                 ),
               ),
@@ -674,7 +772,7 @@ class _SetpointControls extends StatelessWidget {
               _ControlButton(
                 icon: Icons.add,
                 color: color,
-                onPressed: setpoint < max ? () => onChanged(setpoint + 0.5) : null,
+                onPressed: setpoint < max ? onIncrement : null,
               ),
             ],
           ),
@@ -739,14 +837,20 @@ class _ComponentStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final borderRadius = ScreenUtils.getBorderRadius(context, 18);
 
-    return Selector<AppProvider, DeviceStatus?>(
-      selector: (_, provider) => provider.getDeviceStatus(deviceId),
-      builder: (context, status, child) {
-        if (status == null) return const SizedBox.shrink();
+    return Selector<AppProvider, _ComponentStatusData>(
+      selector: (_, provider) {
+        final status = provider.getDeviceStatus(deviceId);
+        return _ComponentStatusData(
+          status: status,
+          isFanPending: provider.isCommandPending(deviceId, 'fan'),
+        );
+      },
+      builder: (context, data, child) {
+        if (data.status == null) return const SizedBox.shrink();
 
-        final state = status.state;
-        final isOnline = status.isOnline;
-        final isRunning = status.isRunning;
+        final state = data.status!.state;
+        final isOnline = data.status!.isOnline;
+        final isRunning = data.status!.isRunning;
 
         return Container(
           padding: ScreenUtils.getCardPadding(context),
@@ -800,7 +904,7 @@ class _ComponentStatus extends StatelessWidget {
                     ),
                     SizedBox(width: ScreenUtils.getPadding(context, 8)),
                     GestureDetector(
-                      onTap: (isOnline && isRunning)
+                      onTap: (isOnline && isRunning && !data.isFanPending)
                           ? () {
                               final currentSpeed = state?.fanSpeed ?? 0;
                               final newSpeed = (currentSpeed + 1) % 4;
@@ -813,6 +917,7 @@ class _ComponentStatus extends StatelessWidget {
                         isActive: state?.fan ?? false,
                         color: AppTheme.success,
                         isClickable: isOnline && isRunning,
+                        isPending: data.isFanPending,
                       ),
                     ),
                   ],
@@ -826,12 +931,30 @@ class _ComponentStatus extends StatelessWidget {
   }
 }
 
+class _ComponentStatusData {
+  final DeviceStatus? status;
+  final bool isFanPending;
+
+  _ComponentStatusData({required this.status, required this.isFanPending});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _ComponentStatusData &&
+          status == other.status &&
+          isFanPending == other.isFanPending;
+
+  @override
+  int get hashCode => status.hashCode ^ isFanPending.hashCode;
+}
+
 class _StatusIndicator extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isActive;
   final Color color;
   final bool isClickable;
+  final bool isPending;
 
   const _StatusIndicator({
     required this.icon,
@@ -839,6 +962,7 @@ class _StatusIndicator extends StatelessWidget {
     required this.isActive,
     required this.color,
     this.isClickable = false,
+    this.isPending = false,
   });
 
   @override
@@ -847,7 +971,8 @@ class _StatusIndicator extends StatelessWidget {
     final width = ScreenUtils.getPadding(context, 90);
     final borderRadius = ScreenUtils.getBorderRadius(context, 12);
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
       width: width,
       padding: EdgeInsets.all(ScreenUtils.getPadding(context, 10)),
       decoration: BoxDecoration(
@@ -869,6 +994,15 @@ class _StatusIndicator extends StatelessWidget {
           color: isActive ? color.withOpacity(0.5) : Theme.of(context).dividerColor.withOpacity(0.2),
           width: isActive ? 2 : 1,
         ),
+        boxShadow: isPending
+            ? [
+                BoxShadow(
+                  color: color.withOpacity(0.4),
+                  blurRadius: 8,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -879,15 +1013,24 @@ class _StatusIndicator extends StatelessWidget {
               color: isActive ? color.withOpacity(0.2) : Colors.transparent,
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              icon,
-              color: isActive ? color : (isDark ? Colors.white.withOpacity(0.4) : Colors.black54),
-              size: ScreenUtils.getIconSize(context, 18),
-            ),
+            child: isPending
+                ? SizedBox(
+                    width: ScreenUtils.getIconSize(context, 18),
+                    height: ScreenUtils.getIconSize(context, 18),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  )
+                : Icon(
+                    icon,
+                    color: isActive ? color : (isDark ? Colors.white.withOpacity(0.4) : Colors.black54),
+                    size: ScreenUtils.getIconSize(context, 18),
+                  ),
           ),
           SizedBox(height: ScreenUtils.getSpacing(context, 6)),
           Text(
-            label,
+            isPending ? 'Changing...' : label,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: ScreenUtils.getFontSize(context, 9),
@@ -916,7 +1059,7 @@ class _StatusIndicator extends StatelessWidget {
               ),
             ),
           ),
-          if (isClickable) ...[
+          if (isClickable && !isPending) ...[
             SizedBox(height: ScreenUtils.getSpacing(context, 4)),
             Icon(
               Icons.touch_app,

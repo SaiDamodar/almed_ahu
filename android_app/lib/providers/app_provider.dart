@@ -32,6 +32,10 @@ class AppProvider extends ChangeNotifier {
   Timer? _statusPollTimer;
   Timer? _notifyDebounceTimer;
   
+  // Optimistic UI tracking
+  final Map<String, _PendingCommand> _pendingCommands = {};
+  static const _commandTimeout = Duration(seconds: 10);
+  
   // Getters
   bool get isAuthenticated => _isAuthenticated;
   bool get isLoading => _isLoading;
@@ -49,6 +53,19 @@ class AppProvider extends ChangeNotifier {
       return _awsIoTService.getDeviceStatus(deviceId) ?? _deviceStatuses[deviceId];
     }
     return _deviceStatuses[deviceId];
+  }
+  
+  /// Check if a command is pending for a device
+  bool isCommandPending(String deviceId, [String? commandType]) {
+    final pending = _pendingCommands[deviceId];
+    if (pending == null) return false;
+    if (commandType != null && pending.type != commandType) return false;
+    // Check if command has timed out
+    if (DateTime.now().difference(pending.timestamp) > _commandTimeout) {
+      _pendingCommands.remove(deviceId);
+      return false;
+    }
+    return true;
   }
   
   /// Debounced notify to prevent excessive rebuilds
@@ -116,8 +133,10 @@ class AppProvider extends ChangeNotifier {
             debugPrint('Error loading admin data: $e');
           }
         } else {
+          // Regular user - load their assigned AHUs and start polling
           try {
-            await loadHospitals();
+            await _loadUserDeviceStatuses();
+            _startUserPolling();
           } catch (e) {
             debugPrint('Error loading hospital user data: $e');
           }
@@ -252,6 +271,12 @@ class AppProvider extends ChangeNotifier {
         
         await _saveAuthState();
         
+        // Load initial status for assigned AHUs
+        await _loadUserDeviceStatuses();
+        
+        // Start polling for user's AHUs
+        _startUserPolling();
+        
         // Register FCM token for push notifications
         await _registerFCMToken();
         
@@ -268,6 +293,16 @@ class AppProvider extends ChangeNotifier {
       _setLoading(false);
       return false;
     }
+  }
+  
+  /// Load device statuses for current user's assigned AHUs
+  Future<void> _loadUserDeviceStatuses() async {
+    final user = _currentUser;
+    if (user == null || user.assignedAhuIds.isEmpty) return;
+    
+    await Future.wait(
+      user.assignedAhuIds.map((id) => loadDeviceStatus(id)),
+    );
   }
 
   /// Check if Google user exists in system
@@ -337,6 +372,10 @@ class AppProvider extends ChangeNotifier {
         
         await _saveAuthState();
         
+        // Load initial status and start polling (if user has assigned AHUs)
+        await _loadUserDeviceStatuses();
+        _startUserPolling();
+        
         // Register FCM token for push notifications
         await _registerFCMToken();
         
@@ -381,6 +420,12 @@ class AppProvider extends ChangeNotifier {
         _currentUser = user;
         
         await _saveAuthState();
+        
+        // Load initial status for assigned AHUs
+        await _loadUserDeviceStatuses();
+        
+        // Start polling for user's AHUs
+        _startUserPolling();
         
         // Register FCM token for push notifications
         await _registerFCMToken();
@@ -470,12 +515,49 @@ class AppProvider extends ChangeNotifier {
     }
   }
   
-  /// Load device status
+  /// Load device status with pending command cross-check
   Future<void> loadDeviceStatus(String deviceId) async {
     try {
       final status = await _apiService.getDeviceStatus(deviceId);
       if (status != null) {
-        _deviceStatuses[deviceId] = status;
+        // Cross-check with pending commands
+        final pending = _pendingCommands[deviceId];
+        if (pending != null) {
+          final elapsed = DateTime.now().difference(pending.timestamp);
+          
+          // Check if command has timed out
+          if (elapsed > _commandTimeout) {
+            debugPrint('Command timeout for $deviceId - clearing pending');
+            _pendingCommands.remove(deviceId);
+            _deviceStatuses[deviceId] = status;
+          } else {
+            // Validate if cloud state matches expected state
+            bool stateMatches = true;
+            
+            if (pending.type == 'toggle' && pending.expectedRun != null) {
+              stateMatches = status.isRunning == pending.expectedRun;
+            } else if (pending.type == 'fan' && pending.expectedFanSpeed != null) {
+              stateMatches = status.state?.fanSpeed == pending.expectedFanSpeed;
+            }
+            
+            if (stateMatches) {
+              // Cloud confirmed our expected state - clear pending
+              debugPrint('✓ Cloud confirmed state for $deviceId');
+              _pendingCommands.remove(deviceId);
+              _deviceStatuses[deviceId] = status;
+            } else if (elapsed > const Duration(seconds: 3)) {
+              // Give some time for ESP to process, then accept cloud state
+              debugPrint('State mismatch for $deviceId after ${elapsed.inSeconds}s - accepting cloud state');
+              _pendingCommands.remove(deviceId);
+              _deviceStatuses[deviceId] = status;
+            }
+            // Otherwise keep optimistic state until confirmed or timeout
+          }
+        } else {
+          // No pending command - just update normally
+          _deviceStatuses[deviceId] = status;
+        }
+        
         // Use debounced notify to batch updates
         _debouncedNotify();
       }
@@ -506,16 +588,62 @@ class AppProvider extends ChangeNotifier {
     }
   }
   
-  /// Toggle AHU system (start/stop)
+  /// Toggle AHU system (start/stop) with optimistic UI update
   Future<void> toggleAhu(String deviceId) async {
     final status = _deviceStatuses[deviceId];
-    if (status == null) return;
+    if (status == null || status.state == null) return;
     
-    final command = status.isRunning
-        ? {'stop': true}
-        : {'start': true};
+    final newRunState = !status.isRunning;
+    final command = newRunState ? {'start': true} : {'stop': true};
     
-    await sendCommand(deviceId, command);
+    // Store pending command for cross-checking
+    _pendingCommands[deviceId] = _PendingCommand(
+      type: 'toggle',
+      expectedRun: newRunState,
+      timestamp: DateTime.now(),
+    );
+    
+    // Optimistic UI update - immediately show new state
+    _deviceStatuses[deviceId] = DeviceStatus(
+      deviceId: status.deviceId,
+      status: status.status,
+      telemetry: status.telemetry,
+      state: AhuState(
+        run: newRunState,
+        tempSet: status.state!.tempSet,
+        humSet: status.state!.humSet,
+        fan: newRunState ? status.state!.fan : false,
+        fanSpeed: newRunState ? status.state!.fanSpeed : 0,
+        cp: newRunState ? status.state!.cp : false,
+        heater: newRunState ? status.state!.heater : false,
+        m1: newRunState ? status.state!.m1 : false,
+        m2: newRunState ? status.state!.m2 : false,
+        ip: status.state!.ip,
+        m1Start: status.state!.m1Start,
+        m1Post: status.state!.m1Post,
+        m2Interval: status.state!.m2Interval,
+        m2Run: status.state!.m2Run,
+        m2Delay: status.state!.m2Delay,
+      ),
+      lastUpdate: status.lastUpdate,
+    );
+    notifyListeners();
+    
+    // Send command to cloud (don't await - fire and forget for faster UI)
+    sendCommand(deviceId, command).then((success) {
+      if (!success) {
+        // Revert on failure
+        _revertOptimisticUpdate(deviceId, status);
+      }
+    });
+  }
+  
+  /// Revert optimistic update on command failure
+  void _revertOptimisticUpdate(String deviceId, DeviceStatus originalStatus) {
+    _pendingCommands.remove(deviceId);
+    _deviceStatuses[deviceId] = originalStatus;
+    notifyListeners();
+    debugPrint('Reverted optimistic update for $deviceId');
   }
   
   /// Set temperature setpoint with optimistic update
@@ -584,13 +712,55 @@ class AppProvider extends ChangeNotifier {
     sendCommand(deviceId, {'humset': hum});
   }
   
-  /// Set fan speed (0=OFF, 1=LOW, 2=MED, 3=HIGH)
+  /// Set fan speed (0=OFF, 1=LOW, 2=MED, 3=HIGH) with optimistic UI update
   Future<void> setFanSpeed(String deviceId, int speed) async {
     if (speed < 0 || speed > 3) return;
-    await sendCommand(deviceId, {'fan': speed});
+    
+    final status = _deviceStatuses[deviceId];
+    if (status?.state == null) return;
+    
+    // Store pending command
+    _pendingCommands[deviceId] = _PendingCommand(
+      type: 'fan',
+      expectedFanSpeed: speed,
+      timestamp: DateTime.now(),
+    );
+    
+    // Optimistic UI update
+    _deviceStatuses[deviceId] = DeviceStatus(
+      deviceId: status!.deviceId,
+      status: status.status,
+      telemetry: status.telemetry,
+      state: AhuState(
+        run: status.state!.run,
+        tempSet: status.state!.tempSet,
+        humSet: status.state!.humSet,
+        fan: speed > 0,
+        fanSpeed: speed,
+        cp: status.state!.cp,
+        heater: status.state!.heater,
+        m1: status.state!.m1,
+        m2: status.state!.m2,
+        ip: status.state!.ip,
+        m1Start: status.state!.m1Start,
+        m1Post: status.state!.m1Post,
+        m2Interval: status.state!.m2Interval,
+        m2Run: status.state!.m2Run,
+        m2Delay: status.state!.m2Delay,
+      ),
+      lastUpdate: status.lastUpdate,
+    );
+    notifyListeners();
+    
+    // Send command (fire and forget)
+    sendCommand(deviceId, {'fan': speed}).then((success) {
+      if (!success) {
+        _revertOptimisticUpdate(deviceId, status);
+      }
+    });
   }
   
-  /// Start polling for device status updates
+  /// Start polling for device status updates (admin - polls all hospitals)
   void _startPolling() {
     _stopPolling();
     _statusPollTimer = Timer.periodic(
@@ -599,6 +769,22 @@ class AppProvider extends ChangeNotifier {
         for (final hospital in _hospitals.values) {
           for (final ahu in hospital.allAhus) {
             loadDeviceStatus(ahu.id);
+          }
+        }
+      },
+    );
+  }
+
+  /// Start polling for user's assigned AHUs
+  void _startUserPolling() {
+    _stopPolling();
+    _statusPollTimer = Timer.periodic(
+      const Duration(seconds: 2), // Faster polling for better UX
+      (timer) {
+        final user = _currentUser;
+        if (user != null) {
+          for (final ahuId in user.assignedAhuIds) {
+            loadDeviceStatus(ahuId);
           }
         }
       },
@@ -761,4 +947,23 @@ class AppProvider extends ChangeNotifier {
     _awsIoTService.disconnect();
     super.dispose();
   }
+}
+
+/// Helper class to track pending commands for optimistic UI
+class _PendingCommand {
+  final String type; // 'toggle', 'fan', 'temp', 'hum'
+  final bool? expectedRun;
+  final int? expectedFanSpeed;
+  final double? expectedTemp;
+  final double? expectedHum;
+  final DateTime timestamp;
+
+  _PendingCommand({
+    required this.type,
+    this.expectedRun,
+    this.expectedFanSpeed,
+    this.expectedTemp,
+    this.expectedHum,
+    required this.timestamp,
+  });
 }
