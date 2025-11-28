@@ -20,6 +20,10 @@
 #include <SensirionI2cSen66.h>
 #include <SensirionI2CSdp.h>
 
+// ========== FORWARD DECLARATIONS ==========
+// HEPA Filter Status enum (must be declared before functions)
+enum HEPAStatus { HEPA_LEAK, HEPA_NORMAL, HEPA_CLOGGING, HEPA_REPLACE_NOW };
+
 // ========== CONFIGURATION ==========
 #define SERIAL_BAUD      115200
 #define READ_INTERVAL_MS 2000    // Read sensors every 2 seconds
@@ -94,6 +98,46 @@ const char* getAQICategory(int aqi) {
     if (aqi <= 200) return "Unhealthy";
     if (aqi <= 300) return "Very Unhealthy";
     return "Hazardous";
+}
+
+// ========== HEPA FILTER STATUS ==========
+// Pressure thresholds for HEPA filter health
+#define HEPA_MIN_NORMAL     9.0    // Below = leak/weak airflow
+#define HEPA_MAX_NORMAL     25.0   // Above = clogging starts
+#define HEPA_REPLACE        40.0   // Above = replace immediately
+
+HEPAStatus getHEPAStatus(float pressure) {
+    float absP = abs(pressure);
+    if (absP < HEPA_MIN_NORMAL) return HEPA_LEAK;
+    if (absP <= HEPA_MAX_NORMAL) return HEPA_NORMAL;
+    if (absP <= HEPA_REPLACE) return HEPA_CLOGGING;
+    return HEPA_REPLACE_NOW;
+}
+
+const char* getHEPAStatusText(HEPAStatus status) {
+    switch (status) {
+        case HEPA_LEAK:        return "Weak Airflow / Leak";
+        case HEPA_NORMAL:      return "Normal Condition";
+        case HEPA_CLOGGING:    return "Filter Clogging";
+        case HEPA_REPLACE_NOW: return "Replace Required!";
+        default:               return "Unknown";
+    }
+}
+
+const char* getHEPAIcon(HEPAStatus status) {
+    switch (status) {
+        case HEPA_LEAK:        return "❌";
+        case HEPA_NORMAL:      return "🟢";
+        case HEPA_CLOGGING:    return "🟡";
+        case HEPA_REPLACE_NOW: return "🔴";
+        default:               return "⚪";
+    }
+}
+
+int getHEPAHealthPercent(float pressure) {
+    float absP = abs(pressure);
+    if (absP < HEPA_MIN_NORMAL || absP >= HEPA_REPLACE) return 0;
+    return constrain((int)(100.0 * (HEPA_REPLACE - absP) / (HEPA_REPLACE - HEPA_MIN_NORMAL)), 0, 100);
 }
 
 // ========== SETUP FUNCTIONS ==========
@@ -231,12 +275,28 @@ void printReadings() {
         Serial.println("\n❌ SEN66 not available");
     }
     
-    // Pressure Section
-    Serial.println("\n🔄 DIFFERENTIAL PRESSURE");
+    // HEPA Filter Status Section
+    Serial.println("\n🔄 HEPA FILTER STATUS");
     Serial.println("───────────────────────────────────────");
     if (sdp810Ready) {
+        HEPAStatus hepaStatus = getHEPAStatus(differentialPressure);
+        int hepaHealth = getHEPAHealthPercent(differentialPressure);
+        
+        Serial.printf("  Status:       %s %s\n", getHEPAIcon(hepaStatus), getHEPAStatusText(hepaStatus));
         Serial.printf("  Pressure:     %.2f Pa\n", differentialPressure);
-        Serial.printf("  SDP Temp:     %.1f °C\n", sdpTemperature);
+        Serial.printf("  Filter Health: %d%%\n", hepaHealth);
+        
+        // Health bar
+        Serial.print("  [");
+        int filled = hepaHealth / 5;
+        for (int i = 0; i < 20; i++) {
+            Serial.print(i < filled ? "█" : "░");
+        }
+        Serial.println("]");
+        
+        // Thresholds reference
+        Serial.println("  ────────────────────────────────");
+        Serial.println("  ❌ <9Pa=Leak  🟢 9-25Pa=OK  🟡 25-40Pa=Clog  🔴 >40Pa=Replace");
     } else {
         Serial.println("  ❌ SDP810 not available");
     }
@@ -263,7 +323,10 @@ void printCompactJSON() {
     }
     
     if (sdp810Ready) {
+        HEPAStatus hepaStatus = getHEPAStatus(differentialPressure);
         Serial.printf("\"diffPressure\":%.2f,", differentialPressure);
+        Serial.printf("\"hepaStatus\":\"%s\",", getHEPAStatusText(hepaStatus));
+        Serial.printf("\"hepaHealth\":%d,", getHEPAHealthPercent(differentialPressure));
         Serial.printf("\"sdpTemp\":%.1f", sdpTemperature);
     }
     
