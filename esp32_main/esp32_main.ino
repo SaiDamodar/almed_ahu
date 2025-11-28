@@ -5,6 +5,10 @@
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 #include <ArduinoJson.h>
+
+// ========== NEW SENSOR LIBRARIES (SEN66 + SDP810 Combo) ==========
+#include <SensirionI2cSen66.h>
+#include <SensirionI2CSdp.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include "soc/soc.h"
@@ -139,8 +143,8 @@ const uint16_t MQTT_PORT = 1883;
 String mqttHost = "10.42.0.1";
 unsigned long lastMqttAttempt = 0;
 
-// MQTT buffer size for large messages
-const int MQTT_BUFFER_SIZE = 512;
+// MQTT buffer size for large messages (increased for combo sensor data)
+const int MQTT_BUFFER_SIZE = 1024;
 
 // ---------- SHT45 ----------
 Adafruit_SHT4x sht4;
@@ -152,6 +156,33 @@ const float TEMP_JUMP_MAX = 12.0;
 const float HUM_JUMP_MAX  = 18.0;
 const float TEMP_FAIL_THRESHOLD = 5.0;
 const float HUM_FAIL_THRESHOLD = 10.0;
+
+// ---------- SEN66 + SDP810 Combo Sensors ----------
+SensirionI2cSen66 sen66;
+SensirionI2CSdp sdp810;
+
+// Sensor detection flags
+bool useSHT45 = false;      // Original sensor
+bool useSEN66 = false;      // New combo: air quality sensor
+bool useSDP810 = false;     // New combo: differential pressure sensor
+
+// SEN66 readings
+float sen66_pm1p0 = 0.0, sen66_pm2p5 = 0.0, sen66_pm4p0 = 0.0, sen66_pm10p0 = 0.0;
+float sen66_humidity = 0.0, sen66_temperature = 0.0;
+float sen66_vocIndex = 0.0, sen66_noxIndex = 0.0;
+uint16_t sen66_co2 = 0;
+int sen66_aqi = 0;
+
+// SDP810 readings
+float sdp810_pressure = 0.0;
+float sdp810_temperature = 0.0;
+String hepaStatus = "Unknown";
+int hepaHealthPercent = 0;
+
+// HEPA Filter Thresholds (Pa)
+#define HEPA_MIN_NORMAL     9.0
+#define HEPA_MAX_NORMAL     25.0
+#define HEPA_REPLACE        40.0
 
 // ---------- 5-Channel Relay Module (Active LOW: LOW=ON, HIGH=OFF) ----------
 #define PIN_MOTOR1  32   // Relay IN1 - Motor 1 (12V DC)
@@ -442,6 +473,51 @@ void motorLogMsg(const String& s){
   // MQTT logging disabled to keep connection stable
 }
 
+// ---------- AQI Calculation (EPA PM2.5 Standard) ----------
+int calculateAQI(float pm25) {
+  if (pm25 < 0) return 0;
+  if (pm25 > 500.4) return 500;
+  
+  // EPA breakpoints: {Clow, Chigh, Ilow, Ihigh}
+  float breakpoints[][4] = {
+    {0.0, 12.0, 0, 50},        // Good
+    {12.1, 35.4, 51, 100},     // Moderate
+    {35.5, 55.4, 101, 150},    // Unhealthy for Sensitive
+    {55.5, 150.4, 151, 200},   // Unhealthy
+    {150.5, 250.4, 201, 300},  // Very Unhealthy
+    {250.5, 500.4, 301, 500}   // Hazardous
+  };
+  
+  for (int i = 0; i < 6; i++) {
+    if (pm25 >= breakpoints[i][0] && pm25 <= breakpoints[i][1]) {
+      float Ilow = breakpoints[i][2], Ihigh = breakpoints[i][3];
+      float Clow = breakpoints[i][0], Chigh = breakpoints[i][1];
+      return (int)((Ihigh - Ilow) / (Chigh - Clow) * (pm25 - Clow) + Ilow);
+    }
+  }
+  return 0;
+}
+
+// ---------- HEPA Filter Status ----------
+void updateHEPAStatus(float pressure) {
+  float absP = abs(pressure);
+  
+  if (absP < HEPA_MIN_NORMAL) {
+    hepaStatus = "Weak Airflow/Leak";
+    hepaHealthPercent = 0;
+  } else if (absP <= HEPA_MAX_NORMAL) {
+    hepaStatus = "Normal";
+    hepaHealthPercent = (int)(100.0 * (HEPA_REPLACE - absP) / (HEPA_REPLACE - HEPA_MIN_NORMAL));
+  } else if (absP <= HEPA_REPLACE) {
+    hepaStatus = "Clogging";
+    hepaHealthPercent = (int)(100.0 * (HEPA_REPLACE - absP) / (HEPA_REPLACE - HEPA_MIN_NORMAL));
+  } else {
+    hepaStatus = "Replace Required";
+    hepaHealthPercent = 0;
+  }
+  hepaHealthPercent = constrain(hepaHealthPercent, 0, 100);
+}
+
 // ---------- Relay Control (Active LOW: LOW=ON, HIGH=OFF) ----------
 inline void systemWrite(bool on){ digitalWrite(PIN_SYSTEM, on ? LOW : HIGH); }
 inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? LOW : HIGH); }
@@ -589,7 +665,7 @@ void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
 void publishTelemetryAWS(){
   if(!client.connected()) return;
   
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<768> doc;  // Increased for combo sensor data
   doc["type"] = "telemetry";
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
@@ -606,7 +682,29 @@ void publishTelemetryAWS(){
   doc["thing"]=THINGNAME;
   doc["ts"]  = millis();
   
-  char buf[512];
+  // Indicate which sensor type is active
+  doc["sensorType"] = useSEN66 ? "combo" : "sht45";
+  
+  // Add SEN66 data if combo sensors active
+  if (useSEN66) {
+    doc["aqi"] = sen66_aqi;
+    doc["pm1p0"] = sen66_pm1p0;
+    doc["pm2p5"] = sen66_pm2p5;
+    doc["pm4p0"] = sen66_pm4p0;
+    doc["pm10p0"] = sen66_pm10p0;
+    doc["voc"] = sen66_vocIndex;
+    doc["nox"] = sen66_noxIndex;
+    doc["co2"] = sen66_co2;
+  }
+  
+  // Add SDP810 data if combo sensors active
+  if (useSDP810) {
+    doc["diffPressure"] = sdp810_pressure;
+    doc["hepaStatus"] = hepaStatus;
+    doc["hepaHealth"] = hepaHealthPercent;
+  }
+  
+  char buf[768];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   
   bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
@@ -616,10 +714,13 @@ void publishTelemetryAWS(){
 }
 
 void publishTelemetryLocal(){
-  if(!mqttLocal.connected()) return;
+  if(!mqttLocal.connected()) {
+    Serial.println("⚠️ [Local MQTT] Not connected - skipping telemetry");
+    return;
+  }
   
-  // Dashboard-compatible format (exact match to original backup)
-  StaticJsonDocument<384> doc;
+  // Dashboard-compatible format (extended for combo sensors)
+  StaticJsonDocument<768> doc;  // Increased for combo sensor data
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
   doc["m1"]  = m1Active;
@@ -633,9 +734,37 @@ void publishTelemetryLocal(){
   doc["humSet"]  = humSet;
   doc["ts"]  = millis();
   
-  char buf[448];
+  // Indicate which sensor type is active
+  doc["sensorType"] = useSEN66 ? "combo" : "sht45";
+  
+  // Add SEN66 data if combo sensors active
+  if (useSEN66) {
+    doc["aqi"] = sen66_aqi;
+    doc["pm1p0"] = sen66_pm1p0;
+    doc["pm2p5"] = sen66_pm2p5;
+    doc["pm4p0"] = sen66_pm4p0;
+    doc["pm10p0"] = sen66_pm10p0;
+    doc["voc"] = sen66_vocIndex;
+    doc["nox"] = sen66_noxIndex;
+    doc["co2"] = sen66_co2;
+  }
+  
+  // Add SDP810 data if combo sensors active
+  if (useSDP810) {
+    doc["diffPressure"] = sdp810_pressure;
+    doc["hepaStatus"] = hepaStatus;
+    doc["hepaHealth"] = hepaHealthPercent;
+  }
+  
+  char buf[896];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+  
+  bool success = mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+  if (success) {
+    Serial.println("✓ Telemetry → Local MQTT (" + tTelemetry() + ")");
+  } else {
+    Serial.println("❌ Telemetry publish to Local MQTT FAILED!");
+  }
 }
 
 void publishStateAWS(){
@@ -750,6 +879,54 @@ void readSensorIfDue(){
     Serial.println("SHT45 read failed");
     pushTempHTML("SHT45 read failed");
   }
+}
+
+// ---------- Read SEN66 + SDP810 Combo Sensors ----------
+void readComboSensorsIfDue() {
+  unsigned long now = millis();
+  if (now - lastSensorAt < SENSOR_PERIOD) return;
+  lastSensorAt = now;
+  
+  static char errMsg[64];
+  
+  // Read SEN66 (Air Quality)
+  if (useSEN66) {
+    int16_t err = sen66.readMeasuredValues(
+      sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
+      sen66_humidity, sen66_temperature,
+      sen66_vocIndex, sen66_noxIndex, sen66_co2
+    );
+    
+    if (err == 0) {
+      // Update filtered values for control logic
+      filtTempC = sen66_temperature;
+      filtHum = sen66_humidity;
+      sen66_aqi = calculateAQI(sen66_pm2p5);
+      
+      Serial.printf("[SEN66] T:%.1f°C H:%.1f%% PM2.5:%.1f AQI:%d CO2:%d\n",
+                    sen66_temperature, sen66_humidity, sen66_pm2p5, sen66_aqi, sen66_co2);
+    } else {
+      errorToString(err, errMsg, sizeof(errMsg));
+      Serial.printf("[SEN66] Read error: %s\n", errMsg);
+    }
+  }
+  
+  // Read SDP810 (Differential Pressure)
+  if (useSDP810) {
+    uint16_t err = sdp810.readMeasurement(sdp810_pressure, sdp810_temperature);
+    
+    if (err == 0) {
+      updateHEPAStatus(sdp810_pressure);
+      Serial.printf("[SDP810] Pressure:%.2fPa HEPA:%s (%d%%)\n",
+                    sdp810_pressure, hepaStatus.c_str(), hepaHealthPercent);
+    } else {
+      errorToString(err, errMsg, sizeof(errMsg));
+      Serial.printf("[SDP810] Read error: %s\n", errMsg);
+    }
+  }
+  
+  // Publish telemetry
+  publishTelemetryLocal();
 }
 
 // ---------- Serial Commands (Standalone Control) ----------
@@ -1421,6 +1598,7 @@ void ensureMqtt(){
   lastMqttAttempt = now;
 
   mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
+  mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);  // Set buffer size for combo sensor data
   mqttLocal.setCallback(onMqttMessageLocal);
 
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
@@ -1496,12 +1674,54 @@ void setup()
   esp_task_wdt_reset();
 
   Wire.begin(21,22);
-  if (!sht4.begin()){
-    Serial.println("⚠️ SHT45 not found!");
+  
+  // ========== AUTO-DETECT SENSORS ==========
+  Serial.println("\n--- Detecting Sensors ---");
+  
+  // Try SEN66 first (combo sensor)
+  sen66.begin(Wire, SEN66_I2C_ADDR_6B);
+  int16_t sen66Err = sen66.deviceReset();
+  if (sen66Err == 0) {
+    delay(1200);  // SEN66 needs warmup after reset
+    sen66Err = sen66.startContinuousMeasurement();
+    if (sen66Err == 0) {
+      useSEN66 = true;
+      Serial.println("✓ SEN66 detected and ready (Air Quality Sensor)");
+    }
+  }
+  
+  // Try SDP810 (differential pressure)
+  sdp810.begin(Wire, SDP8XX_I2C_ADDRESS_0);
+  sdp810.stopContinuousMeasurement();
+  delay(100);
+  uint16_t sdp810Err = sdp810.startContinuousMeasurementWithDiffPressureTCompAndAveraging();
+  if (sdp810Err == 0) {
+    useSDP810 = true;
+    Serial.println("✓ SDP810 detected and ready (HEPA Pressure Sensor)");
+  }
+  
+  // If combo sensors not found, try SHT45 (original sensor)
+  if (!useSEN66) {
+    if (!sht4.begin()){
+      Serial.println("⚠️ SHT45 not found!");
+    } else {
+      sht4.setPrecision(SHT4X_HIGH_PRECISION);
+      sht4.setHeater(SHT4X_NO_HEATER);
+      useSHT45 = true;
+      Serial.println("✓ SHT45 detected and ready (Original Sensor)");
+    }
+  }
+  
+  // Print sensor configuration summary
+  Serial.println("\n--- Sensor Configuration ---");
+  if (useSEN66 || useSDP810) {
+    Serial.println("  Mode: COMBO SENSORS (SEN66 + SDP810)");
+    Serial.println("  Data: AQI, PM, VOC, NOx, CO2, HEPA Status");
+  } else if (useSHT45) {
+    Serial.println("  Mode: ORIGINAL (SHT45 only)");
+    Serial.println("  Data: Temperature, Humidity");
   } else {
-    sht4.setPrecision(SHT4X_HIGH_PRECISION);
-    sht4.setHeater(SHT4X_NO_HEATER);
-    Serial.println("✓ SHT45 ready");
+    Serial.println("  ⚠️ WARNING: No sensors detected!");
   }
   
   esp_task_wdt_reset();
@@ -1739,7 +1959,23 @@ void loop()
   }
 
   handleSerial();
-  readSensorIfDue();
+  
+  // Read appropriate sensors based on what's detected
+  if (useSEN66 || useSDP810) {
+    readComboSensorsIfDue();
+  } else if (useSHT45) {
+    readSensorIfDue();
+  }
+  
+  // Debug: Log sensor mode periodically
+  static unsigned long lastSensorModeLog = 0;
+  if (now - lastSensorModeLog > 30000) {
+    lastSensorModeLog = now;
+    Serial.printf("[DEBUG] Sensor Mode: SEN66=%s SDP810=%s SHT45=%s\n", 
+                  useSEN66 ? "YES" : "NO", 
+                  useSDP810 ? "YES" : "NO", 
+                  useSHT45 ? "YES" : "NO");
+  }
 
   // Publish to AWS every 5 seconds
   static unsigned long lastAWS = 0;
