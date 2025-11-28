@@ -63,7 +63,6 @@ class _DashboardTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dividerColor = theme.dividerColor.withOpacity(0.1);
     
     // Reduced padding for 7-inch Pi display (1024x600)
     return Padding(

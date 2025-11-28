@@ -8,7 +8,6 @@ import '../models/ahu_telemetry.dart';
 import '../models/ahu_state.dart';
 import '../models/ahu_log.dart';
 import '../widgets/motor_timing_dialog.dart';
-import '../widgets/air_quality_display.dart';
 
 /// Modern AHU control screen
 class AhuControlScreen extends StatefulWidget {
@@ -1273,48 +1272,6 @@ class _LogItem extends StatelessWidget {
 // ============ COMPACT AIR QUALITY & HEPA BOXES (Combo Sensors Only) ============
 // Optimized for 7-inch 1024x600 Pi display with tap-to-expand
 
-class _AirQualitySection extends StatelessWidget {
-  final String ahuId;
-
-  const _AirQualitySection({required this.ahuId});
-
-  @override
-  Widget build(BuildContext context) {
-    return Selector<AppProvider, AhuTelemetry?>(
-      selector: (_, provider) => provider.getTelemetry(ahuId),
-      builder: (context, telemetry, _) {
-        // Only show if combo sensors with air quality data
-        if (telemetry == null || !telemetry.hasAirQualityData) {
-          return const SizedBox.shrink();
-        }
-        
-        return const SizedBox.shrink(); // Replaced by _ComboSensorBoxes
-      },
-    );
-  }
-}
-
-class _HepaStatusSection extends StatelessWidget {
-  final String ahuId;
-
-  const _HepaStatusSection({required this.ahuId});
-
-  @override
-  Widget build(BuildContext context) {
-    return Selector<AppProvider, AhuTelemetry?>(
-      selector: (_, provider) => provider.getTelemetry(ahuId),
-      builder: (context, telemetry, _) {
-        // Only show if combo sensors with HEPA data
-        if (telemetry == null || !telemetry.hasHepaData) {
-          return const SizedBox.shrink();
-        }
-        
-        return const SizedBox.shrink(); // Replaced by _ComboSensorBoxes
-      },
-    );
-  }
-}
-
 /// Compact AQI & HEPA boxes for 7-inch Pi display - tap to see full details
 class _ComboSensorBoxes extends StatelessWidget {
   final String ahuId;
@@ -1807,7 +1764,7 @@ class _DetailCard extends StatelessWidget {
             Text(label, style: TextStyle(fontSize: 10, color: isDark ? Colors.white60 : Colors.black54)),
             const SizedBox(height: 2),
             Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
-            Text(unit, style: TextStyle(fontSize: 8, color: isDark ? Colors.white40 : Colors.black38)),
+            Text(unit, style: TextStyle(fontSize: 8, color: isDark ? Colors.white54 : Colors.black38)),
           ],
         ),
       ),
