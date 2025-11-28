@@ -1269,10 +1269,10 @@ class _LogItem extends StatelessWidget {
   }
 }
 
-// ============ COMPACT AIR QUALITY & HEPA BOXES (Combo Sensors Only) ============
-// Optimized for 7-inch 1024x600 Pi display with tap-to-expand
+// ============ PM READINGS & HEPA STATUS (Combo Sensors Only) ============
+// Optimized for 7-inch 1024x600 Pi display
 
-/// Compact AQI & HEPA boxes for 7-inch Pi display - tap to see full details
+/// PM readings row (large) + HEPA box below (expandable)
 class _ComboSensorBoxes extends StatelessWidget {
   final String ahuId;
 
@@ -1292,26 +1292,22 @@ class _ComboSensorBoxes extends StatelessWidget {
 
         return Column(
           children: [
-            Row(
-              children: [
-                if (hasAqi)
-                  Expanded(
-                    child: _CompactAqiBox(
-                      telemetry: telemetry,
-                      onTap: () => _showAqiDetails(context, telemetry),
-                    ),
-                  ),
-                if (hasAqi && hasHepa) const SizedBox(width: 12),
-                if (hasHepa)
-                  Expanded(
-                    child: _CompactHepaBox(
-                      telemetry: telemetry,
-                      onTap: () => _showHepaDetails(context, telemetry),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
+            // PM Readings - Full width row with all values
+            if (hasAqi) ...[
+              _PmReadingsRow(
+                telemetry: telemetry,
+                onTap: () => _showAqiDetails(context, telemetry),
+              ),
+              const SizedBox(height: 12),
+            ],
+            // HEPA Status - Expandable box below
+            if (hasHepa) ...[
+              _ExpandableHepaBox(
+                telemetry: telemetry,
+                onTap: () => _showHepaDetails(context, telemetry),
+              ),
+              const SizedBox(height: 16),
+            ],
           ],
         );
       },
@@ -1337,18 +1333,18 @@ class _ComboSensorBoxes extends StatelessWidget {
   }
 }
 
-/// Compact AQI box - fits in 7-inch display
-class _CompactAqiBox extends StatelessWidget {
+/// Full-width PM readings row - shows PM1.0, PM2.5, PM4.0, PM10, VOC, NOx, CO2
+class _PmReadingsRow extends StatelessWidget {
   final AhuTelemetry telemetry;
   final VoidCallback onTap;
 
-  const _CompactAqiBox({required this.telemetry, required this.onTap});
+  const _PmReadingsRow({required this.telemetry, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final aqi = telemetry.aqi ?? 0;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final aqiColor = Color(telemetry.aqiColorValue);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Material(
       color: Colors.transparent,
@@ -1356,75 +1352,125 @@ class _CompactAqiBox extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [aqiColor.withOpacity(0.15), aqiColor.withOpacity(0.08)],
-            ),
+            color: theme.cardColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: aqiColor.withOpacity(0.3), width: 1.5),
+            border: Border.all(color: theme.dividerColor.withOpacity(0.1)),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // AQI Circle
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [aqiColor, aqiColor.withOpacity(0.7)],
+              // Header with AQI badge
+              Row(
+                children: [
+                  Icon(Icons.air_rounded, color: aqiColor, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Air Quality',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                   ),
-                  boxShadow: [
-                    BoxShadow(color: aqiColor.withOpacity(0.3), blurRadius: 8),
-                  ],
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      '$aqi',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        height: 1,
-                      ),
+                  const Spacer(),
+                  // AQI Badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: aqiColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: aqiColor.withOpacity(0.4)),
                     ),
-                    const Text(
-                      'AQI',
-                      style: TextStyle(fontSize: 8, color: Colors.white70),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'AQI ${telemetry.aqi ?? '--'}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: aqiColor,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          telemetry.aqiCategory,
+                          style: TextStyle(fontSize: 10, color: aqiColor),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(Icons.chevron_right_rounded, color: Colors.grey, size: 20),
+                ],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      telemetry.aqiCategory,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: aqiColor,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'CO₂: ${telemetry.co2 ?? '--'} ppm',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isDark ? Colors.white60 : Colors.black54,
-                      ),
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 14),
+              // PM Values - Large display
+              Row(
+                children: [
+                  _PmValueCard(
+                    label: 'PM1.0',
+                    value: telemetry.pm1p0?.toStringAsFixed(0) ?? '--',
+                    unit: 'µg/m³',
+                    color: const Color(0xFF4CAF50),
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _PmValueCard(
+                    label: 'PM2.5',
+                    value: telemetry.pm2p5?.toStringAsFixed(0) ?? '--',
+                    unit: 'µg/m³',
+                    color: const Color(0xFFFF9800),
+                    isDark: isDark,
+                    isHighlight: true, // PM2.5 is key metric
+                  ),
+                  const SizedBox(width: 8),
+                  _PmValueCard(
+                    label: 'PM4.0',
+                    value: telemetry.pm4p0?.toStringAsFixed(0) ?? '--',
+                    unit: 'µg/m³',
+                    color: const Color(0xFF2196F3),
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _PmValueCard(
+                    label: 'PM10',
+                    value: telemetry.pm10p0?.toStringAsFixed(0) ?? '--',
+                    unit: 'µg/m³',
+                    color: const Color(0xFF9C27B0),
+                    isDark: isDark,
+                  ),
+                ],
               ),
-              Icon(Icons.chevron_right_rounded, color: aqiColor.withOpacity(0.6)),
+              const SizedBox(height: 12),
+              // VOC, NOx, CO2 row
+              Row(
+                children: [
+                  _SmallValueChip(
+                    label: 'VOC',
+                    value: '${telemetry.voc ?? '--'}',
+                    color: const Color(0xFF00BCD4),
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _SmallValueChip(
+                    label: 'NOx',
+                    value: '${telemetry.nox ?? '--'}',
+                    color: const Color(0xFFE91E63),
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _SmallValueChip(
+                    label: 'CO₂',
+                    value: '${telemetry.co2 ?? '--'} ppm',
+                    color: const Color(0xFF607D8B),
+                    isDark: isDark,
+                    isWide: true,
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -1433,12 +1479,130 @@ class _CompactAqiBox extends StatelessWidget {
   }
 }
 
-/// Compact HEPA box - fits in 7-inch display
-class _CompactHepaBox extends StatelessWidget {
+/// PM value card with large number
+class _PmValueCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String unit;
+  final Color color;
+  final bool isDark;
+  final bool isHighlight;
+
+  const _PmValueCard({
+    required this.label,
+    required this.value,
+    required this.unit,
+    required this.color,
+    required this.isDark,
+    this.isHighlight = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(isHighlight ? 0.15 : 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: isHighlight 
+              ? Border.all(color: color.withOpacity(0.4), width: 1.5)
+              : null,
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: isHighlight ? 22 : 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            Text(
+              unit,
+              style: TextStyle(
+                fontSize: 8,
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small value chip for VOC, NOx, CO2
+class _SmallValueChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  final bool isDark;
+  final bool isWide;
+
+  const _SmallValueChip({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.isDark,
+    this.isWide = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      flex: isWide ? 2 : 1,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '$label: ',
+              style: TextStyle(
+                fontSize: 11,
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Flexible(
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Expandable HEPA status box
+class _ExpandableHepaBox extends StatelessWidget {
   final AhuTelemetry telemetry;
   final VoidCallback onTap;
 
-  const _CompactHepaBox({required this.telemetry, required this.onTap});
+  const _ExpandableHepaBox({required this.telemetry, required this.onTap});
 
   Color _getHepaColor() {
     final status = telemetry.hepaStatus ?? '';
@@ -1459,7 +1623,8 @@ class _CompactHepaBox extends StatelessWidget {
   Widget build(BuildContext context) {
     final hepaColor = _getHepaColor();
     final health = telemetry.hepaHealth ?? 0;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Material(
       color: Colors.transparent,
@@ -1467,22 +1632,18 @@ class _CompactHepaBox extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [hepaColor.withOpacity(0.15), hepaColor.withOpacity(0.08)],
-            ),
+            color: theme.cardColor,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: hepaColor.withOpacity(0.3), width: 1.5),
           ),
           child: Row(
             children: [
-              // HEPA Icon Circle
+              // HEPA Icon
               Container(
-                width: 50,
-                height: 50,
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: LinearGradient(
@@ -1492,24 +1653,71 @@ class _CompactHepaBox extends StatelessWidget {
                     BoxShadow(color: hepaColor.withOpacity(0.3), blurRadius: 8),
                   ],
                 ),
-                child: Icon(_getHepaIcon(), color: Colors.white, size: 24),
+                child: Icon(_getHepaIcon(), color: Colors.white, size: 26),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 16),
+              // HEPA Info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'HEPA $health%',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: hepaColor,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          'HEPA Filter',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: hepaColor.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            telemetry.hepaStatus ?? 'Unknown',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: hepaColor,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 8),
+                    // Health bar
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: health / 100,
+                              minHeight: 8,
+                              backgroundColor: isDark ? Colors.white12 : Colors.black12,
+                              valueColor: AlwaysStoppedAnimation<Color>(hepaColor),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          '$health%',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: hepaColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
                     Text(
-                      '${telemetry.diffPressure?.toStringAsFixed(1) ?? '--'} Pa',
+                      'ΔP: ${telemetry.diffPressure?.toStringAsFixed(1) ?? '--'} Pa',
                       style: TextStyle(
                         fontSize: 11,
                         color: isDark ? Colors.white60 : Colors.black54,
@@ -1526,6 +1734,7 @@ class _CompactHepaBox extends StatelessWidget {
     );
   }
 }
+
 
 /// Full AQI details bottom sheet
 class _AqiDetailsSheet extends StatelessWidget {
