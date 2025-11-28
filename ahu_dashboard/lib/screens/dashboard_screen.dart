@@ -475,6 +475,44 @@ class _SensorRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isCombo = data.telemetry?.isComboSensor ?? false;
+    
+    if (isCombo && data.telemetry?.hasAirQualityData == true) {
+      // Combo sensor layout with AQI
+      return Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _SensorDisplay(
+                  icon: Icons.thermostat_rounded,
+                  value: data.telemetry?.temp?.toStringAsFixed(1) ?? '--',
+                  unit: '°C',
+                  color: AppTheme.temperature,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _SensorDisplay(
+                  icon: Icons.water_drop_rounded,
+                  value: data.telemetry?.hum?.toStringAsFixed(1) ?? '--',
+                  unit: '%',
+                  color: AppTheme.humidity,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _AqiMiniDisplay(telemetry: data.telemetry),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _ComboSensorIndicators(telemetry: data.telemetry),
+        ],
+      );
+    }
+    
+    // Original SHT45 layout
     return Row(
       children: [
         Expanded(
@@ -495,6 +533,197 @@ class _SensorRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AqiMiniDisplay extends StatelessWidget {
+  final AhuTelemetry? telemetry;
+
+  const _AqiMiniDisplay({required this.telemetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final aqi = telemetry?.aqi ?? 0;
+    final aqiColor = Color(telemetry?.aqiColorValue ?? 0xFF9E9E9E);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [aqiColor.withOpacity(0.2), aqiColor.withOpacity(0.1)],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: aqiColor.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: aqiColor,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '$aqi',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'AQI',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: aqiColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComboSensorIndicators extends StatelessWidget {
+  final AhuTelemetry? telemetry;
+
+  const _ComboSensorIndicators({required this.telemetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          // CO2
+          if (telemetry?.co2 != null)
+            _MiniIndicator(
+              icon: Icons.co2,
+              value: '${telemetry!.co2}',
+              unit: 'ppm',
+              color: Colors.teal,
+            ),
+          if (telemetry?.pm2p5 != null) ...[
+            const SizedBox(width: 8),
+            _MiniIndicator(
+              icon: Icons.grain_rounded,
+              value: telemetry!.pm2p5!.toStringAsFixed(1),
+              unit: 'PM2.5',
+              color: const Color(0xFFFF9800),
+            ),
+          ],
+          if (telemetry?.hasHepaData == true) ...[
+            const SizedBox(width: 8),
+            _HepaMiniBadge(telemetry: telemetry!),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniIndicator extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String unit;
+  final Color color;
+
+  const _MiniIndicator({
+    required this.icon,
+    required this.value,
+    required this.unit,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 2),
+          Text(
+            unit,
+            style: TextStyle(
+              fontSize: 9,
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HepaMiniBadge extends StatelessWidget {
+  final AhuTelemetry telemetry;
+
+  const _HepaMiniBadge({required this.telemetry});
+
+  Color _getHepaColor() {
+    final status = telemetry.hepaStatus ?? '';
+    if (status.contains('Normal')) return const Color(0xFF4CAF50);
+    if (status.contains('Clogging')) return const Color(0xFFFF9800);
+    if (status.contains('Replace')) return const Color(0xFFF44336);
+    return const Color(0xFFF44336);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _getHepaColor();
+    final health = telemetry.hepaHealth ?? 0;
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.filter_alt_rounded, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            '$health%',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

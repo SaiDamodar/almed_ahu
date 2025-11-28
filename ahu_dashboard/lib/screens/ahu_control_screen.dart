@@ -8,6 +8,7 @@ import '../models/ahu_telemetry.dart';
 import '../models/ahu_state.dart';
 import '../models/ahu_log.dart';
 import '../widgets/motor_timing_dialog.dart';
+import '../widgets/air_quality_display.dart';
 
 /// Modern AHU control screen
 class AhuControlScreen extends StatefulWidget {
@@ -55,6 +56,10 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                       // Temperature & Humidity
                       _SensorControls(ahuId: widget.ahuId),
                       const SizedBox(height: 20),
+                      // Air Quality Display (combo sensors only)
+                      _AirQualitySection(ahuId: widget.ahuId),
+                      // HEPA Status Display (combo sensors only)
+                      _HepaStatusSection(ahuId: widget.ahuId),
                       // Component Status
                       _ComponentStatus(ahuId: widget.ahuId),
                       const SizedBox(height: 20),
@@ -1258,6 +1263,60 @@ class _LogItem extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ============ AIR QUALITY SECTION (Combo Sensors Only) ============
+
+class _AirQualitySection extends StatelessWidget {
+  final String ahuId;
+
+  const _AirQualitySection({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, AhuTelemetry?>(
+      selector: (_, provider) => provider.getTelemetry(ahuId),
+      builder: (context, telemetry, _) {
+        // Only show if combo sensors with air quality data
+        if (telemetry == null || !telemetry.hasAirQualityData) {
+          return const SizedBox.shrink();
+        }
+        
+        return Column(
+          children: [
+            AirQualityDisplay(telemetry: telemetry),
+            const SizedBox(height: 20),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _HepaStatusSection extends StatelessWidget {
+  final String ahuId;
+
+  const _HepaStatusSection({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, AhuTelemetry?>(
+      selector: (_, provider) => provider.getTelemetry(ahuId),
+      builder: (context, telemetry, _) {
+        // Only show if combo sensors with HEPA data
+        if (telemetry == null || !telemetry.hasHepaData) {
+          return const SizedBox.shrink();
+        }
+        
+        return Column(
+          children: [
+            HepaStatusDisplay(telemetry: telemetry),
+            const SizedBox(height: 20),
+          ],
+        );
+      },
     );
   }
 }
