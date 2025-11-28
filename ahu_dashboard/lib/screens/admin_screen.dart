@@ -70,9 +70,9 @@ class _AdminScreenState extends State<AdminScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // Top bar with back button and logout
+              // Top bar with back button and logout - optimized for 7-inch Pi
               Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Row(
                   children: [
                     // ALMED Branding
@@ -183,7 +183,10 @@ class _AdminScreenState extends State<AdminScreen> {
                     }
 
                     return SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      physics: const BouncingScrollPhysics(
+                        parent: AlwaysScrollableScrollPhysics(),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -435,10 +438,9 @@ class _AdminScreenState extends State<AdminScreen> {
                           ],
                           
                           // Motor Timing Configuration Section
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 16),
                           Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 20),
-                            padding: const EdgeInsets.all(24),
+                            padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
                               color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(20),

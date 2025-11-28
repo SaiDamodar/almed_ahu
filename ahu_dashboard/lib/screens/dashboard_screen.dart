@@ -63,10 +63,15 @@ class _DashboardTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 650; // Pi display is 600px height
     
-    // Reduced padding for 7-inch Pi display (1024x600)
+    // Compact padding for 7-inch Pi display (1024x600)
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.symmetric(
+        horizontal: isSmallScreen ? 12 : 16, 
+        vertical: isSmallScreen ? 6 : 12,
+      ),
       child: Row(
         children: [
           // ALMED Branding
@@ -74,36 +79,47 @@ class _DashboardTopBar extends StatelessWidget {
             'ALMED',
             style: TextStyle(
               fontFamily: 'Verdana',
-              fontSize: 24,
+              fontSize: isSmallScreen ? 18 : 24,
               fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : Colors.black,
               letterSpacing: 1.5,
             ),
           ),
-          const SizedBox(width: 20),
+          SizedBox(width: isSmallScreen ? 12 : 20),
           Container(
             width: 1,
-            height: 30,
+            height: isSmallScreen ? 22 : 30,
             color: theme.dividerColor.withOpacity(0.3),
           ),
-          const SizedBox(width: 20),
+          SizedBox(width: isSmallScreen ? 12 : 20),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   'Dashboard',
-                  style: theme.textTheme.displayLarge?.copyWith(fontSize: 28),
+                  style: theme.textTheme.displayLarge?.copyWith(
+                    fontSize: isSmallScreen ? 20 : 28,
+                  ),
                 ),
-                const SizedBox(height: 4),
-                const _ConnectionStatus(),
+                if (!isSmallScreen) ...[
+                  const SizedBox(height: 4),
+                  const _ConnectionStatus(),
+                ],
               ],
             ),
           ),
-          // Action buttons
+          if (isSmallScreen)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: _ConnectionStatus(),
+            ),
+          // Action buttons - smaller on Pi
           _ActionButton(
             icon: Icons.logout_rounded,
             tooltip: 'Logout',
+            isSmall: isSmallScreen,
             onPressed: () {
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -111,10 +127,10 @@ class _DashboardTopBar extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(width: 12),
-          const _ThemeToggleButton(),
-          const SizedBox(width: 12),
-          const _AdminSettingsButton(),
+          SizedBox(width: isSmallScreen ? 6 : 12),
+          _ThemeToggleButton(isSmall: isSmallScreen),
+          SizedBox(width: isSmallScreen ? 6 : 12),
+          _AdminSettingsButton(isSmall: isSmallScreen),
         ],
       ),
     );
@@ -155,11 +171,13 @@ class _ActionButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
+  final bool isSmall;
   
   const _ActionButton({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.isSmall = false,
   });
 
   @override
@@ -168,13 +186,19 @@ class _ActionButton extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.cardColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(isSmall ? 8 : 12),
         border: Border.all(
           color: theme.dividerColor.withOpacity(0.1),
         ),
       ),
       child: IconButton(
-        icon: Icon(icon),
+        icon: Icon(icon, size: isSmall ? 18 : 24),
+        iconSize: isSmall ? 18 : 24,
+        padding: EdgeInsets.all(isSmall ? 6 : 8),
+        constraints: BoxConstraints(
+          minWidth: isSmall ? 32 : 48,
+          minHeight: isSmall ? 32 : 48,
+        ),
         onPressed: onPressed,
         tooltip: tooltip,
       ),
@@ -183,7 +207,9 @@ class _ActionButton extends StatelessWidget {
 }
 
 class _ThemeToggleButton extends StatelessWidget {
-  const _ThemeToggleButton();
+  final bool isSmall;
+  
+  const _ThemeToggleButton({this.isSmall = false});
 
   @override
   Widget build(BuildContext context) {
@@ -194,7 +220,7 @@ class _ThemeToggleButton extends StatelessWidget {
         return Container(
           decoration: BoxDecoration(
             color: theme.cardColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(isSmall ? 8 : 12),
             border: Border.all(
               color: theme.dividerColor.withOpacity(0.1),
             ),
@@ -202,6 +228,13 @@ class _ThemeToggleButton extends StatelessWidget {
           child: IconButton(
             icon: Icon(
               isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              size: isSmall ? 18 : 24,
+            ),
+            iconSize: isSmall ? 18 : 24,
+            padding: EdgeInsets.all(isSmall ? 6 : 8),
+            constraints: BoxConstraints(
+              minWidth: isSmall ? 32 : 48,
+              minHeight: isSmall ? 32 : 48,
             ),
             onPressed: () => context.read<ThemeProvider>().toggleTheme(),
           ),
@@ -212,7 +245,9 @@ class _ThemeToggleButton extends StatelessWidget {
 }
 
 class _AdminSettingsButton extends StatelessWidget {
-  const _AdminSettingsButton();
+  final bool isSmall;
+  
+  const _AdminSettingsButton({this.isSmall = false});
 
   @override
   Widget build(BuildContext context) {
@@ -227,13 +262,19 @@ class _AdminSettingsButton extends StatelessWidget {
         return Container(
           decoration: BoxDecoration(
             color: theme.cardColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(isSmall ? 8 : 12),
             border: Border.all(
               color: theme.dividerColor.withOpacity(0.1),
             ),
           ),
           child: IconButton(
-            icon: const Icon(Icons.settings_rounded),
+            icon: Icon(Icons.settings_rounded, size: isSmall ? 18 : 24),
+            iconSize: isSmall ? 18 : 24,
+            padding: EdgeInsets.all(isSmall ? 6 : 8),
+            constraints: BoxConstraints(
+              minWidth: isSmall ? 32 : 48,
+              minHeight: isSmall ? 32 : 48,
+            ),
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (context) => const AdminScreen()),
@@ -253,6 +294,9 @@ class _AhuCardsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 650;
+    
     return Selector<AppProvider, List<AhuUnit>>(
       selector: (_, provider) => provider.ahuUnits,
       builder: (context, ahus, _) {
@@ -265,12 +309,15 @@ class _AhuCardsList extends StatelessWidget {
             physics: const BouncingScrollPhysics(
               parent: AlwaysScrollableScrollPhysics(),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            padding: EdgeInsets.symmetric(
+              horizontal: isSmallScreen ? 10 : 16, 
+              vertical: isSmallScreen ? 8 : 16,
+            ),
             child: Wrap(
-              spacing: 16,
-              runSpacing: 16,
+              spacing: isSmallScreen ? 10 : 16,
+              runSpacing: isSmallScreen ? 10 : 16,
               alignment: WrapAlignment.center,
-              children: ahus.map((ahu) => _ModernAhuCard(ahu: ahu)).toList(),
+              children: ahus.map((ahu) => _ModernAhuCard(ahu: ahu, isSmallScreen: isSmallScreen)).toList(),
             ),
           ),
         );
@@ -348,8 +395,9 @@ class _AhuCardData {
 
 class _ModernAhuCard extends StatelessWidget {
   final AhuUnit ahu;
+  final bool isSmallScreen;
 
-  const _ModernAhuCard({required this.ahu});
+  const _ModernAhuCard({required this.ahu, this.isSmallScreen = false});
 
   @override
   Widget build(BuildContext context) {
@@ -364,9 +412,11 @@ class _ModernAhuCard extends StatelessWidget {
         final isRunning = data.state?.run ?? false;
         final theme = Theme.of(context);
 
-        // Optimized for 7-inch 1024x600 Pi display - fits 2 cards side by side
+        // Optimized for 7-inch 1024x600 Pi display - fits 2-3 cards
+        final cardWidth = isSmallScreen ? 310.0 : 320.0;
+        
         return SizedBox(
-          width: 320,
+          width: cardWidth,
           child: Material(
             color: Colors.transparent,
             child: InkWell(
@@ -377,27 +427,27 @@ class _ModernAhuCard extends StatelessWidget {
                   ),
                 );
               },
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(isSmallScreen ? 16 : 24),
               child: Container(
                 decoration: BoxDecoration(
                   color: theme.cardColor,
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(isSmallScreen ? 16 : 24),
                   border: Border.all(
                     color: theme.dividerColor.withOpacity(0.1),
                   ),
                 ),
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Header with status
-                    _CardHeader(ahu: ahu, isOnline: isOnline),
-                    const SizedBox(height: 16),
+                    _CardHeader(ahu: ahu, isOnline: isOnline, isSmallScreen: isSmallScreen),
+                    SizedBox(height: isSmallScreen ? 10 : 16),
                     // Sensors
-                    _SensorRow(data: data),
-                    const SizedBox(height: 12),
+                    _SensorRow(data: data, isSmallScreen: isSmallScreen),
+                    SizedBox(height: isSmallScreen ? 8 : 12),
                     // Status chips
-                    _StatusChips(data: data, isRunning: isRunning),
+                    _StatusChips(data: data, isRunning: isRunning, isSmallScreen: isSmallScreen),
                   ],
                 ),
               ),
@@ -412,8 +462,9 @@ class _ModernAhuCard extends StatelessWidget {
 class _CardHeader extends StatelessWidget {
   final AhuUnit ahu;
   final bool isOnline;
+  final bool isSmallScreen;
   
-  const _CardHeader({required this.ahu, required this.isOnline});
+  const _CardHeader({required this.ahu, required this.isOnline, this.isSmallScreen = false});
 
   @override
   Widget build(BuildContext context) {
@@ -428,38 +479,45 @@ class _CardHeader extends StatelessWidget {
             children: [
               Text(
                 ahu.name,
-                style: theme.textTheme.displayMedium?.copyWith(fontSize: 22),
+                style: theme.textTheme.displayMedium?.copyWith(
+                  fontSize: isSmallScreen ? 18 : 22,
+                ),
               ),
-              const SizedBox(height: 4),
+              SizedBox(height: isSmallScreen ? 2 : 4),
               Text(
                 '${ahu.room.toUpperCase()} • ${ahu.site}',
-                style: theme.textTheme.bodyMedium,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: isSmallScreen ? 11 : 14,
+                ),
               ),
             ],
           ),
         ),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: EdgeInsets.symmetric(
+            horizontal: isSmallScreen ? 8 : 12, 
+            vertical: isSmallScreen ? 4 : 6,
+          ),
           decoration: BoxDecoration(
             color: statusColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(isSmallScreen ? 8 : 12),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 6,
-                height: 6,
+                width: isSmallScreen ? 5 : 6,
+                height: isSmallScreen ? 5 : 6,
                 decoration: BoxDecoration(
                   color: statusColor,
                   shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 6),
+              SizedBox(width: isSmallScreen ? 4 : 6),
               Text(
                 isOnline ? 'Online' : 'Offline',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: isSmallScreen ? 10 : 12,
                   fontWeight: FontWeight.w600,
                   color: statusColor,
                 ),
@@ -474,8 +532,9 @@ class _CardHeader extends StatelessWidget {
 
 class _SensorRow extends StatelessWidget {
   final _AhuCardData data;
+  final bool isSmallScreen;
   
-  const _SensorRow({required this.data});
+  const _SensorRow({required this.data, this.isSmallScreen = false});
 
   @override
   Widget build(BuildContext context) {
@@ -489,15 +548,17 @@ class _SensorRow extends StatelessWidget {
             value: data.telemetry?.temp?.toStringAsFixed(1) ?? '--',
             unit: '°C',
             color: AppTheme.temperature,
+            isSmallScreen: isSmallScreen,
           ),
         ),
-        const SizedBox(width: 12),
+        SizedBox(width: isSmallScreen ? 8 : 12),
         Expanded(
           child: _SensorDisplay(
             icon: Icons.water_drop_rounded,
             value: data.telemetry?.hum?.toStringAsFixed(1) ?? '--',
             unit: '%',
             color: AppTheme.humidity,
+            isSmallScreen: isSmallScreen,
           ),
         ),
       ],
@@ -510,26 +571,28 @@ class _SensorDisplay extends StatelessWidget {
   final String value;
   final String unit;
   final Color color;
+  final bool isSmallScreen;
 
   const _SensorDisplay({
     required this.icon,
     required this.value,
     required this.unit,
     required this.color,
+    this.isSmallScreen = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(isSmallScreen ? 10 : 16),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(isSmallScreen ? 12 : 16),
       ),
       child: Column(
         children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 8),
+          Icon(icon, color: color, size: isSmallScreen ? 22 : 28),
+          SizedBox(height: isSmallScreen ? 4 : 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -537,7 +600,7 @@ class _SensorDisplay extends StatelessWidget {
               Text(
                 value,
                 style: TextStyle(
-                  fontSize: 24,
+                  fontSize: isSmallScreen ? 18 : 24,
                   fontWeight: FontWeight.bold,
                   color: color,
                 ),
@@ -545,7 +608,7 @@ class _SensorDisplay extends StatelessWidget {
               Text(
                 unit,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: isSmallScreen ? 10 : 14,
                   fontWeight: FontWeight.w600,
                   color: color.withOpacity(0.7),
                 ),
@@ -561,34 +624,39 @@ class _SensorDisplay extends StatelessWidget {
 class _StatusChips extends StatelessWidget {
   final _AhuCardData data;
   final bool isRunning;
+  final bool isSmallScreen;
   
-  const _StatusChips({required this.data, required this.isRunning});
+  const _StatusChips({required this.data, required this.isRunning, this.isSmallScreen = false});
 
   @override
   Widget build(BuildContext context) {
     return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+      spacing: isSmallScreen ? 6 : 8,
+      runSpacing: isSmallScreen ? 6 : 8,
       children: [
         _StatusChip(
           label: 'Running',
           isActive: isRunning,
           color: AppTheme.success,
+          isSmallScreen: isSmallScreen,
         ),
         _StatusChip(
           label: 'CP',
           isActive: data.state?.cp ?? false,
           color: AppTheme.info,
+          isSmallScreen: isSmallScreen,
         ),
         _StatusChip(
           label: 'Heater',
           isActive: data.state?.heater ?? false,
           color: AppTheme.info,
+          isSmallScreen: isSmallScreen,
         ),
         _StatusChip(
           label: _getFanLabel(data.state?.fanSpeed ?? 0),
           isActive: data.state?.fan ?? false,
           color: AppTheme.success,
+          isSmallScreen: isSmallScreen,
         ),
       ],
     );
@@ -609,11 +677,13 @@ class _StatusChip extends StatelessWidget {
   final String label;
   final bool isActive;
   final Color color;
+  final bool isSmallScreen;
 
   const _StatusChip({
     required this.label,
     required this.isActive,
     required this.color,
+    this.isSmallScreen = false,
   });
 
   @override
@@ -621,19 +691,22 @@ class _StatusChip extends StatelessWidget {
     final theme = Theme.of(context);
     
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: EdgeInsets.symmetric(
+        horizontal: isSmallScreen ? 8 : 12, 
+        vertical: isSmallScreen ? 4 : 6,
+      ),
       decoration: BoxDecoration(
         color: isActive ? color.withOpacity(0.15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(isSmallScreen ? 6 : 10),
         border: Border.all(
           color: isActive ? color : theme.dividerColor.withOpacity(0.3),
-          width: 1.5,
+          width: isSmallScreen ? 1 : 1.5,
         ),
       ),
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: isSmallScreen ? 10 : 12,
           fontWeight: FontWeight.w600,
           color: isActive ? color : theme.textTheme.bodyMedium?.color,
         ),
