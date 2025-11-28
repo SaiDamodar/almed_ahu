@@ -500,6 +500,559 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
+
+        /* ===== PM / Air Quality Section (Combo Sensors) ===== */
+        .pm-section {
+            display: none;
+            margin-bottom: 20px;
+        }
+        
+        .pm-section.active {
+            display: block;
+        }
+        
+        .pm-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 20px;
+        }
+        
+        .pm-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        
+        .pm-header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .pm-header-icon {
+            width: 20px;
+            height: 20px;
+            color: var(--primary);
+        }
+        
+        .pm-header-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--on-surface);
+        }
+        
+        .aqi-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .aqi-badge.good {
+            background: rgba(76, 175, 80, 0.15);
+            color: #4CAF50;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
+        
+        .aqi-badge.moderate {
+            background: rgba(255, 193, 7, 0.15);
+            color: #FFC107;
+            border: 1px solid rgba(255, 193, 7, 0.3);
+        }
+        
+        .aqi-badge.unhealthy-sensitive {
+            background: rgba(255, 152, 0, 0.15);
+            color: #FF9800;
+            border: 1px solid rgba(255, 152, 0, 0.3);
+        }
+        
+        .aqi-badge.unhealthy {
+            background: rgba(244, 67, 54, 0.15);
+            color: #F44336;
+            border: 1px solid rgba(244, 67, 54, 0.3);
+        }
+        
+        .aqi-badge.very-unhealthy {
+            background: rgba(156, 39, 176, 0.15);
+            color: #9C27B0;
+            border: 1px solid rgba(156, 39, 176, 0.3);
+        }
+        
+        .aqi-badge.hazardous {
+            background: rgba(128, 0, 0, 0.15);
+            color: #800000;
+            border: 1px solid rgba(128, 0, 0, 0.3);
+        }
+        
+        .pm-values-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        
+        .pm-value-card {
+            padding: 12px 8px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .pm-value-card.pm1 { background: rgba(76, 175, 80, 0.1); }
+        .pm-value-card.pm25 { 
+            background: rgba(255, 152, 0, 0.15); 
+            border: 1.5px solid rgba(255, 152, 0, 0.4);
+        }
+        .pm-value-card.pm4 { background: rgba(33, 150, 243, 0.1); }
+        .pm-value-card.pm10 { background: rgba(156, 39, 176, 0.1); }
+        
+        .pm-value-label {
+            font-size: 10px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .pm-value-card.pm1 .pm-value-label { color: #4CAF50; }
+        .pm-value-card.pm25 .pm-value-label { color: #FF9800; }
+        .pm-value-card.pm4 .pm-value-label { color: #2196F3; }
+        .pm-value-card.pm10 .pm-value-label { color: #9C27B0; }
+        
+        .pm-value-number {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--on-surface);
+            margin-bottom: 2px;
+        }
+        
+        .pm-value-card.pm25 .pm-value-number {
+            font-size: 24px;
+        }
+        
+        .pm-value-unit {
+            font-size: 8px;
+            color: var(--text-secondary);
+        }
+        
+        .gas-values-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        
+        .gas-value-card {
+            padding: 10px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .gas-value-card.voc { background: rgba(0, 188, 212, 0.1); }
+        .gas-value-card.nox { background: rgba(233, 30, 99, 0.1); }
+        .gas-value-card.co2 { background: rgba(96, 125, 139, 0.1); }
+        
+        .gas-value-label {
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .gas-value-card.voc .gas-value-label { color: #00BCD4; }
+        .gas-value-card.nox .gas-value-label { color: #E91E63; }
+        .gas-value-card.co2 .gas-value-label { color: #607D8B; }
+        
+        .gas-value-number {
+            font-size: 16px;
+            font-weight: bold;
+            color: var(--on-surface);
+        }
+        
+        .gas-value-unit {
+            font-size: 9px;
+            color: var(--text-secondary);
+        }
+
+        /* ===== HEPA Filter Section ===== */
+        .hepa-section {
+            display: none;
+            margin-bottom: 20px;
+        }
+        
+        .hepa-section.active {
+            display: block;
+        }
+        
+        .hepa-card {
+            background: var(--surface);
+            border-radius: 16px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .hepa-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .hepa-card.normal {
+            border: 1.5px solid rgba(76, 175, 80, 0.4);
+        }
+        
+        .hepa-card.clogging {
+            border: 1.5px solid rgba(255, 152, 0, 0.4);
+        }
+        
+        .hepa-card.replace {
+            border: 1.5px solid rgba(244, 67, 54, 0.4);
+        }
+        
+        .hepa-card.leak {
+            border: 1.5px solid rgba(244, 67, 54, 0.4);
+        }
+        
+        .hepa-icon-circle {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .hepa-card.normal .hepa-icon-circle {
+            background: linear-gradient(135deg, #4CAF50, rgba(76, 175, 80, 0.7));
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+        }
+        
+        .hepa-card.clogging .hepa-icon-circle {
+            background: linear-gradient(135deg, #FF9800, rgba(255, 152, 0, 0.7));
+            box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
+        }
+        
+        .hepa-card.replace .hepa-icon-circle,
+        .hepa-card.leak .hepa-icon-circle {
+            background: linear-gradient(135deg, #F44336, rgba(244, 67, 54, 0.7));
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3);
+        }
+        
+        .hepa-icon-circle svg {
+            width: 26px;
+            height: 26px;
+            color: white;
+        }
+        
+        .hepa-info {
+            flex: 1;
+        }
+        
+        .hepa-title-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        
+        .hepa-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--on-surface);
+        }
+        
+        .hepa-status-badge {
+            font-size: 10px;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+        
+        .hepa-card.normal .hepa-status-badge {
+            background: rgba(76, 175, 80, 0.15);
+            color: #4CAF50;
+        }
+        
+        .hepa-card.clogging .hepa-status-badge {
+            background: rgba(255, 152, 0, 0.15);
+            color: #FF9800;
+        }
+        
+        .hepa-card.replace .hepa-status-badge,
+        .hepa-card.leak .hepa-status-badge {
+            background: rgba(244, 67, 54, 0.15);
+            color: #F44336;
+        }
+        
+        .hepa-health-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+        
+        .hepa-progress {
+            flex: 1;
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .hepa-progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s, background 0.3s;
+        }
+        
+        .hepa-card.normal .hepa-progress-fill { background: #4CAF50; }
+        .hepa-card.clogging .hepa-progress-fill { background: #FF9800; }
+        .hepa-card.replace .hepa-progress-fill,
+        .hepa-card.leak .hepa-progress-fill { background: #F44336; }
+        
+        .hepa-health-percent {
+            font-size: 14px;
+            font-weight: bold;
+            min-width: 40px;
+            text-align: right;
+        }
+        
+        .hepa-card.normal .hepa-health-percent { color: #4CAF50; }
+        .hepa-card.clogging .hepa-health-percent { color: #FF9800; }
+        .hepa-card.replace .hepa-health-percent,
+        .hepa-card.leak .hepa-health-percent { color: #F44336; }
+        
+        .hepa-pressure {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        
+        .hepa-arrow {
+            color: var(--text-secondary);
+        }
+
+        /* ===== HEPA Modal ===== */
+        .hepa-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }
+        
+        .hepa-modal-overlay.active {
+            display: flex;
+        }
+        
+        .hepa-modal {
+            background: var(--surface);
+            border-radius: 24px;
+            padding: 24px;
+            width: 90%;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease;
+        }
+        
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .hepa-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        
+        .hepa-modal-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--on-surface);
+        }
+        
+        .hepa-modal-close {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: var(--background);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .hepa-modal-close:hover {
+            background: var(--border);
+        }
+        
+        .hepa-modal-status {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        
+        .hepa-modal-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+        }
+        
+        .hepa-modal-icon.normal {
+            background: linear-gradient(135deg, #4CAF50, rgba(76, 175, 80, 0.7));
+            box-shadow: 0 8px 24px rgba(76, 175, 80, 0.4);
+        }
+        
+        .hepa-modal-icon.clogging {
+            background: linear-gradient(135deg, #FF9800, rgba(255, 152, 0, 0.7));
+            box-shadow: 0 8px 24px rgba(255, 152, 0, 0.4);
+        }
+        
+        .hepa-modal-icon.replace,
+        .hepa-modal-icon.leak {
+            background: linear-gradient(135deg, #F44336, rgba(244, 67, 54, 0.7));
+            box-shadow: 0 8px 24px rgba(244, 67, 54, 0.4);
+        }
+        
+        .hepa-modal-icon svg {
+            width: 40px;
+            height: 40px;
+            color: white;
+        }
+        
+        .hepa-modal-status-text {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        
+        .hepa-modal-status-text.normal { color: #4CAF50; }
+        .hepa-modal-status-text.clogging { color: #FF9800; }
+        .hepa-modal-status-text.replace,
+        .hepa-modal-status-text.leak { color: #F44336; }
+        
+        .hepa-modal-health {
+            margin-bottom: 24px;
+        }
+        
+        .hepa-modal-health-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        
+        .hepa-modal-progress {
+            height: 12px;
+            background: var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        
+        .hepa-modal-progress-fill {
+            height: 100%;
+            border-radius: 6px;
+            transition: width 0.3s;
+        }
+        
+        .hepa-modal-progress-fill.normal { background: #4CAF50; }
+        .hepa-modal-progress-fill.clogging { background: #FF9800; }
+        .hepa-modal-progress-fill.replace,
+        .hepa-modal-progress-fill.leak { background: #F44336; }
+        
+        .hepa-modal-health-value {
+            font-size: 28px;
+            font-weight: bold;
+            text-align: center;
+        }
+        
+        .hepa-modal-health-value.normal { color: #4CAF50; }
+        .hepa-modal-health-value.clogging { color: #FF9800; }
+        .hepa-modal-health-value.replace,
+        .hepa-modal-health-value.leak { color: #F44336; }
+        
+        .hepa-modal-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .hepa-detail-card {
+            background: var(--background);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+        
+        .hepa-detail-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        
+        .hepa-detail-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--on-surface);
+        }
+        
+        .hepa-modal-legend {
+            background: var(--background);
+            border-radius: 12px;
+            padding: 16px;
+        }
+        
+        .hepa-legend-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+        
+        .hepa-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        
+        .hepa-legend-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .hepa-legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        
+        .hepa-legend-dot.green { background: #4CAF50; }
+        .hepa-legend-dot.yellow { background: #FF9800; }
+        .hepa-legend-dot.red { background: #F44336; }
     </style>
 </head>
 <body>
@@ -603,6 +1156,153 @@
                                 <button class="glossy-button" onclick="adjustSetpoint('hum', 0.5)" id="hum-plus">+</button>
                             </div>
                             <div class="setpoint-range">30% - 80%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PM / Air Quality Section (Combo Sensors Only) -->
+                <div class="pm-section" id="pm-section">
+                    <div class="pm-card">
+                        <div class="pm-header">
+                            <div class="pm-header-left">
+                                <svg class="pm-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"></path>
+                                </svg>
+                                <span class="pm-header-title">Air Quality</span>
+                            </div>
+                            <div class="aqi-badge good" id="aqi-badge">
+                                <span id="aqi-value">AQI --</span>
+                                <span id="aqi-category">--</span>
+                            </div>
+                        </div>
+                        <div class="pm-values-grid">
+                            <div class="pm-value-card pm1">
+                                <div class="pm-value-label">PM1.0</div>
+                                <div class="pm-value-number" id="pm1-value">--</div>
+                                <div class="pm-value-unit">µg/m³</div>
+                            </div>
+                            <div class="pm-value-card pm25">
+                                <div class="pm-value-label">PM2.5</div>
+                                <div class="pm-value-number" id="pm25-value">--</div>
+                                <div class="pm-value-unit">µg/m³</div>
+                            </div>
+                            <div class="pm-value-card pm4">
+                                <div class="pm-value-label">PM4.0</div>
+                                <div class="pm-value-number" id="pm4-value">--</div>
+                                <div class="pm-value-unit">µg/m³</div>
+                            </div>
+                            <div class="pm-value-card pm10">
+                                <div class="pm-value-label">PM10</div>
+                                <div class="pm-value-number" id="pm10-value">--</div>
+                                <div class="pm-value-unit">µg/m³</div>
+                            </div>
+                        </div>
+                        <div class="gas-values-grid">
+                            <div class="gas-value-card voc">
+                                <span class="gas-value-label">VOC: </span>
+                                <span class="gas-value-number" id="voc-value">--</span>
+                                <span class="gas-value-unit"> index</span>
+                            </div>
+                            <div class="gas-value-card nox">
+                                <span class="gas-value-label">NOx: </span>
+                                <span class="gas-value-number" id="nox-value">--</span>
+                                <span class="gas-value-unit"> index</span>
+                            </div>
+                            <div class="gas-value-card co2">
+                                <span class="gas-value-label">CO₂: </span>
+                                <span class="gas-value-number" id="co2-value">--</span>
+                                <span class="gas-value-unit"> ppm</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HEPA Filter Section (Combo Sensors Only) -->
+                <div class="hepa-section" id="hepa-section">
+                    <div class="hepa-card normal" id="hepa-card" onclick="showHepaModal()">
+                        <div class="hepa-icon-circle">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="hepa-icon">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                        </div>
+                        <div class="hepa-info">
+                            <div class="hepa-title-row">
+                                <span class="hepa-title">HEPA Filter</span>
+                                <span class="hepa-status-badge" id="hepa-status-badge">Normal</span>
+                            </div>
+                            <div class="hepa-health-bar">
+                                <div class="hepa-progress">
+                                    <div class="hepa-progress-fill" id="hepa-progress" style="width: 0%;"></div>
+                                </div>
+                                <span class="hepa-health-percent" id="hepa-percent">--%</span>
+                            </div>
+                            <div class="hepa-pressure">ΔP: <span id="hepa-pressure">--</span> Pa</div>
+                        </div>
+                        <div class="hepa-arrow">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HEPA Details Modal -->
+                <div class="hepa-modal-overlay" id="hepa-modal" onclick="closeHepaModal(event)">
+                    <div class="hepa-modal" onclick="event.stopPropagation()">
+                        <div class="hepa-modal-header">
+                            <span class="hepa-modal-title">HEPA Filter Status</span>
+                            <button class="hepa-modal-close" onclick="closeHepaModal()">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="hepa-modal-status">
+                            <div class="hepa-modal-icon normal" id="hepa-modal-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="hepa-modal-icon-svg">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                </svg>
+                            </div>
+                            <div class="hepa-modal-status-text normal" id="hepa-modal-status-text">Normal Condition</div>
+                        </div>
+                        <div class="hepa-modal-health">
+                            <div class="hepa-modal-health-label">Filter Health</div>
+                            <div class="hepa-modal-progress">
+                                <div class="hepa-modal-progress-fill normal" id="hepa-modal-progress" style="width: 0%;"></div>
+                            </div>
+                            <div class="hepa-modal-health-value normal" id="hepa-modal-health-value">--%</div>
+                        </div>
+                        <div class="hepa-modal-details">
+                            <div class="hepa-detail-card">
+                                <div class="hepa-detail-label">Differential Pressure</div>
+                                <div class="hepa-detail-value" id="hepa-modal-pressure">-- Pa</div>
+                            </div>
+                            <div class="hepa-detail-card">
+                                <div class="hepa-detail-label">Normal Range</div>
+                                <div class="hepa-detail-value">9-25 Pa</div>
+                            </div>
+                        </div>
+                        <div class="hepa-modal-legend">
+                            <div class="hepa-legend-title">Status Legend</div>
+                            <div class="hepa-legend-item">
+                                <div class="hepa-legend-dot red"></div>
+                                <span>Weak Airflow / Leak: &lt; 9 Pa</span>
+                            </div>
+                            <div class="hepa-legend-item">
+                                <div class="hepa-legend-dot green"></div>
+                                <span>Normal Condition: 9-25 Pa</span>
+                            </div>
+                            <div class="hepa-legend-item">
+                                <div class="hepa-legend-dot yellow"></div>
+                                <span>Filter Clogging: 25-40 Pa</span>
+                            </div>
+                            <div class="hepa-legend-item">
+                                <div class="hepa-legend-dot red"></div>
+                                <span>Replace Required: &gt; 40 Pa</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -803,6 +1503,23 @@
                 : getNum(state.humSet !== undefined ? state.humSet : telemetry.humSet, 55.0);
             document.getElementById('hum-setpoint').textContent = `${humSet.toFixed(1)}%`;
 
+            // Detect combo sensor and show PM/HEPA sections
+            const sensorType = telemetry.sensorType || 'sht45';
+            const isComboSensor = sensorType === 'combo';
+            
+            const pmSection = document.getElementById('pm-section');
+            const hepaSection = document.getElementById('hepa-section');
+            
+            if (isComboSensor) {
+                pmSection.classList.add('active');
+                hepaSection.classList.add('active');
+                updatePmValues(telemetry);
+                updateHepaStatus(telemetry);
+            } else {
+                pmSection.classList.remove('active');
+                hepaSection.classList.remove('active');
+            }
+
             // Update components
             const cpVal = telemetry.cp !== undefined ? telemetry.cp : state.cp;
             const heaterVal = telemetry.heater !== undefined ? telemetry.heater : state.heater;
@@ -818,6 +1535,164 @@
             updateComponent('m1', toBool(m1Val));
             updateComponent('m2', toBool(m2Val));
             updateComponent('fan', toBool(fanVal), fanSpeed);
+        }
+
+        function updatePmValues(telemetry) {
+            // PM values
+            const pm1 = getNum(telemetry.pm1p0);
+            const pm25 = getNum(telemetry.pm2p5);
+            const pm4 = getNum(telemetry.pm4p0);
+            const pm10 = getNum(telemetry.pm10p0);
+            const voc = getNum(telemetry.voc);
+            const nox = getNum(telemetry.nox);
+            const co2 = getNum(telemetry.co2);
+            const aqi = getNum(telemetry.aqi);
+
+            document.getElementById('pm1-value').textContent = pm1 !== null ? Math.round(pm1) : '--';
+            document.getElementById('pm25-value').textContent = pm25 !== null ? Math.round(pm25) : '--';
+            document.getElementById('pm4-value').textContent = pm4 !== null ? Math.round(pm4) : '--';
+            document.getElementById('pm10-value').textContent = pm10 !== null ? Math.round(pm10) : '--';
+            document.getElementById('voc-value').textContent = voc !== null ? Math.round(voc) : '--';
+            document.getElementById('nox-value').textContent = nox !== null ? Math.round(nox) : '--';
+            document.getElementById('co2-value').textContent = co2 !== null ? Math.round(co2) : '--';
+
+            // AQI badge
+            const aqiBadge = document.getElementById('aqi-badge');
+            const aqiValue = document.getElementById('aqi-value');
+            const aqiCategory = document.getElementById('aqi-category');
+            
+            if (aqi !== null) {
+                aqiValue.textContent = `AQI ${Math.round(aqi)}`;
+                
+                // Determine category and color
+                let category, badgeClass;
+                if (aqi <= 50) {
+                    category = 'Good';
+                    badgeClass = 'good';
+                } else if (aqi <= 100) {
+                    category = 'Moderate';
+                    badgeClass = 'moderate';
+                } else if (aqi <= 150) {
+                    category = 'Sensitive';
+                    badgeClass = 'unhealthy-sensitive';
+                } else if (aqi <= 200) {
+                    category = 'Unhealthy';
+                    badgeClass = 'unhealthy';
+                } else if (aqi <= 300) {
+                    category = 'Very Unhealthy';
+                    badgeClass = 'very-unhealthy';
+                } else {
+                    category = 'Hazardous';
+                    badgeClass = 'hazardous';
+                }
+                
+                aqiCategory.textContent = category;
+                aqiBadge.className = `aqi-badge ${badgeClass}`;
+            } else {
+                aqiValue.textContent = 'AQI --';
+                aqiCategory.textContent = '--';
+                aqiBadge.className = 'aqi-badge good';
+            }
+        }
+
+        function updateHepaStatus(telemetry) {
+            const hepaCard = document.getElementById('hepa-card');
+            const hepaStatusBadge = document.getElementById('hepa-status-badge');
+            const hepaProgress = document.getElementById('hepa-progress');
+            const hepaPercent = document.getElementById('hepa-percent');
+            const hepaPressure = document.getElementById('hepa-pressure');
+            const hepaIcon = document.getElementById('hepa-icon');
+
+            const status = telemetry.hepaStatus || 'Unknown';
+            const health = getNum(telemetry.hepaHealth) || 0;
+            const pressure = getNum(telemetry.diffPressure);
+
+            // Update progress bar
+            hepaProgress.style.width = `${health}%`;
+            hepaPercent.textContent = `${Math.round(health)}%`;
+            hepaPressure.textContent = pressure !== null ? pressure.toFixed(1) : '--';
+
+            // Determine status class and update card
+            let statusClass = 'normal';
+            let iconPath = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+            
+            if (status.includes('Normal')) {
+                statusClass = 'normal';
+                hepaStatusBadge.textContent = 'Normal';
+            } else if (status.includes('Clogging')) {
+                statusClass = 'clogging';
+                hepaStatusBadge.textContent = 'Clogging';
+                iconPath = '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>';
+            } else if (status.includes('Replace')) {
+                statusClass = 'replace';
+                hepaStatusBadge.textContent = 'Replace Required!';
+                iconPath = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+            } else if (status.includes('Weak') || status.includes('Leak')) {
+                statusClass = 'leak';
+                hepaStatusBadge.textContent = 'Weak Airflow';
+                iconPath = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+            }
+
+            hepaCard.className = `hepa-card ${statusClass}`;
+            hepaIcon.innerHTML = iconPath;
+        }
+
+        function showHepaModal() {
+            const telemetry = deviceData.telemetry || {};
+            const modal = document.getElementById('hepa-modal');
+            const modalIcon = document.getElementById('hepa-modal-icon');
+            const modalIconSvg = document.getElementById('hepa-modal-icon-svg');
+            const modalStatusText = document.getElementById('hepa-modal-status-text');
+            const modalProgress = document.getElementById('hepa-modal-progress');
+            const modalHealthValue = document.getElementById('hepa-modal-health-value');
+            const modalPressure = document.getElementById('hepa-modal-pressure');
+
+            const status = telemetry.hepaStatus || 'Unknown';
+            const health = getNum(telemetry.hepaHealth) || 0;
+            const pressure = getNum(telemetry.diffPressure);
+
+            // Update modal values
+            modalProgress.style.width = `${health}%`;
+            modalHealthValue.textContent = `${Math.round(health)}%`;
+            modalPressure.textContent = pressure !== null ? `${pressure.toFixed(1)} Pa` : '-- Pa';
+
+            // Determine status class
+            let statusClass = 'normal';
+            let statusText = 'Normal Condition';
+            let iconPath = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+            
+            if (status.includes('Normal')) {
+                statusClass = 'normal';
+                statusText = 'Normal Condition';
+            } else if (status.includes('Clogging')) {
+                statusClass = 'clogging';
+                statusText = 'Filter Clogging';
+                iconPath = '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>';
+            } else if (status.includes('Replace')) {
+                statusClass = 'replace';
+                statusText = 'Replace Required!';
+                iconPath = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+            } else if (status.includes('Weak') || status.includes('Leak')) {
+                statusClass = 'leak';
+                statusText = 'Weak Airflow / Leak';
+                iconPath = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+            }
+
+            // Apply classes
+            modalIcon.className = `hepa-modal-icon ${statusClass}`;
+            modalIconSvg.innerHTML = iconPath;
+            modalStatusText.className = `hepa-modal-status-text ${statusClass}`;
+            modalStatusText.textContent = statusText;
+            modalProgress.className = `hepa-modal-progress-fill ${statusClass}`;
+            modalHealthValue.className = `hepa-modal-health-value ${statusClass}`;
+
+            // Show modal
+            modal.classList.add('active');
+        }
+
+        function closeHepaModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('hepa-modal').classList.remove('active');
         }
 
         function updateComponent(name, isOn, fanSpeed = null) {

@@ -3,6 +3,7 @@ import 'package:json_annotation/json_annotation.dart';
 part 'ahu_telemetry.g.dart';
 
 /// AHU Telemetry model - matches web dashboard structure
+/// Supports both SHT45 (basic temp/hum) and combo sensors (SEN66+SDP810)
 @JsonSerializable()
 class AhuTelemetry {
   final double? temp;
@@ -21,6 +22,32 @@ class AhuTelemetry {
   final double humSet;
   final int? ts; // Timestamp
 
+  // Combo sensor fields (SEN66 + SDP810)
+  @JsonKey(name: 'sensorType')
+  final String? sensorType; // 'sht45' or 'combo'
+  
+  // Air Quality (SEN66)
+  final int? aqi;
+  @JsonKey(name: 'pm1p0')
+  final double? pm1p0;
+  @JsonKey(name: 'pm2p5')
+  final double? pm2p5;
+  @JsonKey(name: 'pm4p0')
+  final double? pm4p0;
+  @JsonKey(name: 'pm10p0')
+  final double? pm10p0;
+  final int? voc;
+  final int? nox;
+  final int? co2;
+  
+  // HEPA Filter (SDP810)
+  @JsonKey(name: 'diffPressure')
+  final double? diffPressure;
+  @JsonKey(name: 'hepaStatus')
+  final String? hepaStatus;
+  @JsonKey(name: 'hepaHealth')
+  final int? hepaHealth;
+
   AhuTelemetry({
     this.temp,
     this.hum,
@@ -34,6 +61,18 @@ class AhuTelemetry {
     required this.tempSet,
     required this.humSet,
     this.ts,
+    this.sensorType,
+    this.aqi,
+    this.pm1p0,
+    this.pm2p5,
+    this.pm4p0,
+    this.pm10p0,
+    this.voc,
+    this.nox,
+    this.co2,
+    this.diffPressure,
+    this.hepaStatus,
+    this.hepaHealth,
   });
 
   factory AhuTelemetry.fromJson(Map<String, dynamic> json) => _$AhuTelemetryFromJson(json);
@@ -57,5 +96,9 @@ class AhuTelemetry {
         return 'UNKNOWN';
     }
   }
-}
 
+  // Combo sensor helpers
+  bool get isComboSensor => sensorType == 'combo';
+  bool get hasAirQualityData => isComboSensor && (pm2p5 != null || aqi != null);
+  bool get hasHepaData => isComboSensor && (hepaStatus != null || diffPressure != null);
+}

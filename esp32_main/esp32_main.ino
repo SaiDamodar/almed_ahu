@@ -166,6 +166,12 @@ bool useSHT45 = false;      // Original sensor
 bool useSEN66 = false;      // New combo: air quality sensor
 bool useSDP810 = false;     // New combo: differential pressure sensor
 
+// Track original sensor type for hot-swap detection
+enum SensorMode { SENSOR_NONE, SENSOR_SHT45, SENSOR_COMBO };
+SensorMode originalSensorMode = SENSOR_NONE;  // Set during setup()
+unsigned long lastSensorCheck = 0;
+const unsigned long SENSOR_CHECK_INTERVAL = 5000;  // Check every 5 seconds
+
 // SEN66 readings
 float sen66_pm1p0 = 0.0, sen66_pm2p5 = 0.0, sen66_pm4p0 = 0.0, sen66_pm10p0 = 0.0;
 float sen66_humidity = 0.0, sen66_temperature = 0.0;
@@ -496,6 +502,61 @@ int calculateAQI(float pm25) {
     }
   }
   return 0;
+}
+
+// ---------- Sensor Hot-Swap Detection ----------
+// Checks if a NEW sensor type has been connected (triggers reset if so)
+void checkForNewSensor() {
+  static char errMsg[64];
+  bool foundSEN66 = false;
+  bool foundSDP810 = false;
+  bool foundSHT45 = false;
+  
+  // Quick probe for SEN66 (don't initialize, just check presence)
+  Wire.beginTransmission(0x6B);  // SEN66 I2C address
+  if (Wire.endTransmission() == 0) {
+    foundSEN66 = true;
+  }
+  
+  // Quick probe for SDP810
+  Wire.beginTransmission(0x25);  // SDP810 I2C address
+  if (Wire.endTransmission() == 0) {
+    foundSDP810 = true;
+  }
+  
+  // Quick probe for SHT45
+  Wire.beginTransmission(0x44);  // SHT45 I2C address
+  if (Wire.endTransmission() == 0) {
+    foundSHT45 = true;
+  }
+  
+  // Determine what sensor mode would be selected now
+  SensorMode detectedMode = SENSOR_NONE;
+  if (foundSEN66 || foundSDP810) {
+    detectedMode = SENSOR_COMBO;
+  } else if (foundSHT45) {
+    detectedMode = SENSOR_SHT45;
+  }
+  
+  // Check if a DIFFERENT sensor type is now connected
+  if (originalSensorMode != SENSOR_NONE && detectedMode != SENSOR_NONE) {
+    if (detectedMode != originalSensorMode) {
+      // NEW sensor type detected! Reset to reinitialize with new sensor
+      Serial.println("\n========================================");
+      Serial.println("🔄 NEW SENSOR TYPE DETECTED!");
+      Serial.printf("   Previous: %s\n", originalSensorMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
+      Serial.printf("   Detected: %s\n", detectedMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
+      Serial.println("   Resetting to apply new sensor configuration...");
+      Serial.println("========================================\n");
+      
+      // Save current state before reset
+      saveSystemState();
+      delay(500);
+      
+      // Trigger reset
+      ESP.restart();
+    }
+  }
 }
 
 // ---------- HEPA Filter Status ----------
@@ -1712,17 +1773,21 @@ void setup()
     }
   }
   
-  // Print sensor configuration summary
+  // Print sensor configuration summary and set original mode for hot-swap detection
   Serial.println("\n--- Sensor Configuration ---");
   if (useSEN66 || useSDP810) {
     Serial.println("  Mode: COMBO SENSORS (SEN66 + SDP810)");
     Serial.println("  Data: AQI, PM, VOC, NOx, CO2, HEPA Status");
+    originalSensorMode = SENSOR_COMBO;
   } else if (useSHT45) {
     Serial.println("  Mode: ORIGINAL (SHT45 only)");
     Serial.println("  Data: Temperature, Humidity");
+    originalSensorMode = SENSOR_SHT45;
   } else {
     Serial.println("  ⚠️ WARNING: No sensors detected!");
+    originalSensorMode = SENSOR_NONE;
   }
+  Serial.println("  Hot-swap detection: ENABLED (auto-reset on sensor type change)");
   
   esp_task_wdt_reset();
 
@@ -1967,14 +2032,22 @@ void loop()
     readSensorIfDue();
   }
   
+  // Periodic sensor hot-swap detection (check if NEW sensor type connected)
+  // Only reset if a DIFFERENT sensor type is attached (not when same type reconnected)
+  if (now - lastSensorCheck >= SENSOR_CHECK_INTERVAL) {
+    lastSensorCheck = now;
+    checkForNewSensor();
+  }
+  
   // Debug: Log sensor mode periodically
   static unsigned long lastSensorModeLog = 0;
   if (now - lastSensorModeLog > 30000) {
     lastSensorModeLog = now;
-    Serial.printf("[DEBUG] Sensor Mode: SEN66=%s SDP810=%s SHT45=%s\n", 
+    Serial.printf("[DEBUG] Sensor Mode: SEN66=%s SDP810=%s SHT45=%s (Original: %s)\n", 
                   useSEN66 ? "YES" : "NO", 
                   useSDP810 ? "YES" : "NO", 
-                  useSHT45 ? "YES" : "NO");
+                  useSHT45 ? "YES" : "NO",
+                  originalSensorMode == SENSOR_COMBO ? "COMBO" : (originalSensorMode == SENSOR_SHT45 ? "SHT45" : "NONE"));
   }
 
   // Publish to AWS every 5 seconds

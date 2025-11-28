@@ -1444,30 +1444,32 @@ class _PmReadingsRow extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              // VOC, NOx, CO2 row
+              const SizedBox(height: 10),
+              // VOC, NOx, CO2 row - same size as PM values
               Row(
                 children: [
-                  _SmallValueChip(
+                  _PmValueCard(
                     label: 'VOC',
                     value: '${telemetry.voc ?? '--'}',
+                    unit: 'index',
                     color: const Color(0xFF00BCD4),
                     isDark: isDark,
                   ),
                   const SizedBox(width: 8),
-                  _SmallValueChip(
+                  _PmValueCard(
                     label: 'NOx',
                     value: '${telemetry.nox ?? '--'}',
+                    unit: 'index',
                     color: const Color(0xFFE91E63),
                     isDark: isDark,
                   ),
                   const SizedBox(width: 8),
-                  _SmallValueChip(
+                  _PmValueCard(
                     label: 'CO₂',
-                    value: '${telemetry.co2 ?? '--'} ppm',
+                    value: '${telemetry.co2 ?? '--'}',
+                    unit: 'ppm',
                     color: const Color(0xFF607D8B),
                     isDark: isDark,
-                    isWide: true,
                   ),
                 ],
               ),
@@ -1542,60 +1544,6 @@ class _PmValueCard extends StatelessWidget {
   }
 }
 
-/// Small value chip for VOC, NOx, CO2
-class _SmallValueChip extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final bool isDark;
-  final bool isWide;
-
-  const _SmallValueChip({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.isDark,
-    this.isWide = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      flex: isWide ? 2 : 1,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '$label: ',
-              style: TextStyle(
-                fontSize: 11,
-                color: color,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Flexible(
-              child: Text(
-                value,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// Expandable HEPA status box
 class _ExpandableHepaBox extends StatelessWidget {

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
 import '../models/device_status.dart';
+import '../models/ahu_telemetry.dart';
 import '../utils/screen_utils.dart';
 import 'admin_screen.dart';
 
@@ -53,6 +54,8 @@ class AhuControlScreen extends StatelessWidget {
                     children: [
                       _SensorControls(deviceId: deviceId),
                       SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+                      // Combo sensor sections (PM readings + HEPA)
+                      _ComboSensorSection(deviceId: deviceId),
                       _ComponentStatus(deviceId: deviceId),
                       SizedBox(height: ScreenUtils.getSpacing(context, 20)),
                     ],
@@ -1069,6 +1072,639 @@ class _StatusIndicator extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ============ COMBO SENSOR SECTION (SEN66 + SDP810) ============
+
+class _ComboSensorSection extends StatelessWidget {
+  final String deviceId;
+
+  const _ComboSensorSection({required this.deviceId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, AhuTelemetry?>(
+      selector: (_, provider) => provider.getDeviceStatus(deviceId)?.telemetry,
+      builder: (context, telemetry, _) {
+        if (telemetry == null || !telemetry.isComboSensor) {
+          return const SizedBox.shrink();
+        }
+
+        return Column(
+          children: [
+            // Air Quality / PM Readings
+            if (telemetry.hasAirQualityData) ...[
+              _AirQualityCard(telemetry: telemetry),
+              SizedBox(height: ScreenUtils.getSpacing(context, 14)),
+            ],
+            // HEPA Filter Status
+            if (telemetry.hasHepaData) ...[
+              _HepaStatusCard(telemetry: telemetry),
+              SizedBox(height: ScreenUtils.getSpacing(context, 14)),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Air Quality Card - uses only theme colors (blue/black or blue/white)
+class _AirQualityCard extends StatelessWidget {
+  final AhuTelemetry telemetry;
+
+  const _AirQualityCard({required this.telemetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final primaryColor = theme.colorScheme.primary;
+    final borderRadius = ScreenUtils.getBorderRadius(context, 18);
+    final padding = ScreenUtils.getPadding(context, 16);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(color: theme.dividerColor.withOpacity(0.2)),
+      ),
+      child: Column(
+        children: [
+          // Header
+          Padding(
+            padding: EdgeInsets.all(padding),
+            child: Row(
+              children: [
+                Icon(Icons.air_rounded, color: primaryColor, size: 20),
+                SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                Text(
+                  'Air Quality',
+                  style: TextStyle(
+                    fontSize: ScreenUtils.getFontSize(context, 14),
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                // AQI Badge
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: ScreenUtils.getPadding(context, 10),
+                    vertical: ScreenUtils.getSpacing(context, 4),
+                  ),
+                  decoration: BoxDecoration(
+                    color: primaryColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: primaryColor.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    'AQI ${telemetry.aqi ?? '--'}',
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 12),
+                      fontWeight: FontWeight.bold,
+                      color: primaryColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // PM Values Grid
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: padding),
+            child: Row(
+              children: [
+                _PmValueBox(label: 'PM1.0', value: telemetry.pm1p0, isPrimary: false),
+                SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                _PmValueBox(label: 'PM2.5', value: telemetry.pm2p5, isPrimary: true),
+                SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                _PmValueBox(label: 'PM4.0', value: telemetry.pm4p0, isPrimary: false),
+                SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                _PmValueBox(label: 'PM10', value: telemetry.pm10p0, isPrimary: false),
+              ],
+            ),
+          ),
+          SizedBox(height: ScreenUtils.getSpacing(context, 12)),
+          // VOC, NOx, CO2 Row
+          Padding(
+            padding: EdgeInsets.fromLTRB(padding, 0, padding, padding),
+            child: Row(
+              children: [
+                _GasValueBox(label: 'VOC', value: telemetry.voc, unit: 'index'),
+                SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                _GasValueBox(label: 'NOx', value: telemetry.nox, unit: 'index'),
+                SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                _GasValueBox(label: 'CO₂', value: telemetry.co2, unit: 'ppm'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PmValueBox extends StatelessWidget {
+  final String label;
+  final double? value;
+  final bool isPrimary;
+
+  const _PmValueBox({
+    required this.label,
+    required this.value,
+    this.isPrimary = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final primaryColor = theme.colorScheme.primary;
+
+    return Expanded(
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          vertical: ScreenUtils.getSpacing(context, 10),
+          horizontal: ScreenUtils.getPadding(context, 6),
+        ),
+        decoration: BoxDecoration(
+          color: primaryColor.withOpacity(isPrimary ? 0.15 : 0.08),
+          borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+          border: isPrimary
+              ? Border.all(color: primaryColor.withOpacity(0.4), width: 1.5)
+              : null,
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 10),
+                fontWeight: FontWeight.w600,
+                color: primaryColor,
+              ),
+            ),
+            SizedBox(height: ScreenUtils.getSpacing(context, 4)),
+            Text(
+              value != null ? value!.round().toString() : '--',
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, isPrimary ? 20 : 16),
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            Text(
+              'µg/m³',
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 8),
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GasValueBox extends StatelessWidget {
+  final String label;
+  final int? value;
+  final String unit;
+
+  const _GasValueBox({
+    required this.label,
+    required this.value,
+    required this.unit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final primaryColor = theme.colorScheme.primary;
+
+    return Expanded(
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          vertical: ScreenUtils.getSpacing(context, 10),
+          horizontal: ScreenUtils.getPadding(context, 8),
+        ),
+        decoration: BoxDecoration(
+          color: primaryColor.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 10)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 10),
+                fontWeight: FontWeight.w600,
+                color: primaryColor,
+              ),
+            ),
+            SizedBox(height: ScreenUtils.getSpacing(context, 2)),
+            Text(
+              value != null ? value.toString() : '--',
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 16),
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            Text(
+              unit,
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 8),
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// HEPA Status Card - uses red/yellow/green for status
+class _HepaStatusCard extends StatelessWidget {
+  final AhuTelemetry telemetry;
+
+  const _HepaStatusCard({required this.telemetry});
+
+  Color _getHepaColor() {
+    final status = telemetry.hepaStatus ?? '';
+    if (status.contains('Normal')) return const Color(0xFF4CAF50); // Green
+    if (status.contains('Clogging')) return const Color(0xFFFF9800); // Yellow/Orange
+    return const Color(0xFFF44336); // Red
+  }
+
+  IconData _getHepaIcon() {
+    final status = telemetry.hepaStatus ?? '';
+    if (status.contains('Normal')) return Icons.check_circle_rounded;
+    if (status.contains('Clogging')) return Icons.warning_rounded;
+    return Icons.error_rounded;
+  }
+
+  String _getStatusText() {
+    final status = telemetry.hepaStatus ?? 'Unknown';
+    if (status.contains('Normal')) return 'Normal';
+    if (status.contains('Clogging')) return 'Clogging';
+    if (status.contains('Replace')) return 'Replace!';
+    if (status.contains('Weak') || status.contains('Leak')) return 'Weak Airflow';
+    return status;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final hepaColor = _getHepaColor();
+    final health = telemetry.hepaHealth ?? 0;
+    final pressure = telemetry.diffPressure;
+    final borderRadius = ScreenUtils.getBorderRadius(context, 16);
+    final padding = ScreenUtils.getPadding(context, 16);
+
+    return GestureDetector(
+      onTap: () => _showHepaDetails(context),
+      child: Container(
+        padding: EdgeInsets.all(padding),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(borderRadius),
+          border: Border.all(color: hepaColor.withOpacity(0.4), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            // HEPA Icon
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [hepaColor, hepaColor.withOpacity(0.7)],
+                ),
+                boxShadow: [
+                  BoxShadow(color: hepaColor.withOpacity(0.3), blurRadius: 8),
+                ],
+              ),
+              child: Icon(_getHepaIcon(), color: Colors.white, size: 26),
+            ),
+            SizedBox(width: ScreenUtils.getPadding(context, 14)),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'HEPA Filter',
+                        style: TextStyle(
+                          fontSize: ScreenUtils.getFontSize(context, 14),
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: ScreenUtils.getPadding(context, 8),
+                          vertical: ScreenUtils.getSpacing(context, 2),
+                        ),
+                        decoration: BoxDecoration(
+                          color: hepaColor.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          _getStatusText(),
+                          style: TextStyle(
+                            fontSize: ScreenUtils.getFontSize(context, 10),
+                            fontWeight: FontWeight.bold,
+                            color: hepaColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 8)),
+                  // Health bar
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: health / 100,
+                            minHeight: 8,
+                            backgroundColor: isDark ? Colors.white12 : Colors.black12,
+                            valueColor: AlwaysStoppedAnimation<Color>(hepaColor),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: ScreenUtils.getPadding(context, 10)),
+                      Text(
+                        '$health%',
+                        style: TextStyle(
+                          fontSize: ScreenUtils.getFontSize(context, 14),
+                          fontWeight: FontWeight.bold,
+                          color: hepaColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: ScreenUtils.getSpacing(context, 4)),
+                  Text(
+                    'ΔP: ${pressure?.toStringAsFixed(1) ?? '--'} Pa',
+                    style: TextStyle(
+                      fontSize: ScreenUtils.getFontSize(context, 11),
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: hepaColor.withOpacity(0.6),
+              size: 24,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showHepaDetails(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final hepaColor = _getHepaColor();
+    final health = telemetry.hepaHealth ?? 0;
+    final pressure = telemetry.diffPressure;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle bar
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            // Title
+            Text(
+              'HEPA Filter Status',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Large icon
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [hepaColor, hepaColor.withOpacity(0.7)],
+                ),
+                boxShadow: [
+                  BoxShadow(color: hepaColor.withOpacity(0.4), blurRadius: 16),
+                ],
+              ),
+              child: Icon(_getHepaIcon(), color: Colors.white, size: 40),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _getStatusText(),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: hepaColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Health bar
+            Text(
+              'Filter Health',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: health / 100,
+                minHeight: 12,
+                backgroundColor: isDark ? Colors.white12 : Colors.black12,
+                valueColor: AlwaysStoppedAnimation<Color>(hepaColor),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '$health%',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: hepaColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Details
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Differential Pressure',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${pressure?.toStringAsFixed(1) ?? '--'} Pa',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Normal Range',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '9-25 Pa',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            // Legend
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'STATUS LEGEND',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _LegendItem(color: const Color(0xFFF44336), text: 'Weak Airflow: < 9 Pa'),
+                  const SizedBox(height: 8),
+                  _LegendItem(color: const Color(0xFF4CAF50), text: 'Normal: 9-25 Pa'),
+                  const SizedBox(height: 8),
+                  _LegendItem(color: const Color(0xFFFF9800), text: 'Clogging: 25-40 Pa'),
+                  const SizedBox(height: 8),
+                  _LegendItem(color: const Color(0xFFF44336), text: 'Replace: > 40 Pa'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String text;
+
+  const _LegendItem({required this.color, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Row(
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 12,
+            color: isDark ? Colors.white70 : Colors.black87,
+          ),
+        ),
+      ],
     );
   }
 }
