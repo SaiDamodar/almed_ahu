@@ -2,45 +2,35 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- 
-	IMPORTANT: Replace this file with your actual GoogleService-Info.plist from Firebase Console!
-	
-	Steps:
-	1. Go to Firebase Console (https://console.firebase.google.com)
-	2. Select your project
-	3. Click on the iOS app (or add one if not exists)
-	4. Download GoogleService-Info.plist
-	5. Replace this file with the downloaded one
-	-->
 	<key>CLIENT_ID</key>
-	<string>YOUR_CLIENT_ID.apps.googleusercontent.com</string>
+	<string>53611520350-emcqsroi797e2dp4p66lcfhrjd52a8em.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.YOUR_CLIENT_ID</string>
+	<string>com.googleusercontent.apps.53611520350-emcqsroi797e2dp4p66lcfhrjd52a8em</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>53611520350-6r6pgjdikm9i0b0sv4r8udh0jg970hh1.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
-	<string>YOUR_API_KEY</string>
+	<string>AIzaSyCk8ngUM2hF85bM-1Bc0cSLqq0Rs2Ee9aU</string>
 	<key>GCM_SENDER_ID</key>
-	<string>YOUR_SENDER_ID</string>
+	<string>53611520350</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
 	<string>com.almed.ahu</string>
 	<key>PROJECT_ID</key>
-	<string>your-project-id</string>
+	<string>alemdahu-0107</string>
 	<key>STORAGE_BUCKET</key>
-	<string>your-project-id.appspot.com</string>
+	<string>alemdahu-0107.firebasestorage.app</string>
 	<key>IS_ADS_ENABLED</key>
-	<false/>
+	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
-	<false/>
+	<false></false>
 	<key>IS_APPINVITE_ENABLED</key>
-	<true/>
+	<true></true>
 	<key>IS_GCM_ENABLED</key>
-	<true/>
+	<true></true>
 	<key>IS_SIGNIN_ENABLED</key>
-	<true/>
+	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:YOUR_SENDER_ID:ios:YOUR_APP_ID</string>
+	<string>1:53611520350:ios:09c55a1bd9156af0d16fcf</string>
 </dict>
 </plist>
-
-
