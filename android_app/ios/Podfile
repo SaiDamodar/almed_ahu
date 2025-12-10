@@ -43,6 +43,17 @@ post_install do |installer|
         '$(inherited)',
         'PERMISSION_NOTIFICATIONS=1',
       ]
+      # Set minimum Swift version
+      if config.build_settings['SWIFT_VERSION']
+        # Keep existing Swift version
+      else
+        config.build_settings['SWIFT_VERSION'] = '5.0'
+      end
+      # Add Swift compiler flags for experimental features
+      other_swift_flags = config.build_settings['OTHER_SWIFT_FLAGS'] || ['$(inherited)']
+      other_swift_flags << '-Xfrontend'
+      other_swift_flags << '-enable-experimental-feature=AccessLevelOnImport'
+      config.build_settings['OTHER_SWIFT_FLAGS'] = other_swift_flags.uniq
     end
   end
 end
