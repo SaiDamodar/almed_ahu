@@ -43,23 +43,12 @@ post_install do |installer|
         '$(inherited)',
         'PERMISSION_NOTIFICATIONS=1',
       ]
-      # Ensure consistent Swift version across all pods
+      # Set Swift version - use 5.0 for compatibility
       config.build_settings['SWIFT_VERSION'] = '5.0'
-      # Fix Swift module compilation issues
-      config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
-      config.build_settings['SWIFT_OPTIMIZATION_LEVEL'] = '-Onone'
-      # Disable module validation for faster builds (can re-enable later)
-      config.build_settings['SWIFT_DISABLE_SAFETY_CHECKS'] = 'NO'
-      # Add Swift compiler flags for experimental features if needed
-      other_swift_flags = config.build_settings['OTHER_SWIFT_FLAGS'] || ['$(inherited)']
-      # Only add experimental flags if not already present
-      unless other_swift_flags.any? { |flag| flag.include?('AccessLevelOnImport') }
-        other_swift_flags << '-Xfrontend'
-        other_swift_flags << '-enable-experimental-feature=AccessLevelOnImport'
+      # Remove problematic optimization settings for Debug
+      if config.name == 'Debug'
+        config.build_settings.delete('SWIFT_OPTIMIZATION_LEVEL')
       end
-      config.build_settings['OTHER_SWIFT_FLAGS'] = other_swift_flags.uniq
-      # Fix for shared_preferences and other Flutter plugins
-      config.build_settings['DEFINES_MODULE'] = 'YES'
     end
   end
 end
