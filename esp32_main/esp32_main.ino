@@ -1005,8 +1005,10 @@ void readSensorIfDue(){
   if (now - lastSensorAt < SENSOR_PERIOD) return;
   lastSensorAt = now;
 
+  esp_task_wdt_reset(); // Feed watchdog before I2C read
   sensors_event_t he, te;
   sht4.getEvent(&he, &te);
+  esp_task_wdt_reset(); // Feed watchdog after I2C read
 
   bool got = (!isnan(te.temperature) && !isnan(he.relative_humidity));
   if (got){
@@ -1074,13 +1076,15 @@ void readComboSensorsIfDue() {
   bool sen66Success = false;
   bool sdp810Success = false;
   
-  // Read SEN66 (Air Quality)
+  // Read SEN66 (Air Quality) - Feed watchdog before I2C operation
   if (useSEN66) {
+    esp_task_wdt_reset(); // Feed watchdog before I2C read
     int16_t err = sen66.readMeasuredValues(
       sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
       sen66_humidity, sen66_temperature,
       sen66_vocIndex, sen66_noxIndex, sen66_co2
     );
+    esp_task_wdt_reset(); // Feed watchdog after I2C read
     
     if (err == 0) {
       // Validate values are reasonable before accepting
@@ -1115,9 +1119,11 @@ void readComboSensorsIfDue() {
     }
   }
   
-  // Read SDP810 (Differential Pressure)
+  // Read SDP810 (Differential Pressure) - Feed watchdog before I2C operation
   if (useSDP810) {
+    esp_task_wdt_reset(); // Feed watchdog before I2C read
     uint16_t err = sdp810.readMeasurement(sdp810_pressure, sdp810_temperature);
+    esp_task_wdt_reset(); // Feed watchdog after I2C read
     
     if (err == 0) {
       // Validate pressure is reasonable (typically -100 to +100 Pa for differential)
@@ -1372,7 +1378,9 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
       if (!onlineMode) {
         // Disconnect AWS IoT when switching to offline mode
         if (client.connected()) {
+          esp_task_wdt_reset(); // Feed watchdog before disconnect
           client.disconnect();
+          esp_task_wdt_reset(); // Feed watchdog after disconnect
           Serial.println("  → AWS IoT disconnected (offline mode)");
         }
       }
@@ -1825,7 +1833,9 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       if (!onlineMode) {
         // Disconnect AWS IoT when switching to offline mode
         if (client.connected()) {
+          esp_task_wdt_reset(); // Feed watchdog before disconnect
           client.disconnect();
+          esp_task_wdt_reset(); // Feed watchdog after disconnect
           Serial.println("  → AWS IoT disconnected (offline mode)");
         }
       }
@@ -2369,11 +2379,18 @@ void loop()
       }
     }
   } else {
-    // Offline mode - ensure AWS IoT is disconnected
-    if (client.connected()) {
+    // Offline mode - ensure AWS IoT is disconnected (only once, not every loop)
+    static bool offlineModeDisconnected = false;
+    if (!offlineModeDisconnected && client.connected()) {
+      esp_task_wdt_reset(); // Feed watchdog before disconnect
       client.disconnect();
+      esp_task_wdt_reset(); // Feed watchdog after disconnect
+      offlineModeDisconnected = true;
       Serial.println("✓ Offline mode - AWS IoT disconnected");
       Serial.println("  → Local MQTT only (no cloud service)");
+    } else if (onlineMode) {
+      // Reset flag when switching back to online mode
+      offlineModeDisconnected = false;
     }
   }
   

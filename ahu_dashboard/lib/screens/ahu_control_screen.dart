@@ -10,6 +10,7 @@ import '../models/ahu_telemetry.dart';
 import '../models/ahu_state.dart';
 import '../models/ahu_log.dart';
 import '../widgets/motor_timing_dialog.dart';
+import '../widgets/wifi_control_widget.dart';
 
 /// Modern AHU control screen
 class AhuControlScreen extends StatefulWidget {
@@ -136,6 +137,9 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           // Mode toggle (Admin only)
           _ModeToggleButton(ahuId: ahuId),
+          const SizedBox(width: 12),
+          // WiFi control (Admin only)
+          _WiFiButton(),
           const SizedBox(width: 12),
           // Exit button
           Container(
@@ -340,6 +344,46 @@ class _StartStopButton extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WiFiButton extends StatelessWidget {
+  const _WiFiButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, UserRole?>(
+      selector: (_, provider) => provider.currentRole,
+      builder: (context, role, _) {
+        if (role != UserRole.admin) return const SizedBox.shrink();
+
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withOpacity(0.1),
+            ),
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.wifi_rounded),
+            tooltip: 'WiFi Networks',
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => Dialog(
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
+                    padding: const EdgeInsets.all(16),
+                    child: const WiFiControlWidget(),
+                  ),
+                ),
+              );
+            },
           ),
         );
       },
