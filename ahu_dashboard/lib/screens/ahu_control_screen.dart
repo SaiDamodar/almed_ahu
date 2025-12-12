@@ -1,5 +1,7 @@
 import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
@@ -131,10 +133,60 @@ class _TopBar extends StatelessWidget {
           Expanded(child: _AhuInfo(ahuId: ahuId)),
           // Start/Stop toggle
           _StartStopButton(ahuId: ahuId),
+          const SizedBox(width: 12),
+          // Exit button
+          Container(
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: theme.dividerColor.withOpacity(0.1),
+              ),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.exit_to_app_rounded),
+              tooltip: 'Exit Application',
+              onPressed: () => _exitApplication(context),
+            ),
+          ),
         ],
       ),
     );
   }
+}
+
+/// Helper function to exit the application
+void _exitApplication(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        title: const Text('Exit Application'),
+        content: const Text('Are you sure you want to exit the AHU Dashboard?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              // Exit the application
+              if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+                exit(0);
+              } else {
+                SystemNavigator.pop();
+              }
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+            child: const Text('Exit'),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 class _AhuInfo extends StatelessWidget {

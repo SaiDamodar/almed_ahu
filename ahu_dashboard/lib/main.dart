@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
+import 'dart:io';
 import 'package:provider/provider.dart';
 import 'providers/app_provider.dart';
 import 'providers/theme_provider.dart';
@@ -8,6 +10,19 @@ import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Enable fullscreen mode on launch
+  SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.immersiveSticky,
+    overlays: [], // Hide all system UI overlays
+  );
+  
+  // Set preferred orientations (optional - can be removed if rotation is needed)
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
+  
   runApp(const AhuDashboardApp());
 }
 

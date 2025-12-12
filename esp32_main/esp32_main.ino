@@ -41,11 +41,11 @@ const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"
 #define DEFAULT_W1_PASS "12345678"
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
-unsigned long M1_START_RUN = 10UL * 1000UL;
-unsigned long M1_POST_RUN  = 10UL * 1000UL;
-unsigned long M2_INTERVAL  = 30UL * 1000UL;
-unsigned long M2_RUN_TIME  = 10UL * 1000UL;
-unsigned long M2_DELAY_AFTER_M1_STOP = 5UL * 1000UL;
+unsigned long M1_START_RUN = 6UL * 1000UL;              // Motor 1 runs 6 seconds at start
+unsigned long M1_POST_RUN  = 6UL * 1000UL;              // Motor 1 runs 6 seconds at stop
+unsigned long M2_INTERVAL  = 15UL * 60UL * 1000UL;      // Motor 2 runs every 15 minutes
+unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22 seconds
+unsigned long M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;   // Motor 2 runs 10 seconds after Motor 1 stops
 
 // ========================= WATCHDOG CONFIGURATION =========================
 const unsigned long WDT_TIMEOUT = 7;
@@ -342,6 +342,11 @@ void restoreSystemState(){
     if (wasRunning && !wasShuttingDown) {
       pendingRecoveryStart = true;
       runState = false;
+      
+      // CRITICAL: Turn on system relay immediately (powers entire system: ozone lights, fans, etc.)
+      systemWrite(true);
+      Serial.println("✓ System relay turned ON (recovery mode)");
+      
       cpOn = wasCpOn;
       heatOn = wasHeatOn;
       cpWrite(cpOn);
@@ -440,6 +445,7 @@ void restoreSystemState(){
       }
       
       Serial.println("⚠️ WATCHDOG RECOVERY: State restored, waiting for WiFi");
+      Serial.println("  System Relay: ON (powers entire system: ozone lights, fans, etc.)");
       Serial.print("  CP: "); Serial.print(cpOn ? "ON" : "OFF");
       Serial.print(" | Heater: "); Serial.print(heatOn ? "ON" : "OFF");
       Serial.print(" | Fan: "); Serial.println(savedFanSpd);
@@ -455,6 +461,10 @@ void restoreSystemState(){
       } else {
         Serial.println("  Motors: DELAYED until WiFi connected");
       }
+    } else {
+      // System was stopped - ensure system relay is OFF
+      systemWrite(false);
+      Serial.println("✓ System relay turned OFF (system was stopped)");
     }
   }
 }
@@ -746,23 +756,44 @@ void publishTelemetryAWS(){
   // Indicate which sensor type is active
   doc["sensorType"] = useSEN66 ? "combo" : "sht45";
   
-  // Add SEN66 data if combo sensors active
+  // Add SEN66 data if combo sensors active (only if values are valid)
   if (useSEN66) {
-    doc["aqi"] = sen66_aqi;
-    doc["pm1p0"] = sen66_pm1p0;
-    doc["pm2p5"] = sen66_pm2p5;
-    doc["pm4p0"] = sen66_pm4p0;
-    doc["pm10p0"] = sen66_pm10p0;
-    doc["voc"] = sen66_vocIndex;
-    doc["nox"] = sen66_noxIndex;
-    doc["co2"] = sen66_co2;
+    // Only add values if temperature is valid (indicates successful read)
+    if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
+      doc["aqi"] = sen66_aqi;
+      doc["pm1p0"] = sen66_pm1p0;
+      doc["pm2p5"] = sen66_pm2p5;
+      doc["pm4p0"] = sen66_pm4p0;
+      doc["pm10p0"] = sen66_pm10p0;
+      doc["voc"] = sen66_vocIndex;
+      doc["nox"] = sen66_noxIndex;
+      doc["co2"] = sen66_co2;
+    } else {
+      // Mark as null if invalid (prevents sending stale 0.0 values)
+      doc["aqi"] = nullptr;
+      doc["pm1p0"] = nullptr;
+      doc["pm2p5"] = nullptr;
+      doc["pm4p0"] = nullptr;
+      doc["pm10p0"] = nullptr;
+      doc["voc"] = nullptr;
+      doc["nox"] = nullptr;
+      doc["co2"] = nullptr;
+    }
   }
   
-  // Add SDP810 data if combo sensors active
+  // Add SDP810 data if combo sensors active (only if values are valid)
   if (useSDP810) {
-    doc["diffPressure"] = sdp810_pressure;
-    doc["hepaStatus"] = hepaStatus;
-    doc["hepaHealth"] = hepaHealthPercent;
+    // Only add if pressure is valid (check reasonable range)
+    if (sdp810_pressure >= -200.0 && sdp810_pressure <= 200.0) {
+      doc["diffPressure"] = sdp810_pressure;
+      doc["hepaStatus"] = hepaStatus;
+      doc["hepaHealth"] = hepaHealthPercent;
+    } else {
+      // Mark as null if invalid
+      doc["diffPressure"] = nullptr;
+      doc["hepaStatus"] = nullptr;
+      doc["hepaHealth"] = nullptr;
+    }
   }
   
   char buf[768];
@@ -798,23 +829,44 @@ void publishTelemetryLocal(){
   // Indicate which sensor type is active
   doc["sensorType"] = useSEN66 ? "combo" : "sht45";
   
-  // Add SEN66 data if combo sensors active
+  // Add SEN66 data if combo sensors active (only if values are valid)
   if (useSEN66) {
-    doc["aqi"] = sen66_aqi;
-    doc["pm1p0"] = sen66_pm1p0;
-    doc["pm2p5"] = sen66_pm2p5;
-    doc["pm4p0"] = sen66_pm4p0;
-    doc["pm10p0"] = sen66_pm10p0;
-    doc["voc"] = sen66_vocIndex;
-    doc["nox"] = sen66_noxIndex;
-    doc["co2"] = sen66_co2;
+    // Only add values if temperature is valid (indicates successful read)
+    if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
+      doc["aqi"] = sen66_aqi;
+      doc["pm1p0"] = sen66_pm1p0;
+      doc["pm2p5"] = sen66_pm2p5;
+      doc["pm4p0"] = sen66_pm4p0;
+      doc["pm10p0"] = sen66_pm10p0;
+      doc["voc"] = sen66_vocIndex;
+      doc["nox"] = sen66_noxIndex;
+      doc["co2"] = sen66_co2;
+    } else {
+      // Mark as null if invalid (prevents sending stale 0.0 values)
+      doc["aqi"] = nullptr;
+      doc["pm1p0"] = nullptr;
+      doc["pm2p5"] = nullptr;
+      doc["pm4p0"] = nullptr;
+      doc["pm10p0"] = nullptr;
+      doc["voc"] = nullptr;
+      doc["nox"] = nullptr;
+      doc["co2"] = nullptr;
+    }
   }
   
-  // Add SDP810 data if combo sensors active
+  // Add SDP810 data if combo sensors active (only if values are valid)
   if (useSDP810) {
-    doc["diffPressure"] = sdp810_pressure;
-    doc["hepaStatus"] = hepaStatus;
-    doc["hepaHealth"] = hepaHealthPercent;
+    // Only add if pressure is valid (check reasonable range)
+    if (sdp810_pressure >= -200.0 && sdp810_pressure <= 200.0) {
+      doc["diffPressure"] = sdp810_pressure;
+      doc["hepaStatus"] = hepaStatus;
+      doc["hepaHealth"] = hepaHealthPercent;
+    } else {
+      // Mark as null if invalid
+      doc["diffPressure"] = nullptr;
+      doc["hepaStatus"] = nullptr;
+      doc["hepaHealth"] = nullptr;
+    }
   }
   
   char buf[896];
@@ -949,6 +1001,10 @@ void readComboSensorsIfDue() {
   lastSensorAt = now;
   
   static char errMsg[64];
+  static int consecutiveSEN66Failures = 0;
+  static int consecutiveSDP810Failures = 0;
+  bool sen66Success = false;
+  bool sdp810Success = false;
   
   // Read SEN66 (Air Quality)
   if (useSEN66) {
@@ -959,16 +1015,35 @@ void readComboSensorsIfDue() {
     );
     
     if (err == 0) {
-      // Update filtered values for control logic
-      filtTempC = sen66_temperature;
-      filtHum = sen66_humidity;
-      sen66_aqi = calculateAQI(sen66_pm2p5);
-      
-      Serial.printf("[SEN66] T:%.1f°C H:%.1f%% PM2.5:%.1f AQI:%d CO2:%d\n",
-                    sen66_temperature, sen66_humidity, sen66_pm2p5, sen66_aqi, sen66_co2);
+      // Validate values are reasonable before accepting
+      if (sen66_temperature >= -40.0 && sen66_temperature <= 125.0 &&
+          sen66_humidity >= 0.0 && sen66_humidity <= 100.0 &&
+          sen66_pm2p5 >= 0.0 && sen66_pm2p5 <= 1000.0) {
+        // Update filtered values for control logic
+        filtTempC = sen66_temperature;
+        filtHum = sen66_humidity;
+        sen66_aqi = calculateAQI(sen66_pm2p5);
+        sen66Success = true;
+        consecutiveSEN66Failures = 0;
+        
+        Serial.printf("[SEN66] T:%.1f°C H:%.1f%% PM2.5:%.1f AQI:%d CO2:%d\n",
+                      sen66_temperature, sen66_humidity, sen66_pm2p5, sen66_aqi, sen66_co2);
+      } else {
+        Serial.printf("[SEN66] Invalid values - T:%.1f H:%.1f PM2.5:%.1f\n",
+                      sen66_temperature, sen66_humidity, sen66_pm2p5);
+        consecutiveSEN66Failures++;
+      }
     } else {
+      consecutiveSEN66Failures++;
       errorToString(err, errMsg, sizeof(errMsg));
-      Serial.printf("[SEN66] Read error: %s\n", errMsg);
+      Serial.printf("[SEN66] Read error (%d consecutive): %s\n", consecutiveSEN66Failures, errMsg);
+      
+      // After 3 consecutive failures, mark values as invalid
+      if (consecutiveSEN66Failures >= 3) {
+        filtTempC = NAN;
+        filtHum = NAN;
+        Serial.println("[SEN66] Multiple failures - marking values as invalid");
+      }
     }
   }
   
@@ -977,17 +1052,32 @@ void readComboSensorsIfDue() {
     uint16_t err = sdp810.readMeasurement(sdp810_pressure, sdp810_temperature);
     
     if (err == 0) {
-      updateHEPAStatus(sdp810_pressure);
-      Serial.printf("[SDP810] Pressure:%.2fPa HEPA:%s (%d%%)\n",
-                    sdp810_pressure, hepaStatus.c_str(), hepaHealthPercent);
+      // Validate pressure is reasonable (typically -100 to +100 Pa for differential)
+      if (sdp810_pressure >= -200.0 && sdp810_pressure <= 200.0) {
+        updateHEPAStatus(sdp810_pressure);
+        sdp810Success = true;
+        consecutiveSDP810Failures = 0;
+        
+        Serial.printf("[SDP810] Pressure:%.2fPa HEPA:%s (%d%%)\n",
+                      sdp810_pressure, hepaStatus.c_str(), hepaHealthPercent);
+      } else {
+        Serial.printf("[SDP810] Invalid pressure value: %.2fPa\n", sdp810_pressure);
+        consecutiveSDP810Failures++;
+      }
     } else {
+      consecutiveSDP810Failures++;
       errorToString(err, errMsg, sizeof(errMsg));
-      Serial.printf("[SDP810] Read error: %s\n", errMsg);
+      Serial.printf("[SDP810] Read error (%d consecutive): %s\n", consecutiveSDP810Failures, errMsg);
     }
   }
   
-  // Publish telemetry
-  publishTelemetryLocal();
+  // Only publish telemetry if at least one sensor read succeeded
+  // This prevents publishing stale/invalid data
+  if (sen66Success || sdp810Success || (!useSEN66 && !useSDP810)) {
+    publishTelemetryLocal();
+  } else {
+    Serial.println("⚠️ [Sensors] All reads failed - skipping telemetry publish");
+  }
 }
 
 // ---------- Serial Commands (Standalone Control) ----------
@@ -1651,11 +1741,13 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
 }
 
 void ensureMqtt(){
+  // CRITICAL: Local MQTT is PRIMARY - works independently of AWS IoT
+  // Non-blocking reconnection (similar to WiFi) - no resets, system continues normally
   if(mqttLocal.connected()) return;
   if (WiFi.status()!=WL_CONNECTED) return;
 
   unsigned long now = millis();
-  if(now - lastMqttAttempt < 2000) return;
+  if(now - lastMqttAttempt < 2000) return;  // Rate limit reconnection attempts
   lastMqttAttempt = now;
 
   mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
@@ -1663,6 +1755,7 @@ void ensureMqtt(){
   mqttLocal.setCallback(onMqttMessageLocal);
 
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
+  // Non-blocking connection attempt (timeout handled internally)
   bool ok = mqttLocal.connect(clientId.c_str(),
                          MQTT_USER, MQTT_PASS,
                          tStatus().c_str(), 1, true, "offline");
@@ -1673,12 +1766,16 @@ void ensureMqtt(){
     mqttLocal.subscribe(tProvBroker().c_str(), 1);
     mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
     Serial.println("✓ Local MQTT connected: " + mqttHost);
+    Serial.println("  → Local control active (works without internet)");
     
     // Publish initial state to local MQTT
     publishStateLocal();
     publishTelemetryLocal();
   }else{
-    Serial.println("✗ Local MQTT connect failed");
+    // Connection failed - this is OK, system continues normally (like WiFi reconnection)
+    Serial.println("✗ Local MQTT connect failed (will retry in 2s)");
+    Serial.println("  → System continues operating normally");
+    Serial.println("  → Will retry automatically (non-blocking)");
   }
 }
 
@@ -1884,25 +1981,31 @@ void setup()
   Serial.println("  - System state preserved during reconnections");
   Serial.println("========================================\n");
 
-  // Try initial AWS IoT connection if WiFi is already connected
+  // Try initial AWS IoT connection if WiFi is already connected (OPTIONAL)
+  // CRITICAL: AWS IoT is optional - failure does NOT affect local MQTT or system operation
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("📡 WiFi already connected, attempting AWS IoT connection...");
+    Serial.println("📡 WiFi connected, attempting AWS IoT connection (optional cloud service)...");
     if (client.connect(THINGNAME)) {
-      Serial.println("✓ AWS IoT connected on startup");
+      Serial.println("✓ AWS IoT connected on startup (cloud service active)");
       bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
       Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
       Serial.println(subResult ? " ✓" : " ✗ FAILED");
       publishStatusOnline();
     } else {
-      Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
+      Serial.println("✗ AWS IoT connection failed on startup (optional - will retry in loop)");
+      Serial.println("  → Local MQTT continues working normally");
+      Serial.println("  → System operates independently of cloud service");
     }
   }
 
   // Restore system state if needed (standalone mode)
   if (pendingRecoveryStart) {
     pendingRecoveryStart = false;
+    // System relay already turned on in restoreSystemState()
+    // Just set runState to true - motor timing will be handled by loop() based on restored timing
     runState = true;
     motorLogMsg("⚠️ RECOVERY START: System recovered and running (standalone mode)");
+    motorLogMsg("  System relay: ON (restored from saved state)");
   }
 
   lastLoopTime = millis();
@@ -1972,22 +2075,29 @@ void loop()
     }
   }
 
-  // ========== AWS IoT MQTT (Cloud) - Only if WiFi connected ==========
-  // Keep the AWS MQTT connection alive - MUST call this every loop
+  // ========== AWS IoT MQTT (Cloud) - OPTIONAL, Non-blocking ==========
+  // CRITICAL: AWS IoT is completely optional - failures must NOT affect local MQTT or system operation
+  // Keep the AWS MQTT connection alive - MUST call this every loop (non-blocking)
   if (client.connected()) {
     client.loop();
   }
   
-  // Simple reconnection logic for AWS - only try if WiFi connected and MQTT disconnected
+  // Non-blocking reconnection logic for AWS - only try if WiFi connected and MQTT disconnected
+  // CRITICAL: This is OPTIONAL - local MQTT works independently even if AWS fails
   if (WiFi.status() == WL_CONNECTED && !client.connected()) {
     static unsigned long lastReconnectAttempt = 0;
-    if (now - lastReconnectAttempt > 15000) { // Wait 15 seconds between attempts
+    // Try every 30 seconds (less frequent to avoid interfering with local MQTT)
+    if (now - lastReconnectAttempt > 30000) {
       lastReconnectAttempt = now;
-      Serial.println("⚠️ AWS IoT disconnected, reconnecting...");
+      Serial.println("⚠️ AWS IoT disconnected (optional cloud service)");
+      Serial.println("  → Local MQTT continues working normally");
+      Serial.println("  → Attempting AWS reconnection (non-blocking)...");
       esp_task_wdt_reset();
       
-      if (client.connect(THINGNAME)) {
-        Serial.println("✓ AWS IoT reconnected");
+      // Non-blocking connection attempt (timeout handled by setSocketTimeout)
+      bool connected = client.connect(THINGNAME);
+      if (connected) {
+        Serial.println("✓ AWS IoT reconnected (cloud service restored)");
         // Resubscribe to command topic
         bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
         Serial.print("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
@@ -1997,8 +2107,12 @@ void loop()
         publishStateAWS();
         publishTelemetryAWS();
       } else {
-        Serial.print("✗ AWS reconnection failed, state: ");
-        Serial.println(client.state());
+        // Connection failed - this is OK, local MQTT still works
+        Serial.print("✗ AWS reconnection failed (state: ");
+        Serial.print(client.state());
+        Serial.println(") - Local MQTT continues normally");
+        Serial.println("  → System continues operating via local MQTT");
+        Serial.println("  → Will retry AWS connection in 30 seconds");
       }
     }
   }
@@ -2014,12 +2128,13 @@ void loop()
     }
   }
 
-  // ========== Local MQTT (Raspberry Pi) - Only if WiFi connected ==========
-  // Ensure local MQTT connection and handle messages (non-blocking)
+  // ========== Local MQTT (Raspberry Pi) - PRIMARY, Works without Internet ==========
+  // CRITICAL: Local MQTT is independent of AWS IoT - works even without internet
+  // Local MQTT reconnects automatically (like WiFi) - non-blocking, no resets
   if (WiFi.status() == WL_CONNECTED) {
-    ensureMqtt();
+    ensureMqtt();  // Non-blocking reconnection (similar to WiFi reconnection)
     if (mqttLocal.connected()) {
-      mqttLocal.loop();
+      mqttLocal.loop();  // Handle local MQTT messages
     }
   }
 

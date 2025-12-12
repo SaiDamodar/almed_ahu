@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../theme/app_theme.dart';
@@ -117,6 +119,22 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                       ),
                     ),
+                    // Exit button
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Theme.of(context).dividerColor.withOpacity( 0.1),
+                        ),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.exit_to_app_rounded),
+                        onPressed: () => _exitApplication(context),
+                        tooltip: 'Exit Application',
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     // Logout button
                     Container(
                       decoration: BoxDecoration(
@@ -717,5 +735,37 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 }
 
-
+/// Helper function to exit the application
+void _exitApplication(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        title: const Text('Exit Application'),
+        content: const Text('Are you sure you want to exit the AHU Dashboard?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              // Exit the application
+              if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+                exit(0);
+              } else {
+                SystemNavigator.pop();
+              }
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+            child: const Text('Exit'),
+          ),
+        ],
+      );
+    },
+  );
+}
 
