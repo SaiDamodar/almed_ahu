@@ -141,6 +141,9 @@ class _TopBar extends StatelessWidget {
           // WiFi control (Admin only)
           _WiFiButton(),
           const SizedBox(width: 12),
+          // Reset button (Admin only)
+          _ResetButton(ahuId: ahuId),
+          const SizedBox(width: 12),
           // Exit button
           Container(
             decoration: BoxDecoration(
@@ -382,6 +385,81 @@ class _WiFiButton extends StatelessWidget {
                     child: const WiFiControlWidget(),
                   ),
                 ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ResetButton extends StatelessWidget {
+  final String ahuId;
+
+  const _ResetButton({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, UserRole?>(
+      selector: (_, provider) => provider.currentRole,
+      builder: (context, role, _) {
+        if (role != UserRole.admin) return const SizedBox.shrink();
+
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withOpacity(0.1),
+            ),
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Reset ESP32',
+            color: Colors.orange,
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (BuildContext dialogContext) {
+                  return AlertDialog(
+                    title: const Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                        SizedBox(width: 12),
+                        Text('Reset ESP32'),
+                      ],
+                    ),
+                    content: const Text(
+                      'This will reset the ESP32 device (same as pressing the physical reset button). '
+                      'The system will restart and reconnect. Continue?',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          context.read<AppProvider>().resetEsp32(ahuId);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Reset command sent to ESP32'),
+                              backgroundColor: Colors.orange,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Reset'),
+                      ),
+                    ],
+                  );
+                },
               );
             },
           ),

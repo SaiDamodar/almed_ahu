@@ -252,6 +252,15 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  /// Reset ESP32 (Admin only) - same as pressing physical reset button
+  void resetEsp32(String ahuId) {
+    if (_currentRole != UserRole.admin) return;
+    final ahu = _ahuUnits[ahuId];
+    if (ahu != null) {
+      _mqttService?.resetEsp32(ahu);
+    }
+  }
+
   /// Provision WiFi (admin only)
   void provisionWifi(
     String ahuId, {

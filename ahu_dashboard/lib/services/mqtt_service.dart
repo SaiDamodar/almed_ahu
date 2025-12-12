@@ -146,6 +146,9 @@ class MqttService {
   /// Set operation mode (true = online/cloud, false = offline/local only)
   void setMode(AhuUnit ahu, bool onlineMode) => sendCommand(ahu, {'mode': onlineMode ? 'online' : 'offline'});
 
+  /// Reset ESP32 (same as pressing physical reset button)
+  void resetEsp32(AhuUnit ahu) => sendCommand(ahu, {'reset': true});
+
   /// Provision WiFi credentials
   void provisionWifi(
     AhuUnit ahu, {

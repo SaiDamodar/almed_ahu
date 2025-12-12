@@ -555,28 +555,44 @@ int calculateAQI(float pm25) {
 
 // ---------- Sensor Hot-Swap Detection ----------
 // Checks if a NEW sensor type has been connected (triggers reset if so)
+// Uses debouncing to prevent false positives from I2C glitches
 void checkForNewSensor() {
-  static char errMsg[64];
+  static SensorMode lastDetectedMode = SENSOR_NONE;
+  static int detectionCount = 0;
+  const int REQUIRED_CONSECUTIVE_DETECTIONS = 3; // Require 3 consecutive detections (15 seconds) before reset
+  
   bool foundSEN66 = false;
   bool foundSDP810 = false;
   bool foundSHT45 = false;
   
-  // Quick probe for SEN66 (don't initialize, just check presence)
-  Wire.beginTransmission(0x6B);  // SEN66 I2C address
-  if (Wire.endTransmission() == 0) {
-    foundSEN66 = true;
+  // Quick probe for SEN66 (retry to reduce false negatives)
+  for (int i = 0; i < 2; i++) {
+    Wire.beginTransmission(0x6B);  // SEN66 I2C address
+    if (Wire.endTransmission() == 0) {
+      foundSEN66 = true;
+      break;
+    }
+    delay(10); // Small delay between retries
   }
   
-  // Quick probe for SDP810
-  Wire.beginTransmission(0x25);  // SDP810 I2C address
-  if (Wire.endTransmission() == 0) {
-    foundSDP810 = true;
+  // Quick probe for SDP810 (retry to reduce false negatives)
+  for (int i = 0; i < 2; i++) {
+    Wire.beginTransmission(0x25);  // SDP810 I2C address
+    if (Wire.endTransmission() == 0) {
+      foundSDP810 = true;
+      break;
+    }
+    delay(10); // Small delay between retries
   }
   
-  // Quick probe for SHT45
-  Wire.beginTransmission(0x44);  // SHT45 I2C address
-  if (Wire.endTransmission() == 0) {
-    foundSHT45 = true;
+  // Quick probe for SHT45 (retry to reduce false negatives)
+  for (int i = 0; i < 2; i++) {
+    Wire.beginTransmission(0x44);  // SHT45 I2C address
+    if (Wire.endTransmission() == 0) {
+      foundSHT45 = true;
+      break;
+    }
+    delay(10); // Small delay between retries
   }
   
   // Determine what sensor mode would be selected now
@@ -587,24 +603,52 @@ void checkForNewSensor() {
     detectedMode = SENSOR_SHT45;
   }
   
-  // Check if a DIFFERENT sensor type is now connected
+  // Debouncing logic: Require multiple consecutive detections before triggering reset
   if (originalSensorMode != SENSOR_NONE && detectedMode != SENSOR_NONE) {
     if (detectedMode != originalSensorMode) {
-      // NEW sensor type detected! Reset to reinitialize with new sensor
-      Serial.println("\n========================================");
-      Serial.println("🔄 NEW SENSOR TYPE DETECTED!");
-      Serial.printf("   Previous: %s\n", originalSensorMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
-      Serial.printf("   Detected: %s\n", detectedMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
-      Serial.println("   Resetting to apply new sensor configuration...");
-      Serial.println("========================================\n");
-      
-      // Save current state before reset
-      saveSystemState();
-      delay(500);
-      
-      // Trigger reset
-      ESP.restart();
+      // Different sensor type detected - increment counter
+      if (detectedMode == lastDetectedMode) {
+        detectionCount++;
+        Serial.printf("[Sensor Check] Different sensor detected: %s (count: %d/%d)\n",
+                      detectedMode == SENSOR_COMBO ? "COMBO" : "SHT45",
+                      detectionCount, REQUIRED_CONSECUTIVE_DETECTIONS);
+        
+        // Only reset after multiple consecutive detections (debouncing)
+        if (detectionCount >= REQUIRED_CONSECUTIVE_DETECTIONS) {
+          // NEW sensor type confirmed! Reset to reinitialize with new sensor
+          Serial.println("\n========================================");
+          Serial.println("🔄 NEW SENSOR TYPE CONFIRMED!");
+          Serial.printf("   Previous: %s\n", originalSensorMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
+          Serial.printf("   Detected: %s\n", detectedMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
+          Serial.printf("   Confirmed: %d consecutive detections\n", detectionCount);
+          Serial.println("   Resetting to apply new sensor configuration...");
+          Serial.println("========================================\n");
+          
+          // Save current state before reset
+          saveSystemState();
+          delay(500);
+          
+          // Trigger reset
+          ESP.restart();
+        }
+      } else {
+        // Different detection from last time - reset counter (debouncing)
+        lastDetectedMode = detectedMode;
+        detectionCount = 1;
+        Serial.printf("[Sensor Check] Sensor type changed (debouncing): %s\n",
+                      detectedMode == SENSOR_COMBO ? "COMBO" : "SHT45");
+      }
+    } else {
+      // Same sensor type - reset debounce counter
+      if (lastDetectedMode != detectedMode) {
+        lastDetectedMode = detectedMode;
+        detectionCount = 0;
+      }
     }
+  } else {
+    // Reset counter if detection is invalid
+    lastDetectedMode = SENSOR_NONE;
+    detectionCount = 0;
   }
 }
 
@@ -1388,6 +1432,24 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     }
   }
   
+  // Handle reset command (same as pressing physical reset button)
+  if (doc.containsKey("reset") && doc["reset"] == true) {
+    Serial.println("\n========================================");
+    Serial.println("🔄 RESET COMMAND RECEIVED!");
+    Serial.println("  Saving system state before reset...");
+    Serial.println("========================================\n");
+    
+    // Save current state before reset
+    saveSystemState();
+    
+    // Small delay to ensure state is saved
+    delay(500);
+    
+    // Restart ESP32 (same as pressing reset button)
+    ESP.restart();
+    return; // Never reached, but good practice
+  }
+  
   // Send updated state immediately after AWS command
   if (stateChanged) {
     Serial.println("📤 Sending updated state...");
@@ -1841,6 +1903,24 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       }
       stateChanged = true;
     }
+  }
+  
+  // Handle reset command (same as pressing physical reset button)
+  if (doc.containsKey("reset") && doc["reset"] == true) {
+    Serial.println("\n========================================");
+    Serial.println("🔄 RESET COMMAND RECEIVED (Local MQTT)!");
+    Serial.println("  Saving system state before reset...");
+    Serial.println("========================================\n");
+    
+    // Save current state before reset
+    saveSystemState();
+    
+    // Small delay to ensure state is saved
+    delay(500);
+    
+    // Restart ESP32 (same as pressing reset button)
+    ESP.restart();
+    return; // Never reached, but good practice
   }
   
   if (stateChanged) {
