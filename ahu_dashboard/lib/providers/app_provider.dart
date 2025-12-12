@@ -243,6 +243,15 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  /// Set operation mode (Admin only)
+  void setMode(String ahuId, bool onlineMode) {
+    if (_currentRole != UserRole.admin) return;
+    final ahu = _ahuUnits[ahuId];
+    if (ahu != null) {
+      _mqttService?.setMode(ahu, onlineMode);
+    }
+  }
+
   /// Provision WiFi (admin only)
   void provisionWifi(
     String ahuId, {

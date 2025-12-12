@@ -15,6 +15,7 @@ class AhuState {
   final double tempSet;      // Temperature setpoint
   final double humSet;       // Humidity setpoint
   final String ip;           // ESP32 IP address
+  @JsonKey(name: 'onlineMode') final bool? onlineMode;  // Operation mode: true=online/cloud, false=offline/local
   
   // Motor timings (in seconds)
   @JsonKey(name: 'm1_start') final int? m1Start;
@@ -34,6 +35,7 @@ class AhuState {
     required this.tempSet,
     required this.humSet,
     required this.ip,
+    this.onlineMode,
     this.m1Start,
     this.m1Post,
     this.m2Interval,

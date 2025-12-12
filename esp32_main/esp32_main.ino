@@ -211,6 +211,7 @@ float  tempSet = 22.0;
 const float TEMP_DEADBAND = 1.0;
 const unsigned long CP_MIN_OFF_MS = 5000;
 const unsigned long CP_MIN_ON_MS  = 3000;
+const unsigned long CP_CYCLE_DELAY_MS = 60UL * 1000UL;  // 1 minute delay between CP cycles
 unsigned long cpLastOnAt  = 0, cpLastOffAt = 0;
 
 bool   heatOn = false;
@@ -219,6 +220,9 @@ const float HUM_DEADBAND = 3.0;
 const unsigned long HEAT_MIN_OFF_MS = 5000;
 const unsigned long HEAT_MIN_ON_MS  = 3000;
 unsigned long heatLastOnAt  = 0, heatLastOffAt = 0;
+
+// ---------- Operation Mode ----------
+bool onlineMode = true;  // true = online/cloud (AWS IoT + Local MQTT), false = offline/local only (Local MQTT only)
 
 // ---------- PWM Fan Control (D2 -> 0-10V Converter) ----------
 #define PIN_FAN_PWM 2
@@ -278,7 +282,17 @@ void saveSystemState(){
   prefs.putBool("heatOn", heatOn);
   prefs.putBool("shuttingDown", shuttingDown);
   prefs.putInt("fanSpeed", (int)fanSpeed);
+  prefs.putBool("onlineMode", onlineMode);
   prefs.putULong("saveTime", now);
+  
+  // Save CP timing state (for 1-minute cycle delay)
+  if (cpLastOffAt > 0 && cpLastOffAt <= now) {
+    // Save time elapsed since CP last turned off (for cycle delay)
+    unsigned long elapsedSinceOff = now - cpLastOffAt;
+    prefs.putULong("cpLastOffElapsed", elapsedSinceOff);
+  } else {
+    prefs.putULong("cpLastOffElapsed", 0);
+  }
   
   // Save motor timing state (time remaining until next M2 run)
   // CRITICAL: Save when Motor 2 last ran (relative to saveTime) for accurate timing across resets
@@ -349,6 +363,29 @@ void restoreSystemState(){
       
       cpOn = wasCpOn;
       heatOn = wasHeatOn;
+      
+      // Restore CP timing state (for 1-minute cycle delay)
+      unsigned long savedCpLastOffElapsed = prefs.getULong("cpLastOffElapsed", 0);
+      if (savedCpLastOffElapsed > 0) {
+        // Calculate when CP last turned off based on saved elapsed time
+        // Account for time that may have passed during reset
+        unsigned long elapsedSinceSave = 0;
+        if (saveTime > 0 && now > saveTime) {
+          elapsedSinceSave = now - saveTime;
+        }
+        // Restore cpLastOffAt to maintain the 1-minute cycle delay
+        if (savedCpLastOffElapsed + elapsedSinceSave < CP_CYCLE_DELAY_MS) {
+          // Still within the delay period - restore timing
+          cpLastOffAt = now - (savedCpLastOffElapsed + elapsedSinceSave);
+        } else {
+          // Delay period has passed - can turn on immediately if needed
+          cpLastOffAt = now - CP_CYCLE_DELAY_MS;
+        }
+      } else {
+        // No saved timing - allow immediate operation
+        cpLastOffAt = now - CP_CYCLE_DELAY_MS;
+      }
+      
       cpWrite(cpOn);
       heatWrite(heatOn);
       
@@ -480,6 +517,8 @@ void clearSystemState(){
   prefs.putULong("m2StartAtRemaining", 0);
   prefs.putBool("m2ScheduledAfterM1", false);
   prefs.putULong("m2LastRunTime", 0);
+  prefs.putULong("cpLastOffElapsed", 0);
+  // Note: onlineMode is NOT cleared - it persists across system stops
 }
 
 // ---------- Logging (Simplified - Serial only to avoid MQTT overload) ----------
@@ -569,6 +608,33 @@ void checkForNewSensor() {
   }
 }
 
+// ---------- Internet Availability Check ----------
+// Instant check if internet is available (non-blocking, never triggers watchdog)
+// Returns true if internet is available, false otherwise
+// CRITICAL: Must be instant to prevent watchdog resets - no blocking operations
+bool checkInternetAvailable() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+  
+  // Instant check: Check if gateway is Pi hotspot (10.42.0.1)
+  // If on Pi hotspot, assume no internet (but local MQTT works perfectly)
+  // This check is instant and never blocks
+  IPAddress gateway = WiFi.gatewayIP();
+  
+  // Check if gateway is Pi hotspot IP (10.42.0.1)
+  // Pi hotspot typically has no internet, only local network
+  if (gateway[0] == 10 && gateway[1] == 42 && gateway[2] == 0 && gateway[3] == 1) {
+    // On Pi hotspot - no internet, but this is OK (local MQTT works)
+    return false;
+  }
+  
+  // For other gateways, assume internet is available
+  // This is a heuristic - if not on Pi hotspot, likely has internet
+  // We avoid connection tests to prevent blocking and watchdog resets
+  return true;
+}
+
 // ---------- HEPA Filter Status ----------
 void updateHEPAStatus(float pressure) {
   float absP = abs(pressure);
@@ -640,14 +706,15 @@ void controlCP(float t){
   float offThresh = tempSet;
 
   if (!cpOn){
-    if (t >= onThresh && (now - cpLastOffAt) >= CP_MIN_OFF_MS){
+    // Check both minimum off time AND 1-minute cycle delay
+    if (t >= onThresh && (now - cpLastOffAt) >= CP_MIN_OFF_MS && (now - cpLastOffAt) >= CP_CYCLE_DELAY_MS){
       cpWrite(true); cpOn = true; cpLastOnAt = now;
       motorLogMsg("CP ON (cooling)");
     }
   } else {
     if (t <= offThresh && (now - cpLastOnAt) >= CP_MIN_ON_MS){
       cpWrite(false); cpOn = false; cpLastOffAt = now;
-      motorLogMsg("CP OFF (reached temp setpoint)");
+      motorLogMsg("CP OFF (reached temp setpoint) - 1 min delay before next cycle");
     }
   }
 }
@@ -926,6 +993,7 @@ void publishStateLocal(){
   doc["m2_run"] = M2_RUN_TIME / 1000UL;
   doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
   doc["ip"]=WiFi.localIP().toString();
+  doc["onlineMode"] = onlineMode;
   char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
@@ -1289,6 +1357,25 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
       Serial.println("✓ Fan toggle: " + String((int)fanSpeed) + " → " + String((int)newSpeed));
       setFanSpeed(newSpeed);
       prefs.putInt("fanSpeed", (int)newSpeed);
+      stateChanged = true;
+    }
+  }
+  
+  // Handle mode switching (online/offline)
+  if (doc.containsKey("mode")){
+    String modeStr = doc["mode"].as<String>();
+    bool newMode = (modeStr == "online");
+    if (newMode != onlineMode) {
+      onlineMode = newMode;
+      prefs.putBool("onlineMode", onlineMode);
+      Serial.println("✓ Operation mode changed: " + String(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)"));
+      if (!onlineMode) {
+        // Disconnect AWS IoT when switching to offline mode
+        if (client.connected()) {
+          client.disconnect();
+          Serial.println("  → AWS IoT disconnected (offline mode)");
+        }
+      }
       stateChanged = true;
     }
   }
@@ -1727,6 +1814,25 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     }
   }
   
+  // Handle mode switching (online/offline)
+  if (doc.containsKey("mode")){
+    String modeStr = doc["mode"].as<String>();
+    bool newMode = (modeStr == "online");
+    if (newMode != onlineMode) {
+      onlineMode = newMode;
+      prefs.putBool("onlineMode", onlineMode);
+      Serial.println("✓ Operation mode changed (Local): " + String(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)"));
+      if (!onlineMode) {
+        // Disconnect AWS IoT when switching to offline mode
+        if (client.connected()) {
+          client.disconnect();
+          Serial.println("  → AWS IoT disconnected (offline mode)");
+        }
+      }
+      stateChanged = true;
+    }
+  }
+  
   if (stateChanged) {
     Serial.println("📤 Sending updated state...");
     if (client.connected()) {
@@ -1753,12 +1859,15 @@ void ensureMqtt(){
   mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
   mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);  // Set buffer size for combo sensor data
   mqttLocal.setCallback(onMqttMessageLocal);
+  mqttLocal.setSocketTimeout(1);  // 1 second max - prevents blocking watchdog
 
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
   // Non-blocking connection attempt (timeout handled internally)
+  esp_task_wdt_reset(); // Feed watchdog before connection
   bool ok = mqttLocal.connect(clientId.c_str(),
                          MQTT_USER, MQTT_PASS,
                          tStatus().c_str(), 1, true, "offline");
+  esp_task_wdt_reset(); // Feed watchdog after connection
   if(ok){
     publishStatusOnlineLocal();
     mqttLocal.subscribe(tCmd().c_str(), 1);
@@ -1907,6 +2016,11 @@ void setup()
   int savedFan = prefs.getInt("fanSpeed", 0);
   if (savedFan >= 0 && savedFan <= 3) fanSpeed = (FanSpeed)savedFan;
 
+  // Load operation mode (default to online)
+  onlineMode = prefs.getBool("onlineMode", true);
+  Serial.print("  Operation mode: ");
+  Serial.println(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)");
+
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
   M1_POST_RUN = prefs.getULong("m1_post", M1_POST_RUN);
   M2_INTERVAL = prefs.getULong("m2_interval", M2_INTERVAL);
@@ -1958,8 +2072,8 @@ void setup()
   // Set keep-alive to 60 seconds (AWS IoT default is 1200s, but 60s is safer)
   client.setKeepAlive(60);
   
-  // Set socket timeout
-  client.setSocketTimeout(15);
+  // Set socket timeout - VERY SHORT timeout to prevent blocking watchdog
+  client.setSocketTimeout(1);  // 1 second max - prevents watchdog resets
 
   // Set the function to handle messages
   client.setCallback(messageHandler);
@@ -1981,21 +2095,45 @@ void setup()
   Serial.println("  - System state preserved during reconnections");
   Serial.println("========================================\n");
 
-  // Try initial AWS IoT connection if WiFi is already connected (OPTIONAL)
+  // Try initial AWS IoT connection if:
+  // 1. Online mode is enabled
+  // 2. WiFi is connected
+  // 3. Internet is available
+  // CRITICAL: Check internet availability BEFORE attempting AWS IoT connection
   // CRITICAL: AWS IoT is optional - failure does NOT affect local MQTT or system operation
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("📡 WiFi connected, attempting AWS IoT connection (optional cloud service)...");
-    if (client.connect(THINGNAME)) {
-      Serial.println("✓ AWS IoT connected on startup (cloud service active)");
-      bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-      Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-      Serial.println(subResult ? " ✓" : " ✗ FAILED");
-      publishStatusOnline();
+  if (onlineMode && WiFi.status() == WL_CONNECTED) {
+    Serial.println("📡 WiFi connected, checking internet availability...");
+    esp_task_wdt_reset(); // Feed watchdog before internet check
+    bool hasInternet = checkInternetAvailable();
+    esp_task_wdt_reset(); // Feed watchdog after internet check
+    
+    if (hasInternet) {
+      Serial.println("✓ Internet available - attempting AWS IoT connection...");
+      esp_task_wdt_reset(); // Feed watchdog before connection
+      if (client.connect(THINGNAME)) {
+        esp_task_wdt_reset(); // Feed watchdog after connection
+        Serial.println("✓ AWS IoT connected on startup (cloud service active)");
+        esp_task_wdt_reset(); // Feed watchdog before subscribe
+        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+        esp_task_wdt_reset(); // Feed watchdog after subscribe
+        Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+        Serial.println(subResult ? " ✓" : " ✗ FAILED");
+        publishStatusOnline();
+      } else {
+        esp_task_wdt_reset(); // Feed watchdog after failed connection
+        Serial.println("✗ AWS IoT connection failed on startup");
+        Serial.println("  → Will retry when internet is available");
+        Serial.println("  → Local MQTT continues working normally");
+      }
     } else {
-      Serial.println("✗ AWS IoT connection failed on startup (optional - will retry in loop)");
+      Serial.println("⚠️ No internet detected - AWS IoT connection skipped");
       Serial.println("  → Local MQTT continues working normally");
-      Serial.println("  → System operates independently of cloud service");
+      Serial.println("  → System operates independently (no cloud service)");
+      Serial.println("  → Will check for internet every 1 minute");
     }
+  } else if (!onlineMode) {
+    Serial.println("✓ Offline mode enabled - AWS IoT disabled");
+    Serial.println("  → Local MQTT only (no cloud service)");
   }
 
   // Restore system state if needed (standalone mode)
@@ -2077,54 +2215,131 @@ void loop()
 
   // ========== AWS IoT MQTT (Cloud) - OPTIONAL, Non-blocking ==========
   // CRITICAL: AWS IoT is completely optional - failures must NOT affect local MQTT or system operation
-  // Keep the AWS MQTT connection alive - MUST call this every loop (non-blocking)
-  if (client.connected()) {
-    client.loop();
-  }
+  // Only active in ONLINE mode - in OFFLINE mode, AWS IoT is completely disabled
+  if (onlineMode) {
+    // Keep the AWS MQTT connection alive - MUST call this every loop (non-blocking)
+    if (client.connected()) {
+      client.loop();
+    }
+    
+    // Non-blocking reconnection logic for AWS - only try if WiFi connected, internet available, and MQTT disconnected
+    // CRITICAL: Check internet availability BEFORE attempting AWS IoT connection
+    // CRITICAL: This prevents watchdog resets by only connecting when internet is actually available
+    static unsigned long lastInternetCheck = 0;
+    static bool internetAvailable = false;
+    static unsigned long lastAwsReconnectAttempt = 0;
+    static int consecutiveFailures = 0;
+    
+    // Check internet availability every 1 minute (quick, non-blocking check)
+    // First check happens immediately (lastInternetCheck starts at 0)
+    if (WiFi.status() == WL_CONNECTED && (now - lastInternetCheck > 60000 || lastInternetCheck == 0)) {
+      lastInternetCheck = now;
+      esp_task_wdt_reset(); // Feed watchdog before internet check
+      internetAvailable = checkInternetAvailable();
+      esp_task_wdt_reset(); // Feed watchdog after internet check
+      
+      if (internetAvailable) {
+        Serial.println("✓ Internet available - AWS IoT connection enabled");
+      } else {
+        Serial.println("⚠️ No internet detected - AWS IoT connection disabled");
+        Serial.println("  → Local MQTT continues working normally");
+        Serial.println("  → Will check for internet again in 1 minute");
+      }
+    }
   
-  // Non-blocking reconnection logic for AWS - only try if WiFi connected and MQTT disconnected
-  // CRITICAL: This is OPTIONAL - local MQTT works independently even if AWS fails
-  if (WiFi.status() == WL_CONNECTED && !client.connected()) {
-    static unsigned long lastReconnectAttempt = 0;
-    // Try every 30 seconds (less frequent to avoid interfering with local MQTT)
-    if (now - lastReconnectAttempt > 30000) {
-      lastReconnectAttempt = now;
-      Serial.println("⚠️ AWS IoT disconnected (optional cloud service)");
-      Serial.println("  → Local MQTT continues working normally");
-      Serial.println("  → Attempting AWS reconnection (non-blocking)...");
+  // Only attempt AWS IoT connection if:
+  // 1. Online mode is enabled
+  // 2. WiFi is connected
+  // 3. Internet is available
+  // 4. AWS IoT is not already connected
+  // 5. Enough time has passed since last attempt
+  if (onlineMode && WiFi.status() == WL_CONNECTED && internetAvailable && !client.connected()) {
+    unsigned long retryInterval = 60000; // 1 minute for first 3 attempts
+    if (consecutiveFailures >= 3) {
+      retryInterval = 600000; // 10 minutes after multiple failures
+    }
+    
+    // Only attempt if enough time has passed
+    if (now - lastAwsReconnectAttempt > retryInterval) {
+      lastAwsReconnectAttempt = now;
+      
+      // CRITICAL: Feed watchdog before connection attempt
       esp_task_wdt_reset();
       
-      // Non-blocking connection attempt (timeout handled by setSocketTimeout)
+      Serial.println("⚠️ AWS IoT disconnected - attempting reconnection...");
+      Serial.print("  Internet: Available | Failures: ");
+      Serial.print(consecutiveFailures);
+      Serial.println(" | Timeout: 1s");
+      
+      // CRITICAL: Connection attempt with 1-second timeout
+      unsigned long connectStart = millis();
       bool connected = client.connect(THINGNAME);
+      unsigned long connectTime = millis() - connectStart;
+      
+      // CRITICAL: Feed watchdog IMMEDIATELY after connection attempt
+      esp_task_wdt_reset();
+      
       if (connected) {
         Serial.println("✓ AWS IoT reconnected (cloud service restored)");
+        Serial.print("  Connection time: ");
+        Serial.print(connectTime);
+        Serial.println("ms");
+        consecutiveFailures = 0; // Reset failure counter
+        
         // Resubscribe to command topic
+        esp_task_wdt_reset(); // Feed watchdog before subscribe
         bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+        esp_task_wdt_reset(); // Feed watchdog after subscribe
         Serial.print("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
         Serial.println(subResult ? " ✓" : " ✗ FAILED");
+        
         // Send status on reconnection
         publishStatusOnline();
         publishStateAWS();
         publishTelemetryAWS();
       } else {
-        // Connection failed - this is OK, local MQTT still works
-        Serial.print("✗ AWS reconnection failed (state: ");
-        Serial.print(client.state());
+        consecutiveFailures++;
+        Serial.print("✗ AWS reconnection failed (timeout after ");
+        Serial.print(connectTime);
+        Serial.print("ms, failures: ");
+        Serial.print(consecutiveFailures);
         Serial.println(") - Local MQTT continues normally");
         Serial.println("  → System continues operating via local MQTT");
-        Serial.println("  → Will retry AWS connection in 30 seconds");
+        if (consecutiveFailures >= 3) {
+          Serial.println("  → Multiple failures - retrying in 10 minutes");
+        } else {
+          Serial.println("  → Will retry AWS connection in 1 minute");
+        }
       }
+    } else if (WiFi.status() == WL_CONNECTED && !internetAvailable && !client.connected()) {
+      // Log once per minute that AWS IoT is disabled due to no internet (only in online mode)
+      static unsigned long lastNoInternetLog = 0;
+      if (now - lastNoInternetLog > 60000) {
+        lastNoInternetLog = now;
+        Serial.println("⚠️ AWS IoT disabled - no internet connection");
+        Serial.println("  → Local MQTT continues working normally");
+        Serial.println("  → Checking for internet every 1 minute");
+      }
+    }
+  } else {
+    // Offline mode - ensure AWS IoT is disconnected
+    if (client.connected()) {
+      client.disconnect();
+      Serial.println("✓ Offline mode - AWS IoT disconnected");
+      Serial.println("  → Local MQTT only (no cloud service)");
     }
   }
   
-  // Debug: Log MQTT connection status periodically
-  static unsigned long lastMqttStatusLog = 0;
-  if (now - lastMqttStatusLog > 30000) { // Every 30 seconds
-    lastMqttStatusLog = now;
-    if (client.connected()) {
-      Serial.println("[DEBUG] AWS IoT MQTT: Connected, subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-    } else {
-      Serial.println("[DEBUG] AWS IoT MQTT: Disconnected (WiFi: " + String(WiFi.status() == WL_CONNECTED ? "OK" : "OFF") + ")");
+  // Debug: Log MQTT connection status periodically (only in online mode)
+  if (onlineMode) {
+    static unsigned long lastMqttStatusLog = 0;
+    if (now - lastMqttStatusLog > 30000) { // Every 30 seconds
+      lastMqttStatusLog = now;
+      if (client.connected()) {
+        Serial.println("[DEBUG] AWS IoT MQTT: Connected, subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+      } else {
+        Serial.println("[DEBUG] AWS IoT MQTT: Disconnected (WiFi: " + String(WiFi.status() == WL_CONNECTED ? "OK" : "OFF") + ")");
+      }
     }
   }
 
@@ -2165,9 +2380,9 @@ void loop()
                   originalSensorMode == SENSOR_COMBO ? "COMBO" : (originalSensorMode == SENSOR_SHT45 ? "SHT45" : "NONE"));
   }
 
-  // Publish to AWS every 5 seconds
+  // Publish to AWS every 5 seconds (only in online mode)
   static unsigned long lastAWS = 0;
-  if (client.connected() && (now - lastAWS >= 2000)) {
+  if (onlineMode && client.connected() && (now - lastAWS >= 2000)) {
     lastAWS = now;
     publishTelemetryAWS();
     publishStateAWS();

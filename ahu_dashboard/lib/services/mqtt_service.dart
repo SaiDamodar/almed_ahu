@@ -143,6 +143,9 @@ class MqttService {
   /// Toggle fan speed
   void toggleFanSpeed(AhuUnit ahu) => sendCommand(ahu, {'fanToggle': true});
 
+  /// Set operation mode (true = online/cloud, false = offline/local only)
+  void setMode(AhuUnit ahu, bool onlineMode) => sendCommand(ahu, {'mode': onlineMode ? 'online' : 'offline'});
+
   /// Provision WiFi credentials
   void provisionWifi(
     AhuUnit ahu, {

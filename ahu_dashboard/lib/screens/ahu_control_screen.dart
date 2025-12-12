@@ -134,6 +134,9 @@ class _TopBar extends StatelessWidget {
           // Start/Stop toggle
           _StartStopButton(ahuId: ahuId),
           const SizedBox(width: 12),
+          // Mode toggle (Admin only)
+          _ModeToggleButton(ahuId: ahuId),
+          const SizedBox(width: 12),
           // Exit button
           Container(
             decoration: BoxDecoration(
