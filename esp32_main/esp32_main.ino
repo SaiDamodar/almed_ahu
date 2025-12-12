@@ -2024,8 +2024,51 @@ void setup()
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
   M1_POST_RUN = prefs.getULong("m1_post", M1_POST_RUN);
   M2_INTERVAL = prefs.getULong("m2_interval", M2_INTERVAL);
-  M2_RUN_TIME = prefs.getULong("m2_run", M2_RUN_TIME);
-  M2_DELAY_AFTER_M1_STOP = prefs.getULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
+  // Load motor timings from preferences (with validation)
+  unsigned long savedM2Run = prefs.getULong("m2_run", M2_RUN_TIME);
+  unsigned long savedM2Delay = prefs.getULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
+  
+  // Validate: M2_RUN_TIME should be around 15-30 seconds, M2_DELAY should be around 5-20 seconds
+  // This prevents swapped values from preferences
+  if (savedM2Run >= 15000 && savedM2Run <= 30000) {
+    M2_RUN_TIME = savedM2Run;
+  } else {
+    Serial.println("⚠️ Invalid M2_RUN_TIME in preferences, using default: " + String(M2_RUN_TIME/1000) + "s");
+    prefs.putULong("m2_run", M2_RUN_TIME); // Save correct default
+  }
+  
+  if (savedM2Delay >= 5000 && savedM2Delay <= 20000) {
+    M2_DELAY_AFTER_M1_STOP = savedM2Delay;
+  } else {
+    Serial.println("⚠️ Invalid M2_DELAY in preferences, using default: " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
+    prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); // Save correct default
+  }
+  
+  // CRITICAL: Safety check - M2_RUN_TIME should be significantly longer than M2_DELAY_AFTER_M1_STOP
+  // If M2_DELAY is longer than M2_RUN_TIME, or if M2_RUN_TIME is too short, values are likely swapped
+  // Expected: M2_RUN_TIME ~22s, M2_DELAY ~10s
+  if (M2_DELAY_AFTER_M1_STOP > M2_RUN_TIME || M2_RUN_TIME < 15000) {
+    Serial.println("⚠️ WARNING: M2 timing values appear swapped or invalid!");
+    Serial.println("  M2_RUN_TIME: " + String(M2_RUN_TIME/1000) + "s (should be ~22s)");
+    Serial.println("  M2_DELAY: " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s (should be ~10s)");
+    Serial.println("  Correcting values...");
+    
+    // Swap if delay > run_time, or reset to defaults if values are clearly wrong
+    if (M2_DELAY_AFTER_M1_STOP > M2_RUN_TIME && M2_DELAY_AFTER_M1_STOP < 30000) {
+      // Values are swapped - swap them back
+      unsigned long temp = M2_RUN_TIME;
+      M2_RUN_TIME = M2_DELAY_AFTER_M1_STOP;
+      M2_DELAY_AFTER_M1_STOP = temp;
+    } else {
+      // Values are invalid - reset to defaults
+      M2_RUN_TIME = 22UL * 1000UL;
+      M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;
+    }
+    
+    prefs.putULong("m2_run", M2_RUN_TIME);
+    prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
+    Serial.println("✓ Corrected: M2_RUN_TIME=" + String(M2_RUN_TIME/1000) + "s, M2_DELAY=" + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
+  }
   
   // Load WiFi credentials
   w1_ssid = prefs.getString("w1_ssid", DEFAULT_W1_SSID);
@@ -2312,6 +2355,8 @@ void loop()
         }
       }
     }
+    }
+    // Close the AWS reconnection attempt if block (line 2256)
     
     // Log once per minute if AWS IoT is disabled due to no internet (only in online mode)
     if (WiFi.status() == WL_CONNECTED && !internetAvailable && !client.connected()) {
