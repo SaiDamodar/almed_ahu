@@ -347,6 +347,73 @@ class _StartStopButton extends StatelessWidget {
   }
 }
 
+class _ModeToggleButton extends StatelessWidget {
+  final String ahuId;
+  
+  const _ModeToggleButton({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, ({bool isAdmin, bool isOnlineMode})>(
+      selector: (_, provider) {
+        final isAdmin = provider.currentRole == UserRole.admin;
+        // Get mode from state (we'll add this to AhuState model)
+        final state = provider.getState(ahuId);
+        final isOnlineMode = state?.onlineMode ?? true; // Default to online
+        return (isAdmin: isAdmin, isOnlineMode: isOnlineMode);
+      },
+      builder: (context, data, _) {
+        if (!data.isAdmin) return const SizedBox.shrink();
+        
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: data.isOnlineMode
+                  ? const [Color(0xFF3B82F6), Color(0xFF2563EB)]
+                  : const [Color(0xFF6B7280), Color(0xFF4B5563)],
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                context.read<AppProvider>().setMode(
+                  ahuId,
+                  !data.isOnlineMode, // Toggle mode
+                );
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      data.isOnlineMode ? Icons.cloud_rounded : Icons.cloud_off_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      data.isOnlineMode ? 'Online' : 'Offline',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// Data class for sensor controls
 @immutable
 class _SensorData {

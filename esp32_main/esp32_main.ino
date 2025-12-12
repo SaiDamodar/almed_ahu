@@ -2311,8 +2311,10 @@ void loop()
           Serial.println("  → Will retry AWS connection in 1 minute");
         }
       }
-    } else if (WiFi.status() == WL_CONNECTED && !internetAvailable && !client.connected()) {
-      // Log once per minute that AWS IoT is disabled due to no internet (only in online mode)
+    }
+    
+    // Log once per minute if AWS IoT is disabled due to no internet (only in online mode)
+    if (WiFi.status() == WL_CONNECTED && !internetAvailable && !client.connected()) {
       static unsigned long lastNoInternetLog = 0;
       if (now - lastNoInternetLog > 60000) {
         lastNoInternetLog = now;
