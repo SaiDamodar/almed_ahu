@@ -1,0 +1,49 @@
+You are setting up iOS development on a FRESH EC2 Mac instance from scratch. Follow these steps in order:
+
+PHASE 1: INSTALL TOOLS
+1. Install Xcode Command Line Tools: xcode-select --install
+2. Accept license: sudo xcodebuild -license accept
+3. Install Xcode from App Store (or download from developer.apple.com)
+4. Install Flutter: cd ~ && git clone https://github.com/flutter/flutter.git -b stable
+5. Add Flutter to PATH: echo 'export PATH="$PATH:$HOME/flutter/bin"' >> ~/.zshrc && source ~/.zshrc
+6. Install CocoaPods: sudo gem install cocoapods && pod setup
+7. Verify: flutter --version && pod --version && xcodebuild -version
+
+PHASE 2: CLONE PROJECT
+1. Clone repo: cd ~ && git clone https://github.com/your-username/almed_ahu.git
+2. Navigate: cd almed_ahu/android_app
+3. Fix permissions: sudo chown -R $(whoami):staff ~/almed_ahu && chmod -R 755 ~/almed_ahu
+4. Fix temp: sudo chmod -R 755 /tmp && sudo chown -R $(whoami) /tmp
+5. Get Flutter deps: flutter clean && flutter pub get
+
+PHASE 3: FIREBASE SETUP
+1. User must: Go to Firebase Console → Project alemdahu-0107 → Add iOS app → Bundle ID: com.almed.ahu → Download GoogleService-Info.plist
+2. Copy file to: android_app/ios/Runner/GoogleService-Info.plist
+3. Extract REVERSED_CLIENT_ID: grep -A 1 "REVERSED_CLIENT_ID" ios/Runner/GoogleService-Info.plist | grep "<string>" | sed 's/.*<string>\(.*\)<\/string>.*/\1/'
+4. Update Info.plist: sed -i '' "s/com.googleusercontent.apps.YOUR_CLIENT_ID/<REVERSED_CLIENT_ID>/g" ios/Runner/Info.plist
+
+PHASE 4: iOS CONFIGURATION
+1. Generate iOS folder: rm -rf ios && flutter create --platforms=ios .
+2. Apply customizations: cp ios_customizations/Podfile ios/Podfile && cp ios_customizations/AppDelegate.swift ios/Runner/AppDelegate.swift
+3. Copy GoogleService-Info.plist to: ios/Runner/GoogleService-Info.plist
+4. Update Info.plist: Add Firebase and Google Sign-In settings from ios_customizations/Info.plist.additions
+5. Extract REVERSED_CLIENT_ID and update Info.plist CFBundleURLSchemes
+6. Install pods: cd ios && pod install --repo-update && cd ..
+7. Clean Xcode: rm -rf ~/Library/Developer/Xcode/DerivedData/*
+
+PHASE 5: BUILD
+1. Open workspace: open ios/Runner.xcworkspace (NOT .xcodeproj)
+2. In Xcode: Signing & Capabilities → Select Team → Check "Automatically manage signing"
+3. Build: flutter build ios --simulator
+4. Run: flutter run
+
+CRITICAL RULES:
+- Always open .xcworkspace, never .xcodeproj
+- GoogleService-Info.plist must be real file from Firebase
+- Fix permissions FIRST on EC2 Mac
+- Swift version must be 5.9 in Podfile (for Firebase 11.x)
+
+SUCCESS = flutter build ios --simulator completes without errors
+
+Read FRESH_EC2_IOS_SETUP.md for detailed instructions.
+
