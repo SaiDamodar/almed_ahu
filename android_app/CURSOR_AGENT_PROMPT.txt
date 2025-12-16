@@ -1,0 +1,68 @@
+You are helping set up an iOS Flutter app called "ALMED AHU" on an EC2 Mac instance. The Android version works, but iOS needs configuration.
+
+PROJECT CONTEXT:
+- Flutter app for monitoring Air Handling Units
+- Bundle ID: com.almed.ahu
+- Firebase project: alemdahu-0107
+- Environment: EC2 Mac (remote macOS)
+- Current state: iOS project exists but needs setup
+
+YOUR TASK:
+Set up the iOS app to build and run. Follow these steps in order:
+
+1. FIX PERMISSIONS (EC2 Mac often has permission issues):
+   - Find project: Check ~/Desktop/Almed App/almed_ahu or ~/almed_ahu
+   - Fix ownership: sudo chown -R $(whoami):staff <project_path>
+   - Fix permissions: chmod -R 755 <project_path>
+   - Fix temp: sudo chmod -R 755 /tmp
+
+2. VERIFY/INSTALL COCOAPODS:
+   - Check: pod --version
+   - If missing: sudo gem install cocoapods && pod setup
+
+3. GET FLUTTER DEPENDENCIES:
+   - cd android_app
+   - flutter clean
+   - flutter pub get
+
+4. CONFIGURE FIREBASE:
+   - Check if ios/Runner/GoogleService-Info.plist is real (not placeholder)
+   - If placeholder: User must download from Firebase Console
+   - Extract REVERSED_CLIENT_ID from GoogleService-Info.plist
+   - Update ios/Runner/Info.plist: Replace YOUR_CLIENT_ID with REVERSED_CLIENT_ID
+
+5. VERIFY PODFILE:
+   - Must have Swift 5.9 (Firebase 11.x requires this)
+   - Must enable AccessLevelOnImport experimental feature
+   - Check: cat ios/Podfile
+
+6. INSTALL iOS PODS:
+   - cd ios
+   - rm -rf Pods Podfile.lock .symlinks
+   - pod deintegrate
+   - pod install --repo-update
+   - cd ..
+
+7. CLEAN XCODE:
+   - rm -rf ~/Library/Developer/Xcode/DerivedData/*
+
+8. BUILD:
+   - flutter build ios --simulator
+
+CRITICAL RULES:
+- ALWAYS open ios/Runner.xcworkspace (NOT .xcodeproj)
+- GoogleService-Info.plist MUST be real file from Firebase
+- Swift version MUST be 5.9 in Podfile
+- Fix permissions FIRST on EC2 Mac
+
+COMMON ERRORS & FIXES:
+- "No such module 'Flutter'": Open .xcworkspace, not .xcodeproj
+- "No such module 'Firebase'": Run pod install in ios directory
+- Permission errors: Run permission fix commands
+- Swift errors: Verify Podfile has Swift 5.9
+- CocoaPods broken: sudo gem install cocoapods
+
+SUCCESS = flutter build ios --simulator completes without errors
+
+Read IOS_SETUP_README.md for detailed instructions. Use setup_ios.sh for automated setup.
+
