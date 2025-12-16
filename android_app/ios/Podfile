@@ -43,12 +43,15 @@ post_install do |installer|
         '$(inherited)',
         'PERMISSION_NOTIFICATIONS=1',
       ]
-      # Set Swift version - use 5.0 for compatibility
-      config.build_settings['SWIFT_VERSION'] = '5.0'
-      # Remove problematic optimization settings for Debug
-      if config.name == 'Debug'
-        config.build_settings.delete('SWIFT_OPTIMIZATION_LEVEL')
+      # Firebase 11.x requires Swift 5.7+ - use 5.9 for compatibility
+      config.build_settings['SWIFT_VERSION'] = '5.9'
+      # Enable experimental features for Swift 5.9
+      other_swift_flags = config.build_settings['OTHER_SWIFT_FLAGS'] || ['$(inherited)']
+      unless other_swift_flags.any? { |flag| flag.include?('AccessLevelOnImport') }
+        other_swift_flags << '-Xfrontend'
+        other_swift_flags << '-enable-experimental-feature=AccessLevelOnImport'
       end
+      config.build_settings['OTHER_SWIFT_FLAGS'] = other_swift_flags.uniq
     end
   end
 end

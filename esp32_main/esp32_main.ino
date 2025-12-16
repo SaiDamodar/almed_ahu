@@ -596,6 +596,7 @@ void checkForNewSensor() {
   }
   
   // Determine what sensor mode would be selected now
+  // Combo mode: SEN66 + SDP810 (SHT45 can be added but doesn't change mode)
   SensorMode detectedMode = SENSOR_NONE;
   if (foundSEN66 || foundSDP810) {
     detectedMode = SENSOR_COMBO;
@@ -1108,17 +1109,74 @@ void readSensorIfDue(){
   }
 }
 
-// ---------- Read SEN66 + SDP810 Combo Sensors ----------
+// ---------- Read All Sensors (SHT45 + SEN66 + SDP810) ----------
 void readComboSensorsIfDue() {
   unsigned long now = millis();
   if (now - lastSensorAt < SENSOR_PERIOD) return;
   lastSensorAt = now;
   
   static char errMsg[64];
+  static int consecutiveSHT45Failures = 0;
   static int consecutiveSEN66Failures = 0;
   static int consecutiveSDP810Failures = 0;
+  bool sht45Success = false;
   bool sen66Success = false;
   bool sdp810Success = false;
+  
+  // Read SHT45 first (Primary for temp/humidity control - most accurate)
+  // Use SHT45 for control logic when available, fallback to SEN66 if SHT45 not available
+  if (useSHT45) {
+    esp_task_wdt_reset(); // Feed watchdog before I2C read
+    sensors_event_t he, te;
+    sht4.getEvent(&he, &te);
+    esp_task_wdt_reset(); // Feed watchdog after I2C read
+    
+    bool got = (!isnan(te.temperature) && !isnan(he.relative_humidity));
+    if (got) {
+      float newT = te.temperature;
+      float newH = he.relative_humidity;
+      
+      bool acceptT = true, acceptH = true;
+      
+      // Apply glitch filters (same logic as original SHT45 reading)
+      if (!isnan(filtTempC)) {
+        if (newT < TEMP_FAIL_THRESHOLD) {
+          acceptT = false;
+        } else if (filtTempC < TEMP_FAIL_THRESHOLD && newT > filtTempC) {
+          acceptT = true;
+        } else if (fabs(newT - filtTempC) > TEMP_JUMP_MAX) {
+          acceptT = false;
+        }
+      }
+      
+      if (!isnan(filtHum)) {
+        if (newH < HUM_FAIL_THRESHOLD) {
+          acceptH = false;
+        } else if (filtHum < HUM_FAIL_THRESHOLD && newH > filtHum) {
+          acceptH = true;
+        } else if (fabs(newH - filtHum) > HUM_JUMP_MAX) {
+          acceptH = false;
+        }
+      }
+      
+      if (acceptT) { filtTempC = newT; }
+      else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
+      
+      if (acceptH) { filtHum = newH; }
+      else if (!isnan(filtHum)) { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "%"); }
+      
+      if (acceptT && acceptH) {
+        sht45Success = true;
+        consecutiveSHT45Failures = 0;
+        Serial.printf("[SHT45] T:%.1f°C H:%.1f%% (Primary for Control)\n", filtTempC, filtHum);
+      } else {
+        consecutiveSHT45Failures++;
+      }
+    } else {
+      consecutiveSHT45Failures++;
+      Serial.println("[SHT45] Read failed");
+    }
+  }
   
   // Read SEN66 (Air Quality) - Feed watchdog before I2C operation
   if (useSEN66) {
@@ -1135,15 +1193,17 @@ void readComboSensorsIfDue() {
       if (sen66_temperature >= -40.0 && sen66_temperature <= 125.0 &&
           sen66_humidity >= 0.0 && sen66_humidity <= 100.0 &&
           sen66_pm2p5 >= 0.0 && sen66_pm2p5 <= 1000.0) {
-        // Update filtered values for control logic
-        filtTempC = sen66_temperature;
-        filtHum = sen66_humidity;
+        // Only use SEN66 temp/humidity if SHT45 is not available
+        if (!useSHT45) {
+          filtTempC = sen66_temperature;
+          filtHum = sen66_humidity;
+        }
         sen66_aqi = calculateAQI(sen66_pm2p5);
         sen66Success = true;
         consecutiveSEN66Failures = 0;
         
-        Serial.printf("[SEN66] T:%.1f°C H:%.1f%% PM2.5:%.1f AQI:%d CO2:%d\n",
-                      sen66_temperature, sen66_humidity, sen66_pm2p5, sen66_aqi, sen66_co2);
+        Serial.printf("[SEN66] PM2.5:%.1f AQI:%d VOC:%.0f NOx:%.0f CO2:%d\n",
+                      sen66_pm2p5, sen66_aqi, sen66_vocIndex, sen66_noxIndex, sen66_co2);
       } else {
         Serial.printf("[SEN66] Invalid values - T:%.1f H:%.1f PM2.5:%.1f\n",
                       sen66_temperature, sen66_humidity, sen66_pm2p5);
@@ -1154,8 +1214,8 @@ void readComboSensorsIfDue() {
       errorToString(err, errMsg, sizeof(errMsg));
       Serial.printf("[SEN66] Read error (%d consecutive): %s\n", consecutiveSEN66Failures, errMsg);
       
-      // After 3 consecutive failures, mark values as invalid
-      if (consecutiveSEN66Failures >= 3) {
+      // After 3 consecutive failures, mark values as invalid (only if not using SHT45)
+      if (consecutiveSEN66Failures >= 3 && !useSHT45) {
         filtTempC = NAN;
         filtHum = NAN;
         Serial.println("[SEN66] Multiple failures - marking values as invalid");
@@ -1189,9 +1249,9 @@ void readComboSensorsIfDue() {
     }
   }
   
-  // Only publish telemetry if at least one sensor read succeeded
-  // This prevents publishing stale/invalid data
-  if (sen66Success || sdp810Success || (!useSEN66 && !useSDP810)) {
+  // Publish telemetry if at least one sensor read succeeded
+  // When all 3 sensors are connected, we want all data, so publish if any sensor succeeded
+  if (sht45Success || sen66Success || sdp810Success || (!useSHT45 && !useSEN66 && !useSDP810)) {
     publishTelemetryLocal();
   } else {
     Serial.println("⚠️ [Sensors] All reads failed - skipping telemetry publish");
@@ -2032,10 +2092,16 @@ void setup()
 
   Wire.begin(21,22);
   
-  // ========== AUTO-DETECT SENSORS ==========
+  // ========== AUTO-DETECT SENSORS (All 3 Together) ==========
   Serial.println("\n--- Detecting Sensors ---");
+  Serial.println("  Power: All sensors from ESP32 3.3V pin (~20-28mA total, well within limits)");
   
-  // Try SEN66 first (combo sensor)
+  // Try all 3 sensors (they all work together, powered from ESP32 3.3V)
+  bool sen66Detected = false;
+  bool sdp810Detected = false;
+  bool sht45Detected = false;
+  
+  // Try SEN66 (Air Quality Sensor)
   sen66.begin(Wire, SEN66_I2C_ADDR_6B);
   int16_t sen66Err = sen66.deviceReset();
   if (sen66Err == 0) {
@@ -2043,39 +2109,45 @@ void setup()
     sen66Err = sen66.startContinuousMeasurement();
     if (sen66Err == 0) {
       useSEN66 = true;
-      Serial.println("✓ SEN66 detected and ready (Air Quality Sensor)");
+      sen66Detected = true;
+      Serial.println("✓ SEN66 detected (Air Quality: PM, AQI, VOC, NOx, CO2)");
     }
   }
   
-  // Try SDP810 (differential pressure)
+  // Try SDP810 (HEPA Pressure Sensor)
   sdp810.begin(Wire, SDP8XX_I2C_ADDRESS_0);
   sdp810.stopContinuousMeasurement();
   delay(100);
   uint16_t sdp810Err = sdp810.startContinuousMeasurementWithDiffPressureTCompAndAveraging();
   if (sdp810Err == 0) {
     useSDP810 = true;
-    Serial.println("✓ SDP810 detected and ready (HEPA Pressure Sensor)");
+    sdp810Detected = true;
+    Serial.println("✓ SDP810 detected (HEPA Status: Differential Pressure)");
   }
   
-  // If combo sensors not found, try SHT45 (original sensor)
-  if (!useSEN66) {
-    if (!sht4.begin()){
-      Serial.println("⚠️ SHT45 not found!");
-    } else {
-      sht4.setPrecision(SHT4X_HIGH_PRECISION);
-      sht4.setHeater(SHT4X_NO_HEATER);
-      useSHT45 = true;
-      Serial.println("✓ SHT45 detected and ready (Original Sensor)");
-    }
+  // Try SHT45 (Temperature & Humidity Sensor - Most Accurate)
+  if (sht4.begin()) {
+    sht4.setPrecision(SHT4X_HIGH_PRECISION);
+    sht4.setHeater(SHT4X_NO_HEATER);
+    useSHT45 = true;
+    sht45Detected = true;
+    Serial.println("✓ SHT45 detected (Temperature & Humidity - Primary for Control)");
   }
   
-  // Print sensor configuration summary and set original mode for hot-swap detection
+  // Determine sensor mode and print configuration
   Serial.println("\n--- Sensor Configuration ---");
-  if (useSEN66 || useSDP810) {
-    Serial.println("  Mode: COMBO SENSORS (SEN66 + SDP810)");
-    Serial.println("  Data: AQI, PM, VOC, NOx, CO2, HEPA Status");
+  if (sen66Detected && sdp810Detected) {
+    // SEN66 + SDP810 = COMBO mode (SHT45 can be added but doesn't change mode)
+    if (sht45Detected) {
+      Serial.println("  Mode: COMBO (SEN66 + SDP810 + SHT45)");
+      Serial.println("  Data: Temp/Hum (SHT45 - Primary), AQI/PM/VOC/NOx/CO2 (SEN66), HEPA Status (SDP810)");
+    } else {
+      Serial.println("  Mode: COMBO (SEN66 + SDP810)");
+      Serial.println("  Data: Temp/Hum/AQI/PM/VOC/NOx/CO2 (SEN66), HEPA Status (SDP810)");
+    }
     originalSensorMode = SENSOR_COMBO;
-  } else if (useSHT45) {
+  } else if (sht45Detected && !sen66Detected && !sdp810Detected) {
+    // Only SHT45 = SHT45 mode
     Serial.println("  Mode: ORIGINAL (SHT45 only)");
     Serial.println("  Data: Temperature, Humidity");
     originalSensorMode = SENSOR_SHT45;
@@ -2083,7 +2155,7 @@ void setup()
     Serial.println("  ⚠️ WARNING: No sensors detected!");
     originalSensorMode = SENSOR_NONE;
   }
-  Serial.println("  Hot-swap detection: ENABLED (auto-reset on sensor type change)");
+  Serial.println("  Hot-swap detection: ENABLED (3-check algorithm, auto-reset on sensor type change)");
   
   esp_task_wdt_reset();
 
@@ -2500,10 +2572,12 @@ void loop()
   handleSerial();
   
   // Read appropriate sensors based on what's detected
+  // If all 3 sensors or combo sensors detected, use combo reading function
+  // Otherwise use single SHT45 reading function
   if (useSEN66 || useSDP810) {
-    readComboSensorsIfDue();
+    readComboSensorsIfDue();  // Reads all connected sensors (SHT45 + SEN66 + SDP810)
   } else if (useSHT45) {
-    readSensorIfDue();
+    readSensorIfDue();  // Only SHT45 available
   }
   
   // Periodic sensor hot-swap detection (check if NEW sensor type connected)
