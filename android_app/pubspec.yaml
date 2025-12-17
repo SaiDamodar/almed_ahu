@@ -2,7 +2,7 @@ name: almed_ahu_android
 description: "ALMED AHU Android App - Admin dashboard for monitoring and controlling Air Handling Units"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.0.0
@@ -40,7 +40,7 @@ dependencies:
   # Crypto for AWS SigV4 signing
   crypto: ^3.0.5
   
-  # Firebase Authentication
+  # Firebase Authentication (upgraded to 11.x for Google Sign-In compatibility with Xcode 16.4)
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1
   
@@ -48,7 +48,7 @@ dependencies:
   firebase_messaging: ^15.1.0
   flutter_local_notifications: ^18.0.0
   
-  # Google Sign-In
+  # Google Sign-In (compatible with Firebase 11.x)
   google_sign_in: ^6.2.1
 
 dev_dependencies:

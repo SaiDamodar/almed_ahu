@@ -1,0 +1,62 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📥 UPLOAD KEY FILE FROM WINDOWS TO EC2
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EC2 IP: 13.233.138.87
+Key File: AuthKey_F3WU9KJ42M.p8
+Destination: ~/.appstoreconnect/private_keys/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OPTION 1: PowerShell (Easiest if OpenSSH installed)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Open PowerShell and run:
+
+   scp -i C:\path\to\your-key.pem `
+     C:\Users\YourUsername\Downloads\AuthKey_F3WU9KJ42M.p8 `
+     ec2-user@13.233.138.87:~/.appstoreconnect/private_keys/
+
+Replace:
+   - C:\path\to\your-key.pem → Your actual key file path
+   - YourUsername → Your Windows username
+   - Downloads → Wherever your .p8 file is
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OPTION 2: WinSCP (GUI - Recommended for Windows)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Download WinSCP: https://winscp.net/
+2. Connect:
+   - Host: 13.233.138.87
+   - User: ec2-user
+   - Key file: Your .pem file
+3. Navigate to: /Users/ec2-user/.appstoreconnect/private_keys/
+4. Drag and drop AuthKey_F3WU9KJ42M.p8
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OPTION 3: FileZilla (SFTP)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Download FileZilla: https://filezilla-project.org/
+2. File → Site Manager → New Site
+3. Protocol: SFTP
+4. Host: 13.233.138.87
+5. User: ec2-user
+6. Key file: Your .pem file
+7. Connect and upload to: /Users/ec2-user/.appstoreconnect/private_keys/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AFTER UPLOADING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Come back to EC2 terminal and run:
+
+   cd /Users/ec2-user/Desktop/Almed/almed_ahu/android_app
+   ./check_key_file.sh
+   ./upload_to_testflight.sh
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
