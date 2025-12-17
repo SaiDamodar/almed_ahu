@@ -8,7 +8,10 @@ class AhuState {
   final bool run;            // System running state
   final bool m1;             // Motor-1 status
   final bool m2;             // Motor-2 status
-  final bool cp;             // Compressor status
+  final bool cp;             // Compressor 1 status
+  @JsonKey(name: 'cp2') final bool? cp2;  // Compressor 2 status
+  @JsonKey(name: 'cpMode') final String? cpMode;  // CP mode: "dual" or "single"
+  @JsonKey(name: 'cpActive') final int? cpActive;  // Active CP: 1 or 2
   final bool heater;         // Heater status
   final bool fan;             // Fan status (on/off)
   @JsonKey(name: 'fanSpeed') final int fanSpeed;  // Fan speed: 0=OFF, 1=LOW, 2=MED, 3=HIGH
