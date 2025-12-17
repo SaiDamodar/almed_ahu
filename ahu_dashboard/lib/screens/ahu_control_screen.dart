@@ -66,9 +66,6 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                       // Component Status
                       _ComponentStatus(ahuId: widget.ahuId),
                       const SizedBox(height: 16),
-                      // CP Mode Control
-                      _CpModeControlSection(ahuId: widget.ahuId),
-                      const SizedBox(height: 16),
                       // Logs (collapsible) - ADMIN ONLY
                       _LogsWrapper(
                         ahuId: widget.ahuId,
@@ -137,6 +134,9 @@ class _TopBar extends StatelessWidget {
           Expanded(child: _AhuInfo(ahuId: ahuId)),
           // Start/Stop toggle
           _StartStopButton(ahuId: ahuId),
+          const SizedBox(width: 12),
+          // CP Mode toggle
+          _CpModeToggleButton(ahuId: ahuId),
           const SizedBox(width: 12),
           // Mode toggle (Admin only)
           _ModeToggleButton(ahuId: ahuId),
@@ -353,6 +353,245 @@ class _StartStopButton extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _CpModeToggleButton extends StatelessWidget {
+  final String ahuId;
+  
+  const _CpModeToggleButton({required this.ahuId});
+
+  void _showCpSelectionDialog(BuildContext context, String ahuId, int currentCpActive) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.ac_unit_rounded, color: Colors.cyan, size: 24),
+            SizedBox(width: 12),
+            Text('Select Compressor'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _CpOptionButton(
+              context: context,
+              ahuId: ahuId,
+              cpNumber: 1,
+              isSelected: currentCpActive == 1,
+              label: 'CP1',
+              color: Colors.cyan,
+            ),
+            const SizedBox(height: 12),
+            _CpOptionButton(
+              context: context,
+              ahuId: ahuId,
+              cpNumber: 2,
+              isSelected: currentCpActive == 2,
+              label: 'CP2',
+              color: Colors.teal,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    return Selector<AppProvider, ({String cpMode, int cpActive, bool isOnline})>(
+      selector: (_, provider) {
+        final state = provider.getState(ahuId);
+        final cpMode = state?.cpMode ?? "dual";
+        final cpActive = state?.cpActive ?? 1;
+        final isOnline = provider.getStatus(ahuId) == 'online';
+        return (cpMode: cpMode, cpActive: cpActive, isOnline: isOnline);
+      },
+      builder: (context, data, _) {
+        final isDualMode = data.cpMode == "dual";
+        final isEnabled = data.isOnline;
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // CP Mode Toggle Button
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDualMode
+                      ? [Colors.cyan.shade600, Colors.cyan.shade700]
+                      : [Colors.teal.shade600, Colors.teal.shade700],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: isEnabled
+                      ? () {
+                          final newMode = isDualMode ? "single" : "dual";
+                          context.read<AppProvider>().setCpMode(ahuId, newMode);
+                        }
+                      : null,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.ac_unit_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          isDualMode ? 'DUAL' : 'SINGLE',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Arrow button (only show in single mode)
+            if (!isDualMode) ...[
+              const SizedBox(width: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: theme.cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: theme.dividerColor.withOpacity(0.2),
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: isEnabled
+                        ? () => _showCpSelectionDialog(context, ahuId, data.cpActive)
+                        : null,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Icon(
+                        Icons.arrow_drop_down_rounded,
+                        color: isEnabled ? Colors.teal : Colors.grey,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CpOptionButton extends StatelessWidget {
+  final BuildContext context;
+  final String ahuId;
+  final int cpNumber;
+  final bool isSelected;
+  final String label;
+  final Color color;
+
+  const _CpOptionButton({
+    required this.context,
+    required this.ahuId,
+    required this.cpNumber,
+    required this.isSelected,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          context.read<AppProvider>().setCpActive(ahuId, cpNumber);
+          Navigator.of(context).pop();
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? color : Colors.grey.shade300,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isSelected ? color : Colors.grey.shade300,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.ac_unit_rounded,
+                  color: isSelected ? Colors.white : Colors.grey.shade600,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected ? color : Colors.grey.shade700,
+                      ),
+                    ),
+                    Text(
+                      'Compressor $cpNumber',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isSelected)
+                Icon(
+                  Icons.check_circle_rounded,
+                  color: color,
+                  size: 24,
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2203,152 +2442,3 @@ class _HepaBadge extends StatelessWidget {
   }
 }
 
-class _CpModeControlSection extends StatelessWidget {
-  final String ahuId;
-  
-  const _CpModeControlSection({required this.ahuId});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Selector<AppProvider, _ComponentData>(
-      selector: (_, provider) => _ComponentData(state: provider.getState(ahuId)),
-      builder: (context, data, _) {
-        final cpMode = data.state?.cpMode ?? "dual";
-        final isDualMode = cpMode == "dual";
-        final cpActive = data.state?.cpActive ?? 1;
-        final isOnline = context.read<AppProvider>().getStatus(ahuId) == 'online';
-
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [Colors.cyan.withOpacity(0.15), Colors.teal.withOpacity(0.08)]
-                  : [Colors.cyan.shade50, Colors.teal.shade50],
-            ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Colors.cyan.withOpacity(0.3),
-              width: 1.5,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.ac_unit_rounded, color: Colors.cyan, size: 24),
-                  const SizedBox(width: 12),
-                  Text(
-                    'CP Mode Control',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                isDualMode 
-                    ? 'Current: DUAL (Auto-switch every hour)'
-                    : 'Current: SINGLE (CP$cpActive only)',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: isOnline && !isDualMode
-                          ? () => context.read<AppProvider>().setCpMode(ahuId, "dual")
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isDualMode ? Colors.cyan : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
-                        foregroundColor: isDualMode ? Colors.white : Colors.grey.shade700,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: const Text(
-                        'DUAL',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: isOnline && isDualMode
-                          ? () => context.read<AppProvider>().setCpMode(ahuId, "single")
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: !isDualMode ? Colors.teal : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
-                        foregroundColor: !isDualMode ? Colors.white : Colors.grey.shade700,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: Text(
-                        'SINGLE (CP$cpActive)',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (!isDualMode) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: isOnline && cpActive != 1
-                            ? () => context.read<AppProvider>().setCpActive(ahuId, 1)
-                            : null,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: cpActive == 1 ? Colors.cyan : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
-                          foregroundColor: cpActive == 1 ? Colors.white : Colors.grey.shade700,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        child: const Text(
-                          'Use CP1',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: isOnline && cpActive != 2
-                            ? () => context.read<AppProvider>().setCpActive(ahuId, 2)
-                            : null,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: cpActive == 2 ? Colors.teal : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
-                          foregroundColor: cpActive == 2 ? Colors.white : Colors.grey.shade700,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        child: const Text(
-                          'Use CP2',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
