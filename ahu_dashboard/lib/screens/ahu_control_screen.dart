@@ -66,6 +66,9 @@ class _AhuControlScreenState extends State<AhuControlScreen> {
                       // Component Status
                       _ComponentStatus(ahuId: widget.ahuId),
                       const SizedBox(height: 16),
+                      // CP Mode Control
+                      _CpModeControlSection(ahuId: widget.ahuId),
+                      const SizedBox(height: 16),
                       // Logs (collapsible) - ADMIN ONLY
                       _LogsWrapper(
                         ahuId: widget.ahuId,
@@ -1070,9 +1073,16 @@ class _ComponentIndicators extends StatelessWidget {
           const SizedBox(width: 12),
           _StatusIndicator(
             icon: Icons.ac_unit_rounded,
-            label: 'Compressor',
+            label: 'CP1',
             isActive: data.state?.cp ?? false,
-            color: const Color(0xFF2563EB),
+            color: Colors.cyan,
+          ),
+          const SizedBox(width: 12),
+          _StatusIndicator(
+            icon: Icons.ac_unit_rounded,
+            label: 'CP2',
+            isActive: data.state?.cp2 ?? false,
+            color: Colors.teal,
           ),
           const SizedBox(width: 12),
           _StatusIndicator(
@@ -2189,6 +2199,156 @@ class _HepaBadge extends StatelessWidget {
         Text(label, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
         Text(status, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
       ],
+    );
+  }
+}
+
+class _CpModeControlSection extends StatelessWidget {
+  final String ahuId;
+  
+  const _CpModeControlSection({required this.ahuId});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Selector<AppProvider, _ComponentData>(
+      selector: (_, provider) => _ComponentData(state: provider.getState(ahuId)),
+      builder: (context, data, _) {
+        final cpMode = data.state?.cpMode ?? "dual";
+        final isDualMode = cpMode == "dual";
+        final cpActive = data.state?.cpActive ?? 1;
+        final isOnline = context.read<AppProvider>().getStatus(ahuId) == 'online';
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [Colors.cyan.withOpacity(0.15), Colors.teal.withOpacity(0.08)]
+                  : [Colors.cyan.shade50, Colors.teal.shade50],
+            ),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: Colors.cyan.withOpacity(0.3),
+              width: 1.5,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.ac_unit_rounded, color: Colors.cyan, size: 24),
+                  const SizedBox(width: 12),
+                  Text(
+                    'CP Mode Control',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                isDualMode 
+                    ? 'Current: DUAL (Auto-switch every hour)'
+                    : 'Current: SINGLE (CP$cpActive only)',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isOnline && !isDualMode
+                          ? () => context.read<AppProvider>().setCpMode(ahuId, "dual")
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isDualMode ? Colors.cyan : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
+                        foregroundColor: isDualMode ? Colors.white : Colors.grey.shade700,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text(
+                        'DUAL',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isOnline && isDualMode
+                          ? () => context.read<AppProvider>().setCpMode(ahuId, "single")
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: !isDualMode ? Colors.teal : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
+                        foregroundColor: !isDualMode ? Colors.white : Colors.grey.shade700,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: Text(
+                        'SINGLE (CP$cpActive)',
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (!isDualMode) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: isOnline && cpActive != 1
+                            ? () => context.read<AppProvider>().setCpActive(ahuId, 1)
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: cpActive == 1 ? Colors.cyan : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
+                          foregroundColor: cpActive == 1 ? Colors.white : Colors.grey.shade700,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: const Text(
+                          'Use CP1',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: isOnline && cpActive != 2
+                            ? () => context.read<AppProvider>().setCpActive(ahuId, 2)
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: cpActive == 2 ? Colors.teal : (isOnline ? Colors.grey.shade300 : Colors.grey.shade200),
+                          foregroundColor: cpActive == 2 ? Colors.white : Colors.grey.shade700,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: const Text(
+                          'Use CP2',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
