@@ -1310,19 +1310,52 @@ class _ComponentIndicators extends StatelessWidget {
             color: const Color(0xFF60A5FA),
           ),
           const SizedBox(width: 12),
-          _StatusIndicator(
-            icon: Icons.ac_unit_rounded,
-            label: 'CP1',
-            isActive: data.state?.cp ?? false,
-            color: Colors.cyan,
-          ),
-          const SizedBox(width: 12),
-          _StatusIndicator(
-            icon: Icons.ac_unit_rounded,
-            label: 'CP2',
-            isActive: data.state?.cp2 ?? false,
-            color: Colors.teal,
-          ),
+          // CP indicators - show both in DUAL mode, only selected in SINGLE mode
+          ...() {
+            final cpMode = data.state?.cpMode ?? "dual";
+            final cpActive = data.state?.cpActive ?? 1;
+            final isDualMode = cpMode == "dual";
+            
+            if (isDualMode) {
+              // DUAL mode: show both CP1 and CP2
+              return [
+                _StatusIndicator(
+                  icon: Icons.ac_unit_rounded,
+                  label: 'CP1',
+                  isActive: data.state?.cp ?? false,
+                  color: Colors.cyan,
+                ),
+                const SizedBox(width: 12),
+                _StatusIndicator(
+                  icon: Icons.ac_unit_rounded,
+                  label: 'CP2',
+                  isActive: data.state?.cp2 ?? false,
+                  color: Colors.teal,
+                ),
+              ];
+            } else {
+              // SINGLE mode: show only the active CP
+              if (cpActive == 1) {
+                return [
+                  _StatusIndicator(
+                    icon: Icons.ac_unit_rounded,
+                    label: 'CP1',
+                    isActive: data.state?.cp ?? false,
+                    color: Colors.cyan,
+                  ),
+                ];
+              } else {
+                return [
+                  _StatusIndicator(
+                    icon: Icons.ac_unit_rounded,
+                    label: 'CP2',
+                    isActive: data.state?.cp2 ?? false,
+                    color: Colors.teal,
+                  ),
+                ];
+              }
+            }
+          }(),
           const SizedBox(width: 12),
           _StatusIndicator(
             icon: Icons.whatshot_rounded,
