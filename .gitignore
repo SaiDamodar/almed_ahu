@@ -44,3 +44,7 @@
 **/Thumbs.db
 **/.DS_Store
 
+android_app/ios/Pods/
+android_app/ios/Podfile.lock
+android_app/ios/*.xcworkspace/xcuserdata/
+android_app/ios/Runner.xcworkspace/xcuserdata/
