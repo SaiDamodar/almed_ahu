@@ -252,6 +252,22 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  /// Set CP mode (dual or single) - Available to all users
+  void setCpMode(String ahuId, String mode) {
+    final ahu = _ahuUnits[ahuId];
+    if (ahu != null) {
+      _mqttService?.setCpMode(ahu, mode);
+    }
+  }
+
+  /// Set active CP (1 or 2) - Available to all users
+  void setCpActive(String ahuId, int cpActive) {
+    final ahu = _ahuUnits[ahuId];
+    if (ahu != null) {
+      _mqttService?.setCpActive(ahu, cpActive);
+    }
+  }
+
   /// Reset ESP32 (Admin only) - same as pressing physical reset button
   void resetEsp32(String ahuId) {
     if (_currentRole != UserRole.admin) return;

@@ -194,7 +194,8 @@ int hepaHealthPercent = 0;
 #define PIN_MOTOR1  32   // Relay IN1 - Motor 1 (12V DC)
 #define PIN_MOTOR2  33   // Relay IN2 - Motor 2 (12V DC)
 #define PIN_HEAT    19   // Relay IN3 - Heater (220V AC)
-#define PIN_CP      23   // Relay IN4 - CP Compressor (220V AC)
+#define PIN_CP      23   // Relay IN4 - CP Compressor 1 (220V AC)
+#define PIN_CP2     11   // GPIO 11 - CP Compressor 2 (220V AC)
 #define PIN_SYSTEM  18   // Relay IN5 - System Master (220V AC)
 
 bool runState = false, m1Active = false, m2Active = false, shuttingDown = false;
@@ -207,6 +208,12 @@ bool shutdownStarted = false;
 
 // ---------- Temperature & Humidity Control ----------
 bool   cpOn = false;
+bool   cp2On = false;
+enum CpMode { CP_DUAL_AUTO, CP_SINGLE };
+CpMode cpMode = CP_DUAL_AUTO;  // Default: dual CP with auto-switching
+int    cpActive = 1;  // Which CP is active (1 or 2) in single mode, or current CP in dual mode
+unsigned long cpLastSwitchAt = 0;  // When CP was last switched (for dual auto mode)
+const unsigned long CP_SWITCH_INTERVAL_MS = 60UL * 60UL * 1000UL;  // 1 hour switch interval
 float  tempSet = 22.0;
 const float TEMP_DEADBAND = 1.0;
 const unsigned long CP_MIN_OFF_MS = 5000;
@@ -349,6 +356,10 @@ void restoreSystemState(){
   if (saveTime == 0 || now < 300000) {
     bool wasRunning = prefs.getBool("runState", false);
     bool wasCpOn = prefs.getBool("cpOn", false);
+    bool wasCp2On = prefs.getBool("cp2On", false);
+    cpMode = (CpMode)prefs.getInt("cpMode", CP_DUAL_AUTO);
+    cpActive = prefs.getInt("cpActive", 1);
+    cpLastSwitchAt = prefs.getULong("cpLastSwitchAt", 0);
     bool wasHeatOn = prefs.getBool("heatOn", false);
     bool wasShuttingDown = prefs.getBool("shuttingDown", false);
     int savedFanSpd = prefs.getInt("fanSpeed", 0);
@@ -362,6 +373,7 @@ void restoreSystemState(){
       Serial.println("✓ System relay turned ON (recovery mode)");
       
       cpOn = wasCpOn;
+      cp2On = wasCp2On;
       heatOn = wasHeatOn;
       
       // Restore CP timing state (for 1-minute cycle delay)
@@ -386,7 +398,16 @@ void restoreSystemState(){
         cpLastOffAt = now - CP_CYCLE_DELAY_MS;
       }
       
-      cpWrite(cpOn);
+      // Restore CP states based on active CP
+      if (cpActive == 1) {
+        cpWrite(cpOn);
+        cp2Write(false);
+        cp2On = false;
+      } else {
+        cpWrite(false);
+        cpOn = false;
+        cp2Write(cp2On);
+      }
       heatWrite(heatOn);
       
       if (savedFanSpd >= 0 && savedFanSpd <= 3) {
@@ -509,6 +530,7 @@ void restoreSystemState(){
 void clearSystemState(){
   prefs.putBool("runState", false);
   prefs.putBool("cpOn", false);
+  prefs.putBool("cp2On", false);
   prefs.putBool("heatOn", false);
   prefs.putBool("shuttingDown", false);
   prefs.putInt("fanSpeed", 0);
@@ -518,7 +540,7 @@ void clearSystemState(){
   prefs.putBool("m2ScheduledAfterM1", false);
   prefs.putULong("m2LastRunTime", 0);
   prefs.putULong("cpLastOffElapsed", 0);
-  // Note: onlineMode is NOT cleared - it persists across system stops
+  // Note: cpMode, cpActive, and onlineMode are NOT cleared - they persist across system stops
 }
 
 // ---------- Logging (Simplified - Serial only to avoid MQTT overload) ----------
@@ -703,6 +725,7 @@ void updateHEPAStatus(float pressure) {
 // ---------- Relay Control (Active LOW: LOW=ON, HIGH=OFF) ----------
 inline void systemWrite(bool on){ digitalWrite(PIN_SYSTEM, on ? LOW : HIGH); }
 inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? LOW : HIGH); }
+inline void cp2Write(bool on){ digitalWrite(PIN_CP2, on ? LOW : HIGH); }
 inline void heatWrite(bool on){ digitalWrite(PIN_HEAT, on ? LOW : HIGH); }
 
 // ---------- Motor Control (Active LOW relay) ----------
@@ -732,7 +755,8 @@ void setFanSpeed(FanSpeed speed){
 void emergencyStopMotors(){
   if (m1Active) { m1_stop(); Serial.println("⚠️ EMERGENCY: Motor-1 stopped"); }
   if (m2Active) { m2_stop(); Serial.println("⚠️ EMERGENCY: Motor-2 stopped"); }
-  if (cpOn) { cpWrite(false); cpOn=false; Serial.println("⚠️ EMERGENCY: CP stopped"); }
+  if (cpOn) { cpWrite(false); cpOn=false; Serial.println("⚠️ EMERGENCY: CP1 stopped"); }
+  if (cp2On) { cp2Write(false); cp2On=false; Serial.println("⚠️ EMERGENCY: CP2 stopped"); }
   if (heatOn) { heatWrite(false); heatOn=false; Serial.println("⚠️ EMERGENCY: Heater stopped"); }
   if (fanSpeed != FAN_OFF) { setFanSpeed(FAN_OFF); Serial.println("⚠️ EMERGENCY: Fan stopped"); }
   systemWrite(false);
@@ -741,25 +765,77 @@ void emergencyStopMotors(){
 // ---------- Controllers ----------
 void controlCP(float t){
   if (!runState){
-    if (cpOn){ cpWrite(false); cpOn=false; cpLastOffAt=millis(); motorLogMsg("CP forced OFF (system STOPPED)"); }
+    if (cpOn){ 
+      cpWrite(false); 
+      cpOn=false; 
+      if (cpMode == CP_DUAL_AUTO) {
+        cp2Write(false);
+        cp2On = false;
+      }
+      cpLastOffAt=millis(); 
+      motorLogMsg("CP forced OFF (system STOPPED)"); 
+    }
     return;
   }
   if (isnan(t)) return;
 
   unsigned long now = millis();
+  
+  // Dual CP auto-switch logic: switch every hour when both CPs are OFF
+  if (cpMode == CP_DUAL_AUTO && !cpOn && !cp2On) {
+    if (cpLastSwitchAt == 0) {
+      cpLastSwitchAt = now;
+      cpActive = 1;
+    } else if (now - cpLastSwitchAt >= CP_SWITCH_INTERVAL_MS) {
+      cpActive = (cpActive == 1) ? 2 : 1;
+      cpLastSwitchAt = now;
+      motorLogMsg("CP auto-switched to CP" + String(cpActive));
+    }
+  }
+  
   float onThresh  = tempSet + TEMP_DEADBAND;
   float offThresh = tempSet;
+  
+  bool shouldBeOn = (t >= onThresh && (now - cpLastOffAt) >= CP_MIN_OFF_MS && (now - cpLastOffAt) >= CP_CYCLE_DELAY_MS);
+  bool shouldBeOff = (t <= offThresh && (now - cpLastOnAt) >= CP_MIN_ON_MS);
 
-  if (!cpOn){
-    // Check both minimum off time AND 1-minute cycle delay
-    if (t >= onThresh && (now - cpLastOffAt) >= CP_MIN_OFF_MS && (now - cpLastOffAt) >= CP_CYCLE_DELAY_MS){
-      cpWrite(true); cpOn = true; cpLastOnAt = now;
-      motorLogMsg("CP ON (cooling)");
+  if (cpMode == CP_DUAL_AUTO) {
+    // Dual mode: use active CP (cpActive)
+    if (cpActive == 1) {
+      if (!cpOn && shouldBeOn){
+        cpWrite(true); cpOn = true; cpLastOnAt = now;
+        motorLogMsg("CP1 ON (cooling)");
+      } else if (cpOn && shouldBeOff){
+        cpWrite(false); cpOn = false; cpLastOffAt = now;
+        motorLogMsg("CP1 OFF (reached temp setpoint) - 1 min delay before next cycle");
+      }
+    } else {
+      if (!cp2On && shouldBeOn){
+        cp2Write(true); cp2On = true; cpLastOnAt = now;
+        motorLogMsg("CP2 ON (cooling)");
+      } else if (cp2On && shouldBeOff){
+        cp2Write(false); cp2On = false; cpLastOffAt = now;
+        motorLogMsg("CP2 OFF (reached temp setpoint) - 1 min delay before next cycle");
+      }
     }
   } else {
-    if (t <= offThresh && (now - cpLastOnAt) >= CP_MIN_ON_MS){
-      cpWrite(false); cpOn = false; cpLastOffAt = now;
-      motorLogMsg("CP OFF (reached temp setpoint) - 1 min delay before next cycle");
+    // Single mode: use selected CP (cpActive)
+    if (cpActive == 1) {
+      if (!cpOn && shouldBeOn){
+        cpWrite(true); cpOn = true; cpLastOnAt = now;
+        motorLogMsg("CP1 ON (cooling)");
+      } else if (cpOn && shouldBeOff){
+        cpWrite(false); cpOn = false; cpLastOffAt = now;
+        motorLogMsg("CP1 OFF (reached temp setpoint) - 1 min delay before next cycle");
+      }
+    } else {
+      if (!cp2On && shouldBeOn){
+        cp2Write(true); cp2On = true; cpLastOnAt = now;
+        motorLogMsg("CP2 ON (cooling)");
+      } else if (cp2On && shouldBeOff){
+        cp2Write(false); cp2On = false; cpLastOffAt = now;
+        motorLogMsg("CP2 OFF (reached temp setpoint) - 1 min delay before next cycle");
+      }
     }
   }
 }
@@ -856,6 +932,7 @@ void publishTelemetryAWS(){
   doc["m2"]  = m2Active;
   doc["run"] = runState;
   doc["cp"]  = cpOn;
+  doc["cp2"] = cp2On;
   doc["heater"] = heatOn;
   doc["fan"] = (fanSpeed != FAN_OFF);
   doc["fanSpeed"] = (int)fanSpeed;
@@ -931,6 +1008,7 @@ void publishTelemetryLocal(){
   doc["m2"]  = m2Active;
   doc["run"] = runState;
   doc["cp"]  = cpOn;
+  doc["cp2"] = cp2On;
   doc["heater"] = heatOn;
   doc["fan"] = (fanSpeed != FAN_OFF);
   doc["fanSpeed"] = (int)fanSpeed;
@@ -1027,7 +1105,8 @@ void publishStateLocal(){
   // Dashboard-compatible format (exact match to original backup)
   StaticJsonDocument<512> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
-  doc["cp"]=cpOn; doc["heater"]=heatOn;
+  doc["cp"]=cpOn; doc["cp2"]=cp2On; doc["cpMode"]=(cpMode == CP_DUAL_AUTO ? "dual" : "single");
+  doc["cpActive"]=cpActive; doc["heater"]=heatOn;
   doc["fan"]=(fanSpeed != FAN_OFF);
   doc["fanSpeed"]=(int)fanSpeed;
   doc["tempSet"]=tempSet; doc["humSet"]=humSet;
@@ -1965,6 +2044,51 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     }
   }
   
+  // Handle CP mode switching (dual/single) - Local MQTT
+  if (doc.containsKey("cpMode")){
+    String cpModeStr = doc["cpMode"].as<String>();
+    CpMode newCpMode = (cpModeStr == "dual") ? CP_DUAL_AUTO : CP_SINGLE;
+    if (newCpMode != cpMode) {
+      cpMode = newCpMode;
+      prefs.putInt("cpMode", (int)cpMode);
+      // When switching to dual mode, reset switch timer
+      if (cpMode == CP_DUAL_AUTO) {
+        cpLastSwitchAt = millis();
+      }
+      // Turn off the inactive CP when switching modes
+      if (cpActive == 1 && cpMode == CP_SINGLE) {
+        cp2Write(false);
+        cp2On = false;
+      } else if (cpActive == 2 && cpMode == CP_SINGLE) {
+        cpWrite(false);
+        cpOn = false;
+      }
+      Serial.println("✓ CP mode changed (Local): " + String(cpMode == CP_DUAL_AUTO ? "DUAL (auto-switch every hour)" : "SINGLE (CP" + String(cpActive) + " only)"));
+      stateChanged = true;
+    }
+  }
+  
+  // Handle CP active selection (1 or 2) - only in single mode - Local MQTT
+  if (doc.containsKey("cpActive")){
+    int newCpActive = doc["cpActive"].as<int>();
+    if (newCpActive == 1 || newCpActive == 2) {
+      if (newCpActive != cpActive) {
+        // Turn off the old active CP
+        if (cpActive == 1) {
+          cpWrite(false);
+          cpOn = false;
+        } else {
+          cp2Write(false);
+          cp2On = false;
+        }
+        cpActive = newCpActive;
+        prefs.putInt("cpActive", cpActive);
+        Serial.println("✓ CP active changed to CP" + String(cpActive) + " (Local)");
+        stateChanged = true;
+      }
+    }
+  }
+  
   // Handle reset command (same as pressing physical reset button)
   if (doc.containsKey("reset") && doc["reset"] == true) {
     Serial.println("\n========================================");
@@ -2182,6 +2306,15 @@ void setup()
   onlineMode = prefs.getBool("onlineMode", true);
   Serial.print("  Operation mode: ");
   Serial.println(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)");
+  
+  // Load CP mode (default to dual auto)
+  cpMode = (CpMode)prefs.getInt("cpMode", CP_DUAL_AUTO);
+  cpActive = prefs.getInt("cpActive", 1);
+  cpLastSwitchAt = prefs.getULong("cpLastSwitchAt", 0);
+  Serial.print("  CP mode: ");
+  Serial.print(cpMode == CP_DUAL_AUTO ? "DUAL (auto-switch every hour)" : "SINGLE");
+  Serial.print(" | Active CP: CP");
+  Serial.println(cpActive);
 
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
   M1_POST_RUN = prefs.getULong("m1_post", M1_POST_RUN);

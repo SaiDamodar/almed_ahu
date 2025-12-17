@@ -146,6 +146,12 @@ class MqttService {
   /// Set operation mode (true = online/cloud, false = offline/local only)
   void setMode(AhuUnit ahu, bool onlineMode) => sendCommand(ahu, {'mode': onlineMode ? 'online' : 'offline'});
 
+  /// Set CP mode ("dual" = auto-switch every hour, "single" = use single CP)
+  void setCpMode(AhuUnit ahu, String mode) => sendCommand(ahu, {'cpMode': mode});
+
+  /// Set active CP (1 or 2) - only used in single mode
+  void setCpActive(AhuUnit ahu, int cpActive) => sendCommand(ahu, {'cpActive': cpActive});
+
   /// Reset ESP32 (same as pressing physical reset button)
   void resetEsp32(AhuUnit ahu) => sendCommand(ahu, {'reset': true});
 

@@ -50,9 +50,15 @@ class MotorStatus extends StatelessWidget {
                 ),
                 _StatusIndicator(
                   icon: Icons.ac_unit,
-                  label: 'Compressor',
+                  label: 'CP1 (Compressor 1)',
                   isActive: state?.cp ?? false,
                   color: Colors.cyan,
+                ),
+                _StatusIndicator(
+                  icon: Icons.ac_unit,
+                  label: 'CP2 (Compressor 2)',
+                  isActive: state?.cp2 ?? false,
+                  color: Colors.teal,
                 ),
                 _StatusIndicator(
                   icon: Icons.whatshot,
