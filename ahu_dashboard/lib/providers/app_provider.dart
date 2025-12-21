@@ -104,8 +104,8 @@ class AppProvider extends ChangeNotifier {
       final logs = _logData.putIfAbsent(ahuId, () => []);
       logs.add(entry.value);
       
-      // Keep only last 100 logs
-      if (logs.length > 100) {
+      // Keep only last 500 logs (increased for better history)
+      if (logs.length > 500) {
         logs.removeAt(0);
       }
       _debouncedNotify();

@@ -675,33 +675,6 @@ void checkForNewSensor() {
   }
 }
 
-// ---------- Internet Availability Check ----------
-// Instant check if internet is available (non-blocking, never triggers watchdog)
-// Returns true if internet is available, false otherwise
-// CRITICAL: Must be instant to prevent watchdog resets - no blocking operations
-bool checkInternetAvailable() {
-  if (WiFi.status() != WL_CONNECTED) {
-    return false;
-  }
-  
-  // Instant check: Check if gateway is Pi hotspot (10.42.0.1)
-  // If on Pi hotspot, assume no internet (but local MQTT works perfectly)
-  // This check is instant and never blocks
-  IPAddress gateway = WiFi.gatewayIP();
-  
-  // Check if gateway is Pi hotspot IP (10.42.0.1)
-  // Pi hotspot typically has no internet, only local network
-  if (gateway[0] == 10 && gateway[1] == 42 && gateway[2] == 0 && gateway[3] == 1) {
-    // On Pi hotspot - no internet, but this is OK (local MQTT works)
-    return false;
-  }
-  
-  // For other gateways, assume internet is available
-  // This is a heuristic - if not on Pi hotspot, likely has internet
-  // We avoid connection tests to prevent blocking and watchdog resets
-  return true;
-}
-
 // ---------- HEPA Filter Status ----------
 void updateHEPAStatus(float pressure) {
   float absP = abs(pressure);
@@ -2433,41 +2406,23 @@ void setup()
   Serial.println("  - System state preserved during reconnections");
   Serial.println("========================================\n");
 
-  // Try initial AWS IoT connection if:
-  // 1. Online mode is enabled
-  // 2. WiFi is connected
-  // 3. Internet is available
-  // CRITICAL: Check internet availability BEFORE attempting AWS IoT connection
-  // CRITICAL: AWS IoT is optional - failure does NOT affect local MQTT or system operation
+  // Try initial AWS IoT connection if online mode and WiFi connected
   if (onlineMode && WiFi.status() == WL_CONNECTED) {
-    Serial.println("📡 WiFi connected, checking internet availability...");
-    esp_task_wdt_reset(); // Feed watchdog before internet check
-    bool hasInternet = checkInternetAvailable();
-    esp_task_wdt_reset(); // Feed watchdog after internet check
-    
-    if (hasInternet) {
-      Serial.println("✓ Internet available - attempting AWS IoT connection...");
-      esp_task_wdt_reset(); // Feed watchdog before connection
-      if (client.connect(THINGNAME)) {
-        esp_task_wdt_reset(); // Feed watchdog after connection
-        Serial.println("✓ AWS IoT connected on startup (cloud service active)");
-        esp_task_wdt_reset(); // Feed watchdog before subscribe
-        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-        esp_task_wdt_reset(); // Feed watchdog after subscribe
-        Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-        Serial.println(subResult ? " ✓" : " ✗ FAILED");
-        publishStatusOnline();
-      } else {
-        esp_task_wdt_reset(); // Feed watchdog after failed connection
-        Serial.println("✗ AWS IoT connection failed on startup");
-        Serial.println("  → Will retry when internet is available");
-        Serial.println("  → Local MQTT continues working normally");
-      }
+    Serial.println("📡 Attempting AWS IoT connection...");
+    esp_task_wdt_reset(); // Feed watchdog before connection
+    if (client.connect(THINGNAME)) {
+      esp_task_wdt_reset(); // Feed watchdog after connection
+      Serial.println("✓ AWS IoT connected on startup (cloud service active)");
+      esp_task_wdt_reset(); // Feed watchdog before subscribe
+      bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+      esp_task_wdt_reset(); // Feed watchdog after subscribe
+      Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+      Serial.println(subResult ? " ✓" : " ✗ FAILED");
+      publishStatusOnline();
     } else {
-      Serial.println("⚠️ No internet detected - AWS IoT connection skipped");
+      esp_task_wdt_reset(); // Feed watchdog after failed connection
+      Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
       Serial.println("  → Local MQTT continues working normally");
-      Serial.println("  → System operates independently (no cloud service)");
-      Serial.println("  → Will check for internet every 1 minute");
     }
   } else if (!onlineMode) {
     Serial.println("✓ Offline mode enabled - AWS IoT disabled");
@@ -2552,7 +2507,6 @@ void loop()
   }
 
   // ========== AWS IoT MQTT (Cloud) - OPTIONAL, Non-blocking ==========
-  // CRITICAL: AWS IoT is completely optional - failures must NOT affect local MQTT or system operation
   // Only active in ONLINE mode - in OFFLINE mode, AWS IoT is completely disabled
   if (onlineMode) {
     // Keep the AWS MQTT connection alive - MUST call this every loop (non-blocking)
@@ -2560,107 +2514,37 @@ void loop()
       client.loop();
     }
     
-    // Non-blocking reconnection logic for AWS - only try if WiFi connected, internet available, and MQTT disconnected
-    // CRITICAL: Check internet availability BEFORE attempting AWS IoT connection
-    // CRITICAL: This prevents watchdog resets by only connecting when internet is actually available
-    static unsigned long lastInternetCheck = 0;
-    static bool internetAvailable = false;
-    static unsigned long lastAwsReconnectAttempt = 0;
-    static int consecutiveFailures = 0;
-    
-    // Check internet availability every 1 minute (quick, non-blocking check)
-    // First check happens immediately (lastInternetCheck starts at 0)
-    if (WiFi.status() == WL_CONNECTED && (now - lastInternetCheck > 60000 || lastInternetCheck == 0)) {
-      lastInternetCheck = now;
-      esp_task_wdt_reset(); // Feed watchdog before internet check
-      internetAvailable = checkInternetAvailable();
-      esp_task_wdt_reset(); // Feed watchdog after internet check
+    // Simple reconnection logic: try to connect if WiFi is connected and AWS IoT is not connected
+    if (WiFi.status() == WL_CONNECTED && !client.connected()) {
+      static unsigned long lastAwsReconnectAttempt = 0;
+      const unsigned long RETRY_INTERVAL = 60000; // Retry every 1 minute
       
-      if (internetAvailable) {
-        Serial.println("✓ Internet available - AWS IoT connection enabled");
-      } else {
-        Serial.println("⚠️ No internet detected - AWS IoT connection disabled");
-        Serial.println("  → Local MQTT continues working normally");
-        Serial.println("  → Will check for internet again in 1 minute");
-      }
-    }
-  
-  // Only attempt AWS IoT connection if:
-  // 1. Online mode is enabled
-  // 2. WiFi is connected
-  // 3. Internet is available
-  // 4. AWS IoT is not already connected
-  // 5. Enough time has passed since last attempt
-  if (onlineMode && WiFi.status() == WL_CONNECTED && internetAvailable && !client.connected()) {
-    unsigned long retryInterval = 60000; // 1 minute for first 3 attempts
-    if (consecutiveFailures >= 3) {
-      retryInterval = 600000; // 10 minutes after multiple failures
-    }
-    
-    // Only attempt if enough time has passed
-    if (now - lastAwsReconnectAttempt > retryInterval) {
-      lastAwsReconnectAttempt = now;
-      
-      // CRITICAL: Feed watchdog before connection attempt
-      esp_task_wdt_reset();
-      
-      Serial.println("⚠️ AWS IoT disconnected - attempting reconnection...");
-      Serial.print("  Internet: Available | Failures: ");
-      Serial.print(consecutiveFailures);
-      Serial.println(" | Timeout: 1s");
-      
-      // CRITICAL: Connection attempt with 1-second timeout
-      unsigned long connectStart = millis();
-      bool connected = client.connect(THINGNAME);
-      unsigned long connectTime = millis() - connectStart;
-      
-      // CRITICAL: Feed watchdog IMMEDIATELY after connection attempt
-      esp_task_wdt_reset();
-      
-      if (connected) {
-        Serial.println("✓ AWS IoT reconnected (cloud service restored)");
-        Serial.print("  Connection time: ");
-        Serial.print(connectTime);
-        Serial.println("ms");
-        consecutiveFailures = 0; // Reset failure counter
+      if (now - lastAwsReconnectAttempt > RETRY_INTERVAL) {
+        lastAwsReconnectAttempt = now;
         
-        // Resubscribe to command topic
-        esp_task_wdt_reset(); // Feed watchdog before subscribe
-        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-        esp_task_wdt_reset(); // Feed watchdog after subscribe
-        Serial.print("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-        Serial.println(subResult ? " ✓" : " ✗ FAILED");
+        esp_task_wdt_reset(); // Feed watchdog before connection attempt
+        Serial.println("⚠️ AWS IoT disconnected - attempting reconnection...");
         
-        // Send status on reconnection
-        publishStatusOnline();
-        publishStateAWS();
-        publishTelemetryAWS();
-      } else {
-        consecutiveFailures++;
-        Serial.print("✗ AWS reconnection failed (timeout after ");
-        Serial.print(connectTime);
-        Serial.print("ms, failures: ");
-        Serial.print(consecutiveFailures);
-        Serial.println(") - Local MQTT continues normally");
-        Serial.println("  → System continues operating via local MQTT");
-        if (consecutiveFailures >= 3) {
-          Serial.println("  → Multiple failures - retrying in 10 minutes");
+        if (client.connect(THINGNAME)) {
+          esp_task_wdt_reset(); // Feed watchdog after connection
+          Serial.println("✓ AWS IoT reconnected (cloud service restored)");
+          
+          // Resubscribe to command topic
+          esp_task_wdt_reset(); // Feed watchdog before subscribe
+          bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+          esp_task_wdt_reset(); // Feed watchdog after subscribe
+          Serial.print("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+          Serial.println(subResult ? " ✓" : " ✗ FAILED");
+          
+          // Send status on reconnection
+          publishStatusOnline();
+          publishStateAWS();
+          publishTelemetryAWS();
         } else {
-          Serial.println("  → Will retry AWS connection in 1 minute");
+          esp_task_wdt_reset(); // Feed watchdog after failed connection
+          Serial.println("✗ AWS reconnection failed (will retry in 1 minute)");
+          Serial.println("  → Local MQTT continues working normally");
         }
-      }
-    }
-    }
-    // Close the AWS reconnection attempt if block (line 2256)
-    
-    // Log once per minute if AWS IoT is disabled due to no internet (only in online mode)
-    if (WiFi.status() == WL_CONNECTED && !internetAvailable && !client.connected()) {
-      static unsigned long lastNoInternetLog = 0;
-      if (now - lastNoInternetLog > 60000) {
-        lastNoInternetLog = now;
-        Serial.println("⚠️ AWS IoT disabled - no internet connection");
-        Serial.println("  → Local MQTT continues working normally");
-        Serial.println("  → Checking for internet every 1 minute");
       }
     }
   } else {

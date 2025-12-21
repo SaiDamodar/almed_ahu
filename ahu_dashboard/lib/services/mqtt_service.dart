@@ -258,13 +258,63 @@ class MqttService {
         final data = jsonDecode(payloadString) as Map<String, dynamic>;
         _stateController.add(MapEntry(topicData, AhuState.fromJson(data)));
       } else if (topic.endsWith('/log')) {
-        final data = jsonDecode(payloadString) as Map<String, dynamic>;
-        _logController.add(MapEntry(topicData, AhuLog.fromJson(data)));
+        // Handle both JSON and plain text log messages
+        try {
+          // Try to parse as JSON first
+          final data = jsonDecode(payloadString) as Map<String, dynamic>;
+          final logEntry = AhuLog.fromJson(data);
+          _logController.add(MapEntry(topicData, logEntry));
+          debugPrint('MQTT: Log received (JSON) from $topic: ${logEntry.msg}');
+        } catch (e) {
+          // If JSON parsing fails, treat as plain text message
+          // Create AhuLog from plain text (common format from ESP32 Serial.println output)
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final logLevel = _extractLogLevel(payloadString);
+          final logEntry = AhuLog(
+            ts: now,
+            lvl: logLevel,
+            msg: payloadString.trim(),
+          );
+          _logController.add(MapEntry(topicData, logEntry));
+          debugPrint('MQTT: Log received (plain text) from $topic: ${payloadString.trim()}');
+        }
       } else if (topic.endsWith('/status')) {
         _statusController.add(MapEntry(topicData, payloadString));
       }
     } catch (e) {
       debugPrint('MQTT: Error parsing message from $topic: $e');
+      // If message parsing fails but topic contains 'log', try to capture as log anyway
+      if (topic.contains('/log') || topic.toLowerCase().contains('log')) {
+        try {
+          final parts = topic.split('/');
+          if (parts.length >= 5) {
+            final ahuId = parts[4];
+            final site = parts.length > 2 ? parts[2] : 'hospitalA';
+            final room = parts.length > 3 ? parts[3] : 'room1';
+            final topicData = '$ahuId|$site|$room';
+            final now = DateTime.now().millisecondsSinceEpoch;
+            _logController.add(MapEntry(topicData, AhuLog(
+              ts: now,
+              lvl: 'INFO',
+              msg: '[MQTT Error] $topic: ${payloadString.length > 200 ? payloadString.substring(0, 200) + "..." : payloadString}',
+            )));
+          }
+        } catch (_) {
+          // Ignore errors in error handler
+        }
+      }
+    }
+  }
+
+  /// Extract log level from plain text message
+  String _extractLogLevel(String message) {
+    final msgUpper = message.toUpperCase();
+    if (msgUpper.contains('ERROR') || msgUpper.contains('❌') || msgUpper.contains('FAILED')) {
+      return 'ERROR';
+    } else if (msgUpper.contains('WARN') || msgUpper.contains('⚠️') || msgUpper.contains('WARNING')) {
+      return 'WARN';
+    } else {
+      return 'INFO';
     }
   }
 
