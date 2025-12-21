@@ -242,21 +242,30 @@ class MqttService {
     final payload = message.payload as MqttPublishMessage;
     final payloadString = MqttPublishPayload.bytesToStringAsString(payload.payload.message);
 
+    // Extract AHU info for logging
+    final parts = topic.split('/');
+    if (parts.length < 5) return;
+
+    final ahuId = parts[4];
+    final site = parts.length > 2 ? parts[2] : 'hospitalA';
+    final room = parts.length > 3 ? parts[3] : 'room1';
+    final topicData = '$ahuId|$site|$room';
+    final now = DateTime.now().millisecondsSinceEpoch;
+
     try {
-      final parts = topic.split('/');
-      if (parts.length < 5) return;
-
-      final ahuId = parts[4];
-      final site = parts.length > 2 ? parts[2] : 'hospitalA';
-      final room = parts.length > 3 ? parts[3] : 'room1';
-      final topicData = '$ahuId|$site|$room';
-
       if (topic.endsWith('/telemetry')) {
         final data = jsonDecode(payloadString) as Map<String, dynamic>;
         _telemetryController.add(MapEntry(topicData, AhuTelemetry.fromJson(data)));
       } else if (topic.endsWith('/state')) {
         final data = jsonDecode(payloadString) as Map<String, dynamic>;
         _stateController.add(MapEntry(topicData, AhuState.fromJson(data)));
+        // Log state changes (when run state changes)
+        final runState = data['run'] ?? false;
+        final m1State = data['m1'] ?? false;
+        final m2State = data['m2'] ?? false;
+        final cpState = data['cp'] ?? false;
+        final heaterState = data['heater'] ?? false;
+        _addLogEntry(topicData, now, 'INFO', '[State] Run:${runState ? "ON" : "OFF"} M1:${m1State ? "ON" : "OFF"} M2:${m2State ? "ON" : "OFF"} CP:${cpState ? "ON" : "OFF"} Heat:${heaterState ? "ON" : "OFF"}');
       } else if (topic.endsWith('/log')) {
         // Handle both JSON and plain text log messages
         try {
@@ -267,19 +276,17 @@ class MqttService {
           debugPrint('MQTT: Log received (JSON) from $topic: ${logEntry.msg}');
         } catch (e) {
           // If JSON parsing fails, treat as plain text message
-          // Create AhuLog from plain text (common format from ESP32 Serial.println output)
-          final now = DateTime.now().millisecondsSinceEpoch;
           final logLevel = _extractLogLevel(payloadString);
-          final logEntry = AhuLog(
-            ts: now,
-            lvl: logLevel,
-            msg: payloadString.trim(),
-          );
-          _logController.add(MapEntry(topicData, logEntry));
+          _addLogEntry(topicData, now, logLevel, payloadString.trim());
           debugPrint('MQTT: Log received (plain text) from $topic: ${payloadString.trim()}');
         }
       } else if (topic.endsWith('/status')) {
         _statusController.add(MapEntry(topicData, payloadString));
+        // Log status updates
+        _addLogEntry(topicData, now, 'INFO', '[Status] $payloadString');
+      } else {
+        // Capture any other messages from AHU topics as logs
+        _addLogEntry(topicData, now, 'INFO', '[MQTT] $topic: ${payloadString.length > 100 ? payloadString.substring(0, 100) + "..." : payloadString}');
       }
     } catch (e) {
       debugPrint('MQTT: Error parsing message from $topic: $e');
@@ -304,6 +311,15 @@ class MqttService {
         }
       }
     }
+  }
+
+  /// Add log entry to the log stream
+  void _addLogEntry(String topicData, int timestamp, String level, String message) {
+    _logController.add(MapEntry(topicData, AhuLog(
+      ts: timestamp,
+      lvl: level,
+      msg: message,
+    )));
   }
 
   /// Extract log level from plain text message
