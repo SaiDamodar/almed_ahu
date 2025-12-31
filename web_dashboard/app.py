@@ -292,8 +292,17 @@ def store_historical_data(device_id, msg_type, payload):
     created_at_utc = datetime.utcnow()
     created_at_ist = datetime.now(IST_ZONE)
     created_at_str = created_at_ist.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Extract location metadata from payload
+    site = payload.get('site', 'unknown')
+    room = payload.get('room', 'unknown')
+    ahu = payload.get('ahu', 'unknown')
+    
     document = {
         'device_id': device_id,
+        'site': site,
+        'room': room,
+        'ahu': ahu,
         'type': msg_type,
         'created_at': created_at_utc,
         'created_at_ist': created_at_str,
@@ -449,15 +458,33 @@ def on_aws_iot_message(client, userdata, msg):
         payload_str = msg.payload.decode('utf-8')
         payload = json.loads(payload_str)
         
-        # Extract device ID from 'thing' field
-        device_id = payload.get('thing', 'unknown')
+        # Extract location metadata from payload (new fields from ESP32)
+        site = payload.get('site', 'unknown')
+        room = payload.get('room', 'unknown')
+        ahu = payload.get('ahu', 'unknown')
+        
+        # Create composite device_id from location (for backward compatibility with existing code)
+        # Format: site_room_ahu (e.g., "hospitalA_icu1_ahu-01")
+        device_id = f"{site}_{room}_{ahu}" if (site != 'unknown' and room != 'unknown' and ahu != 'unknown') else payload.get('thing', 'unknown')
         
         # Determine message type
         msg_type = payload.get('type', 'telemetry')
         
-        # Update device cache
+        # Update device cache (store location metadata)
         if device_id not in device_cache:
-            device_cache[device_id] = {}
+            device_cache[device_id] = {
+                'site': site,
+                'room': room,
+                'ahu': ahu
+            }
+        else:
+            # Update location metadata if not already set
+            if 'site' not in device_cache[device_id]:
+                device_cache[device_id]['site'] = site
+            if 'room' not in device_cache[device_id]:
+                device_cache[device_id]['room'] = room
+            if 'ahu' not in device_cache[device_id]:
+                device_cache[device_id]['ahu'] = ahu
         
         if msg_type == 'telemetry':
             device_cache[device_id]['telemetry'] = payload
@@ -469,15 +496,18 @@ def on_aws_iot_message(client, userdata, msg):
         # Persist for historical analysis
         store_historical_data(device_id, msg_type, payload)
         
-        # Broadcast to all connected WebSocket clients
+        # Broadcast to all connected WebSocket clients (include location metadata)
         socketio.emit('device_update', {
             'device_id': device_id,
+            'site': site,
+            'room': room,
+            'ahu': ahu,
             'type': msg_type,
             'data': payload,
             'timestamp': time.time()
         })
         
-        print(f"AWS IoT MQTT: Received {msg_type} from {device_id}")
+        print(f"AWS IoT MQTT: Received {msg_type} from {site}/{room}/{ahu} (device_id: {device_id})")
     except Exception as e:
         print(f"AWS IoT MQTT: Error processing message: {e}")
         import traceback
@@ -667,15 +697,29 @@ def get_devices():
         hospitals = {}
         seen_devices = set()
 
-        def format_device_name(device_id):
-            cleaned = (
-                device_id.replace('ahu-', '')
-                .replace('AHU_', '')
-                .replace('ESP2', '')
-                .strip()
-                .upper()
-            )
-            return f'AHU {cleaned or "ESP2"}'
+        def format_device_name(ahu_id, device_id=None):
+            """Format device name from ahu field, fallback to device_id formatting"""
+            if ahu_id and ahu_id != 'unknown':
+                # Use the ahu field directly (e.g., "ahu-01" -> "AHU-01")
+                # Normalize: convert to uppercase and ensure consistent formatting
+                name = ahu_id.upper()
+                # Normalize underscores to hyphens
+                name = name.replace('_', '-')
+                # Ensure it starts with AHU- (in case it's just "01")
+                if not name.startswith('AHU'):
+                    name = f'AHU-{name}'
+                return name
+            # Fallback to old formatting if ahu not available
+            if device_id:
+                cleaned = (
+                    device_id.replace('ahu-', '')
+                    .replace('AHU_', '')
+                    .replace('ESP2', '')
+                    .strip()
+                    .upper()
+                )
+                return f'AHU {cleaned or "ESP2"}'
+            return 'AHU Unknown'
 
         def add_device_record(device_id, telemetry=None, state=None, last_seen=None):
             nonlocal hospitals
@@ -683,61 +727,79 @@ def get_devices():
             state = state or {}
             source = telemetry if telemetry else state
 
-            site = 'hospitalA'
-            room = 'icu1'
-
-            # Map known device IDs
-            lower_id = device_id.lower()
-            if 'ahu_esp2' in lower_id or 'esp2' in lower_id:
+            # Extract location metadata from payload (preferred) or cache
+            site = source.get('site', state.get('site', 'unknown'))
+            room = source.get('room', state.get('room', 'unknown'))
+            ahu = source.get('ahu', state.get('ahu', 'unknown'))
+            
+            # Fallback to defaults if not in payload
+            if site == 'unknown':
                 site = 'hospitalA'
+            if room == 'unknown':
                 room = 'icu1'
-            elif 'ahu-01' in lower_id:
-                site = 'hospitalA'
-                room = 'icu1'
-
-            site = source.get('site', state.get('site', site))
-            room = source.get('room', state.get('room', room))
+            if ahu == 'unknown':
+                # Try to extract from device_id format (site_room_ahu)
+                parts = device_id.split('_')
+                if len(parts) >= 3:
+                    site = parts[0] if parts[0] != 'unknown' else site
+                    room = parts[1] if parts[1] != 'unknown' else room
+                    ahu = parts[2] if parts[2] != 'unknown' else ahu
 
             if site not in hospitals:
                 hospitals[site] = {}
             if room not in hospitals[site]:
                 hospitals[site][room] = []
 
+            # Use ahu field for device name
+            device_name = format_device_name(ahu, device_id)
+
             hospitals[site][room].append({
                 'id': device_id,
-                'name': format_device_name(device_id),
+                'name': device_name,
                 'site': site,
                 'room': room,
+                'ahu': ahu,
                 'last_seen': last_seen
             })
             seen_devices.add(device_id)
         
         for device_id, data in device_cache.items():
-            # Try to extract site/room from cache or use defaults
-            site = 'hospitalA'  # Default
-            room = 'icu1'  # Default
+            # Get location metadata from cache (stored in on_aws_iot_message)
+            site = data.get('site', 'unknown')
+            room = data.get('room', 'unknown')
+            ahu = data.get('ahu', 'unknown')
             
-            # Map known device IDs
-            if 'AHU_ESP2' in device_id or 'ESP2' in device_id:
-                site = 'hospitalA'
-                room = 'icu1'
-            elif 'ahu-01' in device_id.lower():
-                site = 'hospitalA'
-                room = 'icu1'
-            
-            # Try to get from telemetry or state
+            # Try to get from telemetry or state payloads (in case cache metadata missing)
             telemetry = data.get('telemetry', {})
             state = data.get('state', {})
             
-            if 'site' in telemetry:
+            if site == 'unknown' and 'site' in telemetry:
                 site = telemetry['site']
-            elif 'site' in state:
+            elif site == 'unknown' and 'site' in state:
                 site = state['site']
             
-            if 'room' in telemetry:
+            if room == 'unknown' and 'room' in telemetry:
                 room = telemetry['room']
-            elif 'room' in state:
+            elif room == 'unknown' and 'room' in state:
                 room = state['room']
+            
+            if ahu == 'unknown' and 'ahu' in telemetry:
+                ahu = telemetry['ahu']
+            elif ahu == 'unknown' and 'ahu' in state:
+                ahu = state['ahu']
+            
+            # Fallback defaults
+            if site == 'unknown':
+                site = 'hospitalA'
+            if room == 'unknown':
+                room = 'icu1'
+            if ahu == 'unknown':
+                # Try to extract from device_id format (site_room_ahu)
+                parts = device_id.split('_')
+                if len(parts) >= 3:
+                    site = parts[0] if parts[0] != 'unknown' else site
+                    room = parts[1] if parts[1] != 'unknown' else room
+                    ahu = parts[2] if parts[2] != 'unknown' else ahu
             
             add_device_record(device_id, telemetry, state, data.get('last_update'))
 
@@ -751,7 +813,20 @@ def get_devices():
                     doc = get_last_telemetry_doc(device_id)
                     if not doc:
                         continue
+                    # Try to get location from doc first, then from payload
                     payload = doc.get('payload', {})
+                    site = doc.get('site', payload.get('site', 'unknown'))
+                    room = doc.get('room', payload.get('room', 'unknown'))
+                    ahu = doc.get('ahu', payload.get('ahu', 'unknown'))
+                    
+                    # Update payload with location if missing
+                    if 'site' not in payload and site != 'unknown':
+                        payload['site'] = site
+                    if 'room' not in payload and room != 'unknown':
+                        payload['room'] = room
+                    if 'ahu' not in payload and ahu != 'unknown':
+                        payload['ahu'] = ahu
+                    
                     last_seen = parse_timestamp_seconds(doc.get('created_at')) or parse_timestamp_seconds(payload.get('ts'))
                     add_device_record(device_id, payload, payload, last_seen)
             except Exception as mongo_err:

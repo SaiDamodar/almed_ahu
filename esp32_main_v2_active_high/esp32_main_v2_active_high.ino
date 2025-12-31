@@ -190,12 +190,12 @@ int hepaHealthPercent = 0;
 #define HEPA_MAX_NORMAL     25.0
 #define HEPA_REPLACE        40.0
 
-// ---------- 5-Channel Relay Module (Active LOW: LOW=ON, HIGH=OFF) ----------
+// ---------- 5-Channel Relay Module (Active HIGH: HIGH=ON, LOW=OFF) ----------
 #define PIN_MOTOR1  32   // Relay IN1 - Motor 1 (12V DC)
 #define PIN_MOTOR2  33   // Relay IN2 - Motor 2 (12V DC)
 #define PIN_HEAT    19   // Relay IN3 - Heater (220V AC)
 #define PIN_CP      23   // Relay IN4 - CP Compressor 1 (220V AC)
-#define PIN_CP2     11   // GPIO 11 - CP Compressor 2 (220V AC)
+#define PIN_CP2     14   // GPIO 14 - CP Compressor 2 (220V AC) - Changed from GPIO 11
 #define PIN_SYSTEM  18   // Relay IN5 - System Master (220V AC)
 
 bool runState = false, m1Active = false, m2Active = false, shuttingDown = false;
@@ -695,17 +695,17 @@ void updateHEPAStatus(float pressure) {
   hepaHealthPercent = constrain(hepaHealthPercent, 0, 100);
 }
 
-// ---------- Relay Control (Active LOW: LOW=ON, HIGH=OFF) ----------
-inline void systemWrite(bool on){ digitalWrite(PIN_SYSTEM, on ? LOW : HIGH); }
-inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? LOW : HIGH); }
-inline void cp2Write(bool on){ digitalWrite(PIN_CP2, on ? LOW : HIGH); }
-inline void heatWrite(bool on){ digitalWrite(PIN_HEAT, on ? LOW : HIGH); }
+// ---------- Relay Control (Active HIGH: HIGH=ON, LOW=OFF) ----------
+inline void systemWrite(bool on){ digitalWrite(PIN_SYSTEM, on ? HIGH : LOW); }
+inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? HIGH : LOW); }
+inline void cp2Write(bool on){ digitalWrite(PIN_CP2, on ? HIGH : LOW); }
+inline void heatWrite(bool on){ digitalWrite(PIN_HEAT, on ? HIGH : LOW); }
 
-// ---------- Motor Control (Active LOW relay) ----------
-void m1_start(){ digitalWrite(PIN_MOTOR1, LOW); m1Active=true; motorLogMsg("Motor-1 ON (Drain)"); }
-void m1_stop (){ digitalWrite(PIN_MOTOR1, HIGH); m1Active=false; motorLogMsg("Motor-1 OFF"); }
-void m2_start(){ digitalWrite(PIN_MOTOR2, LOW); m2Active=true; motorLogMsg("Motor-2 ON (Filter Clean)"); }
-void m2_stop (){ digitalWrite(PIN_MOTOR2, HIGH); m2Active=false; motorLogMsg("Motor-2 OFF"); }
+// ---------- Motor Control (Active HIGH relay) ----------
+void m1_start(){ digitalWrite(PIN_MOTOR1, HIGH); m1Active=true; motorLogMsg("Motor-1 ON (Drain)"); }
+void m1_stop (){ digitalWrite(PIN_MOTOR1, LOW); m1Active=false; motorLogMsg("Motor-1 OFF"); }
+void m2_start(){ digitalWrite(PIN_MOTOR2, HIGH); m2Active=true; motorLogMsg("Motor-2 ON (Filter Clean)"); }
+void m2_stop (){ digitalWrite(PIN_MOTOR2, LOW); m2Active=false; motorLogMsg("Motor-2 OFF"); }
 
 // ---------- Fan Control (PWM to Voltage) ----------
 void setFanSpeed(FanSpeed speed){
@@ -900,8 +900,8 @@ void publishTelemetryAWS(){
   StaticJsonDocument<768> doc;  // Increased for combo sensor data
   doc["type"] = "telemetry";
   doc["site"] = SITE;  // Hospital name (e.g., "hospitalA")
-  doc["room"] = ROOM;  // Room name (e.g., "icu1")
-  doc["ahu"] = AHU;    // AHU identifier (e.g., "ahu-01")
+  doc["room"] = ROOM;  // Room name (e.g., "icu2")
+  doc["ahu"] = AHU;    // AHU identifier (e.g., "ahu-03")
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
   doc["m1"]  = m1Active;
@@ -1052,8 +1052,8 @@ void publishStateAWS(){
   StaticJsonDocument<512> doc;
   doc["type"] = "state";
   doc["site"] = SITE;  // Hospital name (e.g., "hospitalA")
-  doc["room"] = ROOM;  // Room name (e.g., "icu1")
-  doc["ahu"] = AHU;    // AHU identifier (e.g., "ahu-01")
+  doc["room"] = ROOM;  // Room name (e.g., "icu2")
+  doc["ahu"] = AHU;    // AHU identifier (e.g., "ahu-03")
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["heater"]=heatOn;
   doc["fan"]=(fanSpeed != FAN_OFF);
@@ -2176,15 +2176,19 @@ void setup()
   pinMode(PIN_CP, OUTPUT);
   pinMode(PIN_SYSTEM, OUTPUT);
   
-  digitalWrite(PIN_MOTOR1, HIGH);
-  digitalWrite(PIN_MOTOR2, HIGH);
-  digitalWrite(PIN_HEAT, HIGH);
-  digitalWrite(PIN_CP, HIGH);
-  digitalWrite(PIN_SYSTEM, HIGH);
+  digitalWrite(PIN_MOTOR1, LOW);
+  digitalWrite(PIN_MOTOR2, LOW);
+  digitalWrite(PIN_HEAT, LOW);
+  digitalWrite(PIN_CP, LOW);
+  digitalWrite(PIN_SYSTEM, LOW);
+  
+  // CP2 pin (separate from relay module)
+  pinMode(PIN_CP2, OUTPUT);
+  digitalWrite(PIN_CP2, LOW);
   
   cpLastOffAt = millis();
   heatLastOffAt = millis();
-  Serial.println("✓ 5-channel relay module initialized (Active LOW)");
+  Serial.println("✓ 5-channel relay module initialized (Active HIGH)");
   
   // PWM Fan Init
   ledcAttach(PIN_FAN_PWM, FAN_PWM_FREQ, FAN_PWM_RESOLUTION);
