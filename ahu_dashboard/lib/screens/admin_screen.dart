@@ -506,7 +506,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                   decoration: InputDecoration(
                                     labelText: 'Motor-1 Post Run Time (seconds)',
                                     hintText: '10',
-                                    helperText: 'Duration Motor-1 runs during shutdown drain',
+                                    helperText: 'Duration Motor-1 runs during shutdown filter',
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
                                     ),
@@ -524,7 +524,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                   decoration: InputDecoration(
                                     labelText: 'Motor-2 Interval (seconds)',
                                     hintText: '30',
-                                    helperText: 'Time between Motor-2 filter clean cycles',
+                                    helperText: 'Time between Motor-2 drain cycles',
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
                                     ),

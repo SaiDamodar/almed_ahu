@@ -37,14 +37,14 @@ class MotorStatus extends StatelessWidget {
               runSpacing: 12,
               children: [
                 _StatusIndicator(
-                  icon: Icons.water,
-                  label: 'Motor 1 (Drain)',
+                  icon: Icons.cleaning_services,
+                  label: 'Motor 1 (Filter)',
                   isActive: state?.m1 ?? false,
                   color: Colors.blue,
                 ),
                 _StatusIndicator(
-                  icon: Icons.cleaning_services,
-                  label: 'Motor 2 (Filter)',
+                  icon: Icons.water,
+                  label: 'Motor 2 (Drain)',
                   isActive: state?.m2 ?? false,
                   color: Colors.purple,
                 ),

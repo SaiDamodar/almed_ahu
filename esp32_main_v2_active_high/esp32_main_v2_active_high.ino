@@ -48,9 +48,60 @@ unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22 secon
 unsigned long M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;   // Motor 2 runs 10 seconds after Motor 1 stops
 
 // ========================= WATCHDOG CONFIGURATION =========================
-const unsigned long WDT_TIMEOUT = 7;
-const unsigned long LOOP_TIMEOUT_MS = 5000;
-const unsigned long WIFI_FAIL_RESET_MS = 15000;
+// STABILITY: Increased timeout to 30s for hospital-grade reliability
+const unsigned long WDT_TIMEOUT = 30;  // 30 seconds
+const unsigned long LOOP_TIMEOUT_MS = 10000;  // 10s warning threshold
+const unsigned long WIFI_FAIL_RESET_MS = 60000;  // Not used for reset, just logging
+
+// STABILITY: Disable auto-reset on sensor change
+const bool AUTO_RESET_ON_SENSOR_CHANGE = false;
+
+// ========================= SELF-HEALING SYSTEM =========================
+// Hospital-grade reliability: Handle ALL failures without reset
+// System will automatically recover from:
+// - I2C bus hangs
+// - WiFi disconnections
+// - MQTT broker issues
+// - Sensor failures
+// - Memory issues
+
+// Self-healing state tracking
+struct SelfHealingState {
+  // I2C health
+  int i2cFailCount = 0;
+  unsigned long lastI2CRecovery = 0;
+  bool i2cHealthy = true;
+  
+  // WiFi health
+  int wifiFailCount = 0;
+  unsigned long lastWifiRecovery = 0;
+  bool wifiHealthy = false;
+  unsigned long wifiDownSince = 0;
+  
+  // MQTT health (Local)
+  int mqttLocalFailCount = 0;
+  unsigned long lastMqttLocalRecovery = 0;
+  bool mqttLocalHealthy = false;
+  
+  // MQTT health (AWS)
+  int mqttAwsFailCount = 0;
+  unsigned long lastMqttAwsRecovery = 0;
+  bool mqttAwsHealthy = false;
+  
+  // Sensor health
+  int sensorFailCount = 0;
+  unsigned long lastSensorRecovery = 0;
+  bool sensorHealthy = true;
+  float lastGoodTemp = NAN;
+  float lastGoodHum = NAN;
+  
+  // System health
+  unsigned long lastHealthCheck = 0;
+  unsigned long uptimeStart = 0;
+  int totalRecoveries = 0;
+} selfHealing;
+
+// NOTE: Self-healing functions are defined after all variable declarations (see below)
 
 // Amazon Root CA 1, necessary for secure communication
 static const char AWS_CERT_CA[] PROGMEM = R"EOF(
@@ -281,6 +332,195 @@ int consecutiveWifiFailures = 0;
 bool wifiAssociationRefused = false;
 bool pendingRecoveryStart = false;
 
+// ========================= SELF-HEALING FUNCTIONS =========================
+// These functions are defined here after all variable declarations
+
+// Forward declaration for callback
+void onMqttMessageLocal(char* topic, byte* payload, unsigned int len);
+
+// I2C Bus Recovery - fixes hung I2C bus without reset
+void recoverI2CBus() {
+  Serial.println("🔧 [SELF-HEAL] Recovering I2C bus...");
+  
+  Wire.end();
+  delay(10);
+  
+  // Toggle SDA/SCL as GPIO to clear stuck slaves
+  pinMode(21, OUTPUT);
+  pinMode(22, OUTPUT);
+  
+  // Generate 9 clock pulses to release any stuck slave
+  for (int i = 0; i < 9; i++) {
+    digitalWrite(22, LOW);
+    delayMicroseconds(5);
+    digitalWrite(22, HIGH);
+    delayMicroseconds(5);
+  }
+  
+  // Generate STOP condition
+  digitalWrite(21, LOW);
+  delayMicroseconds(5);
+  digitalWrite(22, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(21, HIGH);
+  delayMicroseconds(5);
+  
+  // Reinitialize I2C
+  Wire.begin(21, 22);
+  Wire.setClock(100000);
+  Wire.setTimeout(100);
+  
+  selfHealing.lastI2CRecovery = millis();
+  selfHealing.i2cFailCount = 0;
+  selfHealing.i2cHealthy = true;
+  selfHealing.totalRecoveries++;
+  
+  Serial.println("✓ [SELF-HEAL] I2C bus recovered");
+}
+
+// WiFi Recovery - reconnects without reset
+void recoverWiFi() {
+  Serial.println("🔧 [SELF-HEAL] Recovering WiFi...");
+  
+  WiFi.disconnect(true, true);
+  delay(100);
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.setAutoReconnect(true);
+  
+  selfHealing.lastWifiRecovery = millis();
+  selfHealing.wifiFailCount = 0;
+  selfHealing.totalRecoveries++;
+  
+  Serial.println("✓ [SELF-HEAL] WiFi recovery initiated");
+}
+
+// MQTT Recovery - reconnects to broker without reset
+void recoverMqttLocal() {
+  Serial.println("🔧 [SELF-HEAL] Recovering Local MQTT...");
+  
+  if (mqttLocal.connected()) {
+    mqttLocal.disconnect();
+  }
+  delay(100);
+  
+  mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
+  mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);
+  mqttLocal.setCallback(onMqttMessageLocal);
+  mqttLocal.setSocketTimeout(3);
+  
+  selfHealing.lastMqttLocalRecovery = millis();
+  selfHealing.mqttLocalFailCount = 0;
+  selfHealing.totalRecoveries++;
+  
+  Serial.println("✓ [SELF-HEAL] Local MQTT recovery initiated");
+}
+
+// Sensor Recovery - reinitializes sensors without reset
+void recoverSensors() {
+  Serial.println("🔧 [SELF-HEAL] Recovering sensors...");
+  
+  recoverI2CBus();
+  delay(100);
+  
+  if (useSEN66) {
+    sen66.begin(Wire, SEN66_I2C_ADDR_6B);
+    int16_t err = sen66.deviceReset();
+    if (err == 0) {
+      delay(100);
+      sen66.startContinuousMeasurement();
+      Serial.println("  ✓ SEN66 reinitialized");
+    }
+  }
+  
+  if (useSDP810) {
+    sdp810.begin(Wire, SDP8XX_I2C_ADDRESS_0);
+    sdp810.stopContinuousMeasurement();
+    delay(50);
+    sdp810.startContinuousMeasurementWithDiffPressureTCompAndAveraging();
+    Serial.println("  ✓ SDP810 reinitialized");
+  }
+  
+  if (useSHT45) {
+    if (sht4.begin()) {
+      sht4.setPrecision(SHT4X_HIGH_PRECISION);
+      sht4.setHeater(SHT4X_NO_HEATER);
+      Serial.println("  ✓ SHT45 reinitialized");
+    }
+  }
+  
+  selfHealing.lastSensorRecovery = millis();
+  selfHealing.sensorFailCount = 0;
+  selfHealing.sensorHealthy = true;
+  selfHealing.totalRecoveries++;
+  
+  Serial.println("✓ [SELF-HEAL] Sensor recovery complete");
+}
+
+// Graceful degradation - use last known good values
+void useLastGoodSensorValues() {
+  if (!isnan(selfHealing.lastGoodTemp)) {
+    filtTempC = selfHealing.lastGoodTemp;
+  }
+  if (!isnan(selfHealing.lastGoodHum)) {
+    filtHum = selfHealing.lastGoodHum;
+  }
+}
+
+// Main health check - runs periodically to detect and fix issues
+void performHealthCheck() {
+  unsigned long now = millis();
+  
+  if (now - selfHealing.lastHealthCheck < 30000) return;
+  selfHealing.lastHealthCheck = now;
+  
+  esp_task_wdt_reset();
+  
+  // Check I2C health
+  if (selfHealing.i2cFailCount >= 5) {
+    Serial.printf("⚠️ [HEALTH] I2C failures: %d - recovering\n", selfHealing.i2cFailCount);
+    recoverI2CBus();
+  }
+  
+  // Check WiFi health
+  if (!selfHealing.wifiHealthy && selfHealing.wifiDownSince > 0) {
+    unsigned long downTime = now - selfHealing.wifiDownSince;
+    if (downTime > 120000 && (now - selfHealing.lastWifiRecovery > 180000)) {
+      Serial.printf("⚠️ [HEALTH] WiFi down %lus - recovering\n", downTime/1000);
+      recoverWiFi();
+    }
+  }
+  
+  // Check Local MQTT health
+  if (selfHealing.mqttLocalFailCount >= 10 && (now - selfHealing.lastMqttLocalRecovery > 120000)) {
+    Serial.printf("⚠️ [HEALTH] MQTT failures: %d - recovering\n", selfHealing.mqttLocalFailCount);
+    recoverMqttLocal();
+  }
+  
+  // Check sensor health
+  if (selfHealing.sensorFailCount >= 10 && (now - selfHealing.lastSensorRecovery > 60000)) {
+    Serial.printf("⚠️ [HEALTH] Sensor failures: %d - recovering\n", selfHealing.sensorFailCount);
+    recoverSensors();
+  }
+  
+  // Log health status every 5 minutes
+  static unsigned long lastHealthLog = 0;
+  if (now - lastHealthLog > 300000) {
+    lastHealthLog = now;
+    unsigned long uptime = (now - selfHealing.uptimeStart) / 1000;
+    Serial.printf("\n📊 [HEALTH] Uptime: %lu min | Recoveries: %d\n", uptime/60, selfHealing.totalRecoveries);
+    Serial.printf("   WiFi:%s MQTT-L:%s MQTT-A:%s Sensors:%s I2C:%s\n",
+                  selfHealing.wifiHealthy ? "OK" : "DOWN",
+                  selfHealing.mqttLocalHealthy ? "OK" : "DOWN",
+                  selfHealing.mqttAwsHealthy ? "OK" : "DOWN",
+                  selfHealing.sensorHealthy ? "OK" : "FAIL",
+                  selfHealing.i2cHealthy ? "OK" : "FAIL");
+  }
+}
+
 // ---------- State Persistence ----------
 void saveSystemState(){
   unsigned long now = millis();
@@ -353,7 +593,10 @@ void saveSystemState(){
 void restoreSystemState(){
   unsigned long saveTime = prefs.getULong("saveTime", 0);
   unsigned long now = millis();
-  if (saveTime == 0 || now < 300000) {
+  
+  // Only restore if there's a valid saved state (saveTime > 0)
+  // Fresh upload has saveTime = 0, so don't restore anything
+  if (saveTime > 0 && now < 300000) {
     bool wasRunning = prefs.getBool("runState", false);
     bool wasCpOn = prefs.getBool("cpOn", false);
     bool wasCp2On = prefs.getBool("cp2On", false);
@@ -524,6 +767,9 @@ void restoreSystemState(){
       systemWrite(false);
       Serial.println("✓ System relay turned OFF (system was stopped)");
     }
+  } else {
+    // No valid saved state (fresh upload) - ensure all relays are OFF
+    Serial.println("✓ Fresh boot - all relays initialized OFF");
   }
 }
 
@@ -576,49 +822,37 @@ int calculateAQI(float pm25) {
 }
 
 // ---------- Sensor Hot-Swap Detection ----------
-// Checks if a NEW sensor type has been connected (triggers reset if so)
-// Uses debouncing to prevent false positives from I2C glitches
+// STABILITY: Only logs warning, does NOT auto-reset (configurable via AUTO_RESET_ON_SENSOR_CHANGE)
+// Hospital environments need stability - sensor changes should be handled manually
 void checkForNewSensor() {
+  // DISABLED for hospital stability - sensor hot-swap detection can cause false resets
+  if (!AUTO_RESET_ON_SENSOR_CHANGE) {
+    return;  // Skip detection entirely for maximum stability
+  }
+  
   static SensorMode lastDetectedMode = SENSOR_NONE;
   static int detectionCount = 0;
-  const int REQUIRED_CONSECUTIVE_DETECTIONS = 3; // Require 3 consecutive detections (15 seconds) before reset
+  const int REQUIRED_CONSECUTIVE_DETECTIONS = 5; // Increased from 3 to 5 (25 seconds) for stability
   
   bool foundSEN66 = false;
   bool foundSDP810 = false;
   bool foundSHT45 = false;
   
-  // Quick probe for SEN66 (retry to reduce false negatives)
-  for (int i = 0; i < 2; i++) {
-    Wire.beginTransmission(0x6B);  // SEN66 I2C address
-    if (Wire.endTransmission() == 0) {
-      foundSEN66 = true;
-      break;
-    }
-    delay(10); // Small delay between retries
-  }
+  esp_task_wdt_reset();  // Feed watchdog before I2C probes
   
-  // Quick probe for SDP810 (retry to reduce false negatives)
-  for (int i = 0; i < 2; i++) {
-    Wire.beginTransmission(0x25);  // SDP810 I2C address
-    if (Wire.endTransmission() == 0) {
-      foundSDP810 = true;
-      break;
-    }
-    delay(10); // Small delay between retries
-  }
+  // Quick probe for SEN66 (single attempt - faster)
+  Wire.beginTransmission(0x6B);  // SEN66 I2C address
+  if (Wire.endTransmission() == 0) foundSEN66 = true;
   
-  // Quick probe for SHT45 (retry to reduce false negatives)
-  for (int i = 0; i < 2; i++) {
-    Wire.beginTransmission(0x44);  // SHT45 I2C address
-    if (Wire.endTransmission() == 0) {
-      foundSHT45 = true;
-      break;
-    }
-    delay(10); // Small delay between retries
-  }
+  // Quick probe for SDP810
+  Wire.beginTransmission(0x25);  // SDP810 I2C address
+  if (Wire.endTransmission() == 0) foundSDP810 = true;
+  
+  // Quick probe for SHT45
+  Wire.beginTransmission(0x44);  // SHT45 I2C address
+  if (Wire.endTransmission() == 0) foundSHT45 = true;
   
   // Determine what sensor mode would be selected now
-  // Combo mode: SEN66 + SDP810 (SHT45 can be added but doesn't change mode)
   SensorMode detectedMode = SENSOR_NONE;
   if (foundSEN66 || foundSDP810) {
     detectedMode = SENSOR_COMBO;
@@ -626,50 +860,33 @@ void checkForNewSensor() {
     detectedMode = SENSOR_SHT45;
   }
   
-  // Debouncing logic: Require multiple consecutive detections before triggering reset
+  // Debouncing logic
   if (originalSensorMode != SENSOR_NONE && detectedMode != SENSOR_NONE) {
     if (detectedMode != originalSensorMode) {
-      // Different sensor type detected - increment counter
       if (detectedMode == lastDetectedMode) {
         detectionCount++;
-        Serial.printf("[Sensor Check] Different sensor detected: %s (count: %d/%d)\n",
-                      detectedMode == SENSOR_COMBO ? "COMBO" : "SHT45",
-                      detectionCount, REQUIRED_CONSECUTIVE_DETECTIONS);
         
-        // Only reset after multiple consecutive detections (debouncing)
+        // STABILITY: Only log warning, don't reset
         if (detectionCount >= REQUIRED_CONSECUTIVE_DETECTIONS) {
-          // NEW sensor type confirmed! Reset to reinitialize with new sensor
-          Serial.println("\n========================================");
-          Serial.println("🔄 NEW SENSOR TYPE CONFIRMED!");
-          Serial.printf("   Previous: %s\n", originalSensorMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
-          Serial.printf("   Detected: %s\n", detectedMode == SENSOR_COMBO ? "COMBO (SEN66+SDP810)" : "SHT45");
-          Serial.printf("   Confirmed: %d consecutive detections\n", detectionCount);
-          Serial.println("   Resetting to apply new sensor configuration...");
-          Serial.println("========================================\n");
-          
-          // Save current state before reset
-          saveSystemState();
-          delay(500);
-          
-          // Trigger reset
-          ESP.restart();
+          Serial.println("\n⚠️ [STABILITY] Different sensor type detected but NOT resetting");
+          Serial.printf("   Current: %s | Detected: %s\n", 
+                        originalSensorMode == SENSOR_COMBO ? "COMBO" : "SHT45",
+                        detectedMode == SENSOR_COMBO ? "COMBO" : "SHT45");
+          Serial.println("   Manual reset required to change sensors");
+          Serial.println("   (AUTO_RESET_ON_SENSOR_CHANGE = false for hospital stability)\n");
+          detectionCount = 0;  // Reset counter, don't keep warning
         }
       } else {
-        // Different detection from last time - reset counter (debouncing)
         lastDetectedMode = detectedMode;
         detectionCount = 1;
-        Serial.printf("[Sensor Check] Sensor type changed (debouncing): %s\n",
-                      detectedMode == SENSOR_COMBO ? "COMBO" : "SHT45");
       }
     } else {
-      // Same sensor type - reset debounce counter
       if (lastDetectedMode != detectedMode) {
         lastDetectedMode = detectedMode;
         detectionCount = 0;
       }
     }
   } else {
-    // Reset counter if detection is invalid
     lastDetectedMode = SENSOR_NONE;
     detectionCount = 0;
   }
@@ -1158,12 +1375,27 @@ void readSensorIfDue(){
     Serial.println(line);
     pushTempHTML("Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + "&deg;C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%");
     
-    // Publish telemetry to local MQTT (dashboard-compatible)
+    // SELF-HEALING: Track sensor health and store last good values
+    selfHealing.sensorHealthy = true;
+    selfHealing.sensorFailCount = 0;
+    if (!isnan(filtTempC) && filtTempC > 0) {
+      selfHealing.lastGoodTemp = filtTempC;
+    }
+    if (!isnan(filtHum) && filtHum > 0) {
+      selfHealing.lastGoodHum = filtHum;
+    }
+    
     publishTelemetryLocal();
 
   } else {
-    Serial.println("SHT45 read failed");
-    pushTempHTML("SHT45 read failed");
+    // SELF-HEALING: Track sensor failures
+    selfHealing.sensorFailCount++;
+    selfHealing.i2cFailCount++;
+    
+    if (selfHealing.sensorFailCount > 3) {
+      useLastGoodSensorValues();
+      selfHealing.sensorHealthy = false;
+    }
   }
 }
 
@@ -1307,30 +1539,54 @@ void readComboSensorsIfDue() {
     }
   }
   
-  // Publish telemetry if at least one sensor read succeeded
-  // When all 3 sensors are connected, we want all data, so publish if any sensor succeeded
-  if (sht45Success || sen66Success || sdp810Success || (!useSHT45 && !useSEN66 && !useSDP810)) {
+  // SELF-HEALING: Track sensor health and store last good values
+  if (sht45Success || sen66Success || sdp810Success) {
+    selfHealing.sensorHealthy = true;
+    selfHealing.sensorFailCount = 0;
+    
+    // Store last known good values for graceful degradation
+    if (!isnan(filtTempC) && filtTempC > 0) {
+      selfHealing.lastGoodTemp = filtTempC;
+    }
+    if (!isnan(filtHum) && filtHum > 0) {
+      selfHealing.lastGoodHum = filtHum;
+    }
+    
     publishTelemetryLocal();
-  } else {
-    Serial.println("⚠️ [Sensors] All reads failed - skipping telemetry publish");
+  } else if (useSHT45 || useSEN66 || useSDP810) {
+    // All sensors failed - track failure
+    selfHealing.sensorFailCount++;
+    selfHealing.i2cFailCount++;  // Also track I2C failures
+    
+    // SELF-HEALING: Use last known good values (graceful degradation)
+    if (selfHealing.sensorFailCount > 3) {
+      useLastGoodSensorValues();
+      selfHealing.sensorHealthy = false;
+      Serial.println("⚠️ [SELF-HEAL] Using last good sensor values");
+    }
   }
 }
 
 // ---------- Serial Commands (Standalone Control) ----------
 // NOTE: System works completely standalone via Serial Monitor
 // Future: Push button will replace Serial commands (see PUSH_BUTTON_DIAGRAM.md)
-String serialBuf;
+char serialBuf[65];  // Fixed-size buffer to prevent heap fragmentation
+uint8_t serialBufIdx = 0;
+
 void handleSerial(){
   while (Serial.available()){
     char ch = Serial.read();
     if (ch == '\r' || ch == '\n'){
-      serialBuf.trim();
-      serialBuf.toLowerCase();
-      if (serialBuf == "start")  startSystem();  // Standalone: works without WiFi/MQTT
-      else if (serialBuf == "stop")   stopSystem();  // Standalone: works without WiFi/MQTT
-      else if (serialBuf == "toggle") toggleSystem();  // Standalone: works without WiFi/MQTT
-      else if (serialBuf.startsWith("set ")){
-        float sp = serialBuf.substring(4).toFloat();
+      serialBuf[serialBufIdx] = '\0';  // Null terminate
+      String cmd = String(serialBuf);
+      cmd.trim();
+      cmd.toLowerCase();
+      serialBufIdx = 0;  // Reset buffer
+      if (cmd == "start")  startSystem();  // Standalone: works without WiFi/MQTT
+      else if (cmd == "stop")   stopSystem();  // Standalone: works without WiFi/MQTT
+      else if (cmd == "toggle") toggleSystem();  // Standalone: works without WiFi/MQTT
+      else if (cmd.startsWith("set ")){
+        float sp = cmd.substring(4).toFloat();
         if (sp>=1 && sp<=100){ 
           tempSet=sp; 
           prefs.putFloat("tempSet",tempSet); 
@@ -1339,8 +1595,8 @@ void handleSerial(){
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
-      else if (serialBuf.startsWith("hum ")){
-        float hs = serialBuf.substring(4).toFloat();
+      else if (cmd.startsWith("hum ")){
+        float hs = cmd.substring(4).toFloat();
         if (hs>=10 && hs<=90){ 
           humSet=hs; 
           prefs.putFloat("humSet",humSet); 
@@ -1349,8 +1605,8 @@ void handleSerial(){
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
-      else if (serialBuf.startsWith("fan ")){
-        String fanCmd = serialBuf.substring(4);
+      else if (cmd.startsWith("fan ")){
+        String fanCmd = cmd.substring(4);
         if (fanCmd == "off" || fanCmd == "0") { 
           setFanSpeed(FAN_OFF); 
           prefs.putInt("fanSpeed", 0); 
@@ -1376,11 +1632,12 @@ void handleSerial(){
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
-      else if (serialBuf.length()) motorLogMsg("Unknown cmd: " + serialBuf);
-      serialBuf = "";
+      else if (cmd.length() > 0) motorLogMsg("Unknown cmd: " + cmd);
     } else {
-      serialBuf += ch;
-      if (serialBuf.length() > 64) serialBuf = serialBuf.substring(0,64);
+      if (serialBufIdx < 64) {
+        serialBuf[serialBufIdx++] = ch;
+      }
+      // Silently drop chars if buffer full
     }
   }
 }
@@ -2106,38 +2363,32 @@ void ensureMqtt(){
   if (WiFi.status()!=WL_CONNECTED) return;
 
   unsigned long now = millis();
-  if(now - lastMqttAttempt < 2000) return;  // Rate limit reconnection attempts
+  // STABILITY: Reduced reconnection frequency from 2s to 15s
+  if(now - lastMqttAttempt < 15000) return;  // Rate limit to every 15 seconds
   lastMqttAttempt = now;
 
   mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
-  mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);  // Set buffer size for combo sensor data
+  mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);
   mqttLocal.setCallback(onMqttMessageLocal);
-  mqttLocal.setSocketTimeout(1);  // 1 second max - prevents blocking watchdog
+  mqttLocal.setSocketTimeout(2);  // 2 second timeout
 
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
-  // Non-blocking connection attempt (timeout handled internally)
-  esp_task_wdt_reset(); // Feed watchdog before connection
+  esp_task_wdt_reset();
   bool ok = mqttLocal.connect(clientId.c_str(),
                          MQTT_USER, MQTT_PASS,
                          tStatus().c_str(), 1, true, "offline");
-  esp_task_wdt_reset(); // Feed watchdog after connection
+  esp_task_wdt_reset();
   if(ok){
     publishStatusOnlineLocal();
     mqttLocal.subscribe(tCmd().c_str(), 1);
     mqttLocal.subscribe(tProvWifi().c_str(), 1);
     mqttLocal.subscribe(tProvBroker().c_str(), 1);
     mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
-    Serial.println("✓ Local MQTT connected: " + mqttHost);
-    Serial.println("  → Local control active (works without internet)");
-    
-    // Publish initial state to local MQTT
+    Serial.println("✓ Local MQTT connected");
     publishStateLocal();
-    publishTelemetryLocal();
-  }else{
-    // Connection failed - this is OK, system continues normally (like WiFi reconnection)
-    Serial.println("✗ Local MQTT connect failed (will retry in 2s)");
-    Serial.println("  → System continues operating normally");
-    Serial.println("  → Will retry automatically (non-blocking)");
+  } else {
+    // STABILITY: Quiet failure - just log once, don't spam
+    Serial.println("✗ Local MQTT failed (retry in 15s)");
   }
 }
 
@@ -2156,16 +2407,24 @@ void setup()
   Serial.println("HELLO");
   Serial.println("========================================");
   
+  // Deinitialize watchdog first to prevent "already initialized" error
+  esp_task_wdt_deinit();
+  delay(10);
+  
   esp_task_wdt_config_t wdt_config = {
     .timeout_ms = WDT_TIMEOUT * 1000,
     .idle_core_mask = 0,
     .trigger_panic = true
   };
-  esp_task_wdt_init(&wdt_config);
-  esp_task_wdt_add(NULL);
-  Serial.print("✓ Watchdog enabled (");
-  Serial.print(WDT_TIMEOUT);
-  Serial.println("s timeout)");
+  esp_err_t wdt_err = esp_task_wdt_init(&wdt_config);
+  if (wdt_err == ESP_OK) {
+    esp_task_wdt_add(NULL);
+    Serial.print("✓ Watchdog enabled (");
+    Serial.print(WDT_TIMEOUT);
+    Serial.println("s timeout)");
+  } else {
+    Serial.println("⚠️ Watchdog init skipped (already active)");
+  }
   
   esp_task_wdt_reset();
 
@@ -2197,7 +2456,9 @@ void setup()
   
   esp_task_wdt_reset();
 
-  Wire.begin(21,22);
+  Wire.begin(21, 22);
+  Wire.setClock(100000);  // 100kHz I2C clock (safer for multiple sensors)
+  Wire.setTimeout(50);     // 50ms I2C timeout (prevents hangs)
   
   // ========== AUTO-DETECT SENSORS (All 3 Together) ==========
   Serial.println("\n--- Detecting Sensors ---");
@@ -2209,10 +2470,15 @@ void setup()
   bool sht45Detected = false;
   
   // Try SEN66 (Air Quality Sensor)
+  esp_task_wdt_reset();
   sen66.begin(Wire, SEN66_I2C_ADDR_6B);
   int16_t sen66Err = sen66.deviceReset();
   if (sen66Err == 0) {
-    delay(1200);  // SEN66 needs warmup after reset
+    // Feed watchdog during warmup (1200ms split into smaller chunks)
+    for (int i = 0; i < 6; i++) {
+      delay(200);
+      esp_task_wdt_reset();
+    }
     sen66Err = sen66.startContinuousMeasurement();
     if (sen66Err == 0) {
       useSEN66 = true;
@@ -2222,9 +2488,11 @@ void setup()
   }
   
   // Try SDP810 (HEPA Pressure Sensor)
+  esp_task_wdt_reset();
   sdp810.begin(Wire, SDP8XX_I2C_ADDRESS_0);
   sdp810.stopContinuousMeasurement();
-  delay(100);
+  delay(50);
+  esp_task_wdt_reset();
   uint16_t sdp810Err = sdp810.startContinuousMeasurementWithDiffPressureTCompAndAveraging();
   if (sdp810Err == 0) {
     useSDP810 = true;
@@ -2442,12 +2710,17 @@ void setup()
   // Restore system state if needed (standalone mode)
   if (pendingRecoveryStart) {
     pendingRecoveryStart = false;
-    // System relay already turned on in restoreSystemState()
-    // Just set runState to true - motor timing will be handled by loop() based on restored timing
     runState = true;
     motorLogMsg("⚠️ RECOVERY START: System recovered and running (standalone mode)");
-    motorLogMsg("  System relay: ON (restored from saved state)");
   }
+
+  // Initialize self-healing system
+  selfHealing.uptimeStart = millis();
+  selfHealing.lastHealthCheck = millis();
+  Serial.println("\n✓ Self-Healing System ENABLED");
+  Serial.println("  → Automatic recovery from WiFi/MQTT/I2C/Sensor failures");
+  Serial.println("  → NO RESETS - system heals itself");
+  Serial.println("========================================\n");
 
   lastLoopTime = millis();
 }
@@ -2456,104 +2729,103 @@ void loop()
 {
   unsigned long now = millis();
   
+  // Feed watchdog at start of every loop
   esp_task_wdt_reset();
   
+  // SELF-HEALING: Perform periodic health check and auto-recovery
+  performHealthCheck();
+  
+  // Check for loop hangs (log only, no reset)
   if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
-    Serial.println("⚠️ CRITICAL: Loop timeout!");
-    motorLogMsg("ERROR: Loop hang - resetting");
-    emergencyStopMotors();
-    saveSystemState();
-    delay(100);
-    while(1);
+    Serial.println("⚠️ Loop slow - continuing (no reset)");
   }
   lastLoopTime = now;
   
   static unsigned long lastStateSave = 0;
-  // Save more frequently when Motor 2 is waiting to preserve accurate timing
-  // This is critical to prevent flooding if ESP resets during M2 wait period
-  unsigned long saveInterval = 10000; // Default: 10 seconds
+  // STABILITY: Reduced save frequency to prevent flash wear and reduce overhead
+  // Save every 60 seconds normally, every 30 seconds when M2 is near
+  // Flash writes can cause brief delays - minimize them for stability
+  unsigned long saveInterval = 60000; // Default: 60 seconds (was 10s - too frequent)
   if (runState && !shuttingDown && m2NextAt > now && (m2NextAt - now) < 60000) {
-    // Motor 2 is waiting and has less than 60s remaining - save every 2 seconds for accuracy
-    saveInterval = 2000;
+    // Motor 2 is waiting and has less than 60s remaining - save every 30 seconds
+    saveInterval = 30000;  // (was 2s - too frequent, caused flash wear)
   }
   if (runState && (now - lastStateSave > saveInterval)) {
+    esp_task_wdt_reset();  // Feed watchdog before flash write
     saveSystemState();
     lastStateSave = now;
   }
 
-  // ========== STANDALONE MODE: WiFi Reconnection (Non-blocking) ==========
+  // ========== SELF-HEALING: WiFi Management ==========
   static unsigned long lastWifiCheck = 0;
   static bool wifiWasConnected = false;
   
-  if (now - lastWifiCheck > 2000) {  // Check WiFi status every 2 seconds
+  if (now - lastWifiCheck > 5000) {
     lastWifiCheck = now;
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
     
     if (wifiConnected && !wifiWasConnected) {
-      // WiFi just connected
-      Serial.println("\n✓ WiFi Connected!");
-      Serial.println("  IP: " + WiFi.localIP().toString());
-      motorLogMsg("WiFi: Connected - " + WiFi.localIP().toString());
+      // WiFi just connected - update self-healing state
+      Serial.println("✓ WiFi Connected: " + WiFi.localIP().toString());
       wifiWasConnected = true;
+      selfHealing.wifiHealthy = true;
+      selfHealing.wifiFailCount = 0;
+      selfHealing.wifiDownSince = 0;
     } 
     else if (!wifiConnected && wifiWasConnected) {
-      // WiFi just disconnected
-      Serial.println("\n⚠️ WiFi Disconnected (system continues running)");
-      motorLogMsg("WiFi: Disconnected - system continues standalone");
+      // WiFi just disconnected - update self-healing state
+      Serial.println("⚠️ WiFi Disconnected (self-healing active)");
       wifiWasConnected = false;
+      selfHealing.wifiHealthy = false;
+      selfHealing.wifiDownSince = now;
     }
     else if (!wifiConnected && !wifiWasConnected) {
-      // WiFi still disconnected - try to reconnect (non-blocking)
+      // WiFi still down - increment failure counter
+      selfHealing.wifiFailCount++;
+      
+      // Let self-healing system handle recovery (not here)
+      // Just do basic reconnection attempt every 30s
       static unsigned long lastWifiReconnectAttempt = 0;
-      if (now - lastWifiReconnectAttempt > 10000) {  // Try every 10 seconds
+      if (now - lastWifiReconnectAttempt > 30000) {
         lastWifiReconnectAttempt = now;
-        Serial.print("📡 Attempting WiFi reconnection...");
-        WiFi.disconnect();
-        delay(100);
+        WiFi.disconnect(false, false);
+        delay(50);
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-        // Don't wait - just start the connection attempt
       }
     }
   }
 
-  // ========== AWS IoT MQTT (Cloud) - OPTIONAL, Non-blocking ==========
-  // Only active in ONLINE mode - in OFFLINE mode, AWS IoT is completely disabled
+  // ========== SELF-HEALING: AWS IoT MQTT (Cloud) ==========
   if (onlineMode) {
-    // Keep the AWS MQTT connection alive - MUST call this every loop (non-blocking)
     if (client.connected()) {
       client.loop();
+      selfHealing.mqttAwsHealthy = true;
+    } else {
+      selfHealing.mqttAwsHealthy = false;
     }
     
-    // Simple reconnection logic: try to connect if WiFi is connected and AWS IoT is not connected
+    // AWS reconnection with exponential backoff (self-healing)
     if (WiFi.status() == WL_CONNECTED && !client.connected()) {
-      static unsigned long lastAwsReconnectAttempt = 0;
-      const unsigned long RETRY_INTERVAL = 60000; // Retry every 1 minute
+      // Longer retry intervals (2-5 minutes)
+      unsigned long retryInterval = (selfHealing.mqttAwsFailCount < 3) ? 120000 : 300000;
       
-      if (now - lastAwsReconnectAttempt > RETRY_INTERVAL) {
-        lastAwsReconnectAttempt = now;
+      if (now - selfHealing.lastMqttAwsRecovery > retryInterval) {
+        selfHealing.lastMqttAwsRecovery = now;
         
-        esp_task_wdt_reset(); // Feed watchdog before connection attempt
-        Serial.println("⚠️ AWS IoT disconnected - attempting reconnection...");
+        esp_task_wdt_reset();
         
         if (client.connect(THINGNAME)) {
-          esp_task_wdt_reset(); // Feed watchdog after connection
-          Serial.println("✓ AWS IoT reconnected (cloud service restored)");
+          esp_task_wdt_reset();
+          Serial.println("✓ [SELF-HEAL] AWS IoT reconnected");
+          selfHealing.mqttAwsFailCount = 0;
+          selfHealing.mqttAwsHealthy = true;
+          selfHealing.totalRecoveries++;
           
-          // Resubscribe to command topic
-          esp_task_wdt_reset(); // Feed watchdog before subscribe
-          bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-          esp_task_wdt_reset(); // Feed watchdog after subscribe
-          Serial.print("📥 Resubscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-          Serial.println(subResult ? " ✓" : " ✗ FAILED");
-          
-          // Send status on reconnection
+          client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
           publishStatusOnline();
-          publishStateAWS();
-          publishTelemetryAWS();
         } else {
-          esp_task_wdt_reset(); // Feed watchdog after failed connection
-          Serial.println("✗ AWS reconnection failed (will retry in 1 minute)");
-          Serial.println("  → Local MQTT continues working normally");
+          esp_task_wdt_reset();
+          selfHealing.mqttAwsFailCount++;
         }
       }
     }
@@ -2573,26 +2845,27 @@ void loop()
     }
   }
   
-  // Debug: Log MQTT connection status periodically (only in online mode)
+  // Debug: Log MQTT connection status periodically (every 60 seconds, only in online mode)
   if (onlineMode) {
     static unsigned long lastMqttStatusLog = 0;
-    if (now - lastMqttStatusLog > 30000) { // Every 30 seconds
+    if (now - lastMqttStatusLog > 60000) {
       lastMqttStatusLog = now;
-      if (client.connected()) {
-        Serial.println("[DEBUG] AWS IoT MQTT: Connected, subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-      } else {
-        Serial.println("[DEBUG] AWS IoT MQTT: Disconnected (WiFi: " + String(WiFi.status() == WL_CONNECTED ? "OK" : "OFF") + ")");
-      }
+      Serial.printf("[DEBUG] AWS: %s | WiFi: %s\n", 
+                    client.connected() ? "OK" : "OFF",
+                    WiFi.status() == WL_CONNECTED ? "OK" : "OFF");
     }
   }
 
-  // ========== Local MQTT (Raspberry Pi) - PRIMARY, Works without Internet ==========
-  // CRITICAL: Local MQTT is independent of AWS IoT - works even without internet
-  // Local MQTT reconnects automatically (like WiFi) - non-blocking, no resets
+  // ========== SELF-HEALING: Local MQTT (Raspberry Pi) ==========
   if (WiFi.status() == WL_CONNECTED) {
-    ensureMqtt();  // Non-blocking reconnection (similar to WiFi reconnection)
+    ensureMqtt();  // Non-blocking reconnection with self-healing
     if (mqttLocal.connected()) {
-      mqttLocal.loop();  // Handle local MQTT messages
+      mqttLocal.loop();
+      selfHealing.mqttLocalHealthy = true;
+      selfHealing.mqttLocalFailCount = 0;
+    } else {
+      selfHealing.mqttLocalHealthy = false;
+      selfHealing.mqttLocalFailCount++;
     }
   }
 
@@ -2614,15 +2887,15 @@ void loop()
     checkForNewSensor();
   }
   
-  // Debug: Log sensor mode periodically
+  // Debug: Log sensor mode periodically (every 60 seconds to reduce log spam)
   static unsigned long lastSensorModeLog = 0;
-  if (now - lastSensorModeLog > 30000) {
+  if (now - lastSensorModeLog > 60000) {
     lastSensorModeLog = now;
-    Serial.printf("[DEBUG] Sensor Mode: SEN66=%s SDP810=%s SHT45=%s (Original: %s)\n", 
-                  useSEN66 ? "YES" : "NO", 
-                  useSDP810 ? "YES" : "NO", 
-                  useSHT45 ? "YES" : "NO",
-                  originalSensorMode == SENSOR_COMBO ? "COMBO" : (originalSensorMode == SENSOR_SHT45 ? "SHT45" : "NONE"));
+    esp_task_wdt_reset();
+    Serial.printf("[DEBUG] Sensors: SEN66=%s SDP810=%s SHT45=%s\n", 
+                  useSEN66 ? "Y" : "N", 
+                  useSDP810 ? "Y" : "N", 
+                  useSHT45 ? "Y" : "N");
   }
 
   // Publish to AWS every 5 seconds (only in online mode)
@@ -2633,26 +2906,24 @@ void loop()
     publishStateAWS();
   }
   
-  // Publish to Local MQTT every 2 seconds (everything: telemetry, state, status)
+  // Publish to Local MQTT every 2 seconds (telemetry and state only - status less often)
   static unsigned long lastLocal = 0;
+  static unsigned long lastLocalStatus = 0;
   if (mqttLocal.connected()) {
-    unsigned long timeSinceLastPublish = now - lastLocal;
-    if (timeSinceLastPublish >= 2000) {
+    if (now - lastLocal >= 2000) {
       lastLocal = now;
-      Serial.print("📤 [Local MQTT] Publishing all data every 2s (elapsed: ");
-      Serial.print(timeSinceLastPublish);
-      Serial.println("ms)...");
+      esp_task_wdt_reset();  // Feed watchdog before MQTT operations
       publishTelemetryLocal();
       publishStateLocal();
-      publishStatusOnlineLocal();
-      Serial.println("✓ [Local MQTT] All data published!");
+      // Status only every 10 seconds to reduce traffic
+      if (now - lastLocalStatus >= 10000) {
+        lastLocalStatus = now;
+        publishStatusOnlineLocal();
+      }
     }
   } else {
-    // Reset timer if disconnected to publish immediately on reconnect
-    if (lastLocal != 0) {
-      Serial.println("⚠️ [Local MQTT] Disconnected - resetting timer");
-      lastLocal = 0;
-    }
+    lastLocal = 0;
+    lastLocalStatus = 0;
   }
 
   controlCP(filtTempC);

@@ -2844,6 +2844,345 @@ def trigger_ota_update():
         }), 500
 
 
+# ==================== RPi Dashboard OTA API ====================
+
+# RPi OTA MQTT Topics
+RPI_OTA_TOPIC_COMMAND = 'almed/rpi/ota/command'
+RPI_OTA_TOPIC_STATUS = 'almed/rpi/ota/status'
+
+# Store for RPi OTA status (received via local MQTT)
+rpi_ota_status = {
+    'status': 'unknown',
+    'message': 'No status received yet',
+    'current_version': 'unknown',
+    'last_update': None
+}
+
+# GitHub config for RPi dashboard (uses similar config as ESP32)
+RPI_GITHUB_REPO_NAME = os.getenv('RPI_GITHUB_REPO_NAME', 'almed-rpi-dashboard')
+
+
+@app.route('/api/rpi-ota/status', methods=['GET'])
+@login_required
+def get_rpi_ota_status():
+    """Get current RPi OTA updater status"""
+    return jsonify({
+        'success': True,
+        'status': rpi_ota_status
+    })
+
+
+@app.route('/api/rpi-ota/check-update', methods=['POST'])
+@login_required
+def rpi_check_update():
+    """Send command to RPi to check for updates"""
+    try:
+        command = {
+            'type': 'check_update',
+            'timestamp': int(time.time())
+        }
+        
+        # Send via local MQTT broker
+        success = publish_to_local_mqtt(RPI_OTA_TOPIC_COMMAND, command)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Check update command sent to RPi'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to send command to RPi (MQTT publish failed)'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/rpi-ota/trigger-update', methods=['POST'])
+@login_required
+def trigger_rpi_ota_update():
+    """Send OTA update command to RPi dashboard"""
+    try:
+        data = request.json
+        version = data.get('version', 'latest')
+        
+        command = {
+            'type': 'ota_update',
+            'version': version,
+            'timestamp': int(time.time())
+        }
+        
+        print(f"\n[RPi OTA] Sending update command:")
+        print(f"[RPi OTA] Version: {version}")
+        print(f"[RPi OTA] Topic: {RPI_OTA_TOPIC_COMMAND}")
+        
+        # Send via local MQTT broker
+        success = publish_to_local_mqtt(RPI_OTA_TOPIC_COMMAND, command)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'OTA update command sent to RPi (version: {version})',
+                'version': version
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to send command to RPi (MQTT publish failed)'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/rpi-ota/restart', methods=['POST'])
+@login_required
+def restart_rpi_dashboard():
+    """Send restart command to RPi dashboard service"""
+    try:
+        command = {
+            'type': 'restart',
+            'timestamp': int(time.time())
+        }
+        
+        success = publish_to_local_mqtt(RPI_OTA_TOPIC_COMMAND, command)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Restart command sent to RPi dashboard'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to send restart command'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/rpi-ota/rollback', methods=['POST'])
+@login_required
+def rollback_rpi_dashboard():
+    """Send rollback command to RPi dashboard"""
+    try:
+        command = {
+            'type': 'rollback',
+            'timestamp': int(time.time())
+        }
+        
+        success = publish_to_local_mqtt(RPI_OTA_TOPIC_COMMAND, command)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Rollback command sent to RPi'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to send rollback command'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/rpi-ota/releases', methods=['GET'])
+@login_required
+def get_rpi_releases():
+    """Get available releases from GitHub for RPi dashboard"""
+    try:
+        headers = {
+            'Accept': 'application/vnd.github.v3+json',
+            'Authorization': f'token {config.GITHUB_TOKEN}'
+        }
+        
+        repo_name = RPI_GITHUB_REPO_NAME
+        url = f'https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{repo_name}/releases'
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            releases = response.json()
+            # Simplify the response
+            simplified = []
+            for release in releases[:10]:  # Limit to 10 releases
+                assets = []
+                for asset in release.get('assets', []):
+                    assets.append({
+                        'name': asset.get('name'),
+                        'size': asset.get('size'),
+                        'download_count': asset.get('download_count')
+                    })
+                simplified.append({
+                    'tag': release.get('tag_name'),
+                    'name': release.get('name'),
+                    'published_at': release.get('published_at'),
+                    'prerelease': release.get('prerelease'),
+                    'assets': assets
+                })
+            
+            return jsonify({
+                'success': True,
+                'releases': simplified,
+                'repo': f'{config.GITHUB_REPO_OWNER}/{repo_name}'
+            })
+        elif response.status_code == 404:
+            return jsonify({
+                'success': True,
+                'releases': [],
+                'message': 'No releases found or repository does not exist'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'GitHub API error: {response.status_code}'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/rpi-ota/push-release', methods=['POST'])
+@login_required
+def push_rpi_release():
+    """Create a new RPi dashboard release on GitHub with uploaded bundle"""
+    try:
+        data = request.json
+        bundle_base64 = data.get('bundle')  # Base64-encoded tar.gz
+        version = data.get('version')
+        release_notes = data.get('notes', 'RPi Dashboard Update')
+        
+        if not bundle_base64:
+            return jsonify({
+                'success': False,
+                'error': 'Bundle file is required'
+            }), 400
+        
+        if not version:
+            # Auto-generate version
+            version = f'v{datetime.now().strftime("%Y.%m.%d.%H%M")}'
+        
+        headers = {
+            'Accept': 'application/vnd.github.v3+json',
+            'Authorization': f'token {config.GITHUB_TOKEN}'
+        }
+        
+        repo_name = RPI_GITHUB_REPO_NAME
+        
+        # Step 1: Create release
+        release_url = f'https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{repo_name}/releases'
+        release_data = {
+            'tag_name': version,
+            'name': f'RPi Dashboard {version}',
+            'body': release_notes,
+            'draft': False,
+            'prerelease': False
+        }
+        
+        release_response = requests.post(release_url, headers=headers, json=release_data, timeout=60)
+        
+        if release_response.status_code != 201:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to create release: {release_response.text}'
+            }), 500
+        
+        release_info = release_response.json()
+        upload_url = release_info['upload_url'].replace('{?name,label}', '')
+        
+        # Step 2: Upload bundle asset
+        bundle_data = base64.b64decode(bundle_base64)
+        asset_name = f'ahu_dashboard_{version}.tar.gz'
+        
+        upload_headers = {
+            'Authorization': f'token {config.GITHUB_TOKEN}',
+            'Content-Type': 'application/gzip'
+        }
+        
+        upload_response = requests.post(
+            f"{upload_url}?name={asset_name}",
+            headers=upload_headers,
+            data=bundle_data,
+            timeout=300
+        )
+        
+        if upload_response.status_code == 201:
+            return jsonify({
+                'success': True,
+                'message': f'Release {version} created successfully',
+                'version': version,
+                'release_url': release_info.get('html_url')
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Release created but asset upload failed: {upload_response.status_code}'
+            }), 500
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+def publish_to_local_mqtt(topic, payload):
+    """Publish message to local MQTT broker for RPi communication"""
+    import paho.mqtt.publish as publish
+    
+    # Local MQTT broker config (same as ESP32 uses)
+    MQTT_BROKER = os.getenv('LOCAL_MQTT_BROKER', '10.42.0.1')
+    MQTT_PORT = int(os.getenv('LOCAL_MQTT_PORT', '1883'))
+    MQTT_USERNAME = os.getenv('LOCAL_MQTT_USERNAME', 'ahu_user')
+    MQTT_PASSWORD = os.getenv('LOCAL_MQTT_PASSWORD', 'ahu_pass_2024')
+    
+    try:
+        print(f"[RPi MQTT] Publishing to {MQTT_BROKER}:{MQTT_PORT}")
+        print(f"[RPi MQTT] Topic: {topic}")
+        print(f"[RPi MQTT] Payload: {json.dumps(payload)}")
+        
+        publish.single(
+            topic,
+            payload=json.dumps(payload),
+            hostname=MQTT_BROKER,
+            port=MQTT_PORT,
+            auth={'username': MQTT_USERNAME, 'password': MQTT_PASSWORD},
+            qos=1,
+            retain=False
+        )
+        
+        print(f"[RPi MQTT] ✓ Message published successfully")
+        return True
+        
+    except Exception as e:
+        print(f"[RPi MQTT] ✗ Publish failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 # ==================== WebSocket Event Handlers ====================
 
 @socketio.on('connect')

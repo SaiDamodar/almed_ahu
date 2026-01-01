@@ -9,8 +9,8 @@ class AhuTelemetry {
   // Basic readings (both sensor types)
   final double? temp;        // Temperature in °C
   final double? hum;         // Humidity in %RH
-  final bool m1;             // Motor-1 (drain) status
-  final bool m2;             // Motor-2 (filter clean) status
+  final bool m1;             // Motor-1 (filter) status
+  final bool m2;             // Motor-2 (drain) status
   final bool run;            // System running state
   final bool cp;             // Compressor (cooling) status
   final bool heater;         // Heater (dehumidifier) status

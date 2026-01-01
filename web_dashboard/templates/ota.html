@@ -25,6 +25,7 @@
             display: flex;
             gap: 12px;
             margin-bottom: 24px;
+            flex-wrap: wrap;
         }
         .status-log {
             background: var(--bg-secondary);
@@ -66,6 +67,124 @@
             border-color: var(--primary);
             background: var(--bg-secondary);
         }
+        /* Tab Navigation */
+        .ota-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 24px;
+            border-bottom: 2px solid var(--border-color);
+        }
+        .ota-tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.2s;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+        .ota-tab:hover {
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+        }
+        .ota-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        .ota-content {
+            display: none;
+        }
+        .ota-content.active {
+            display: block;
+        }
+        /* RPi Status Card */
+        .rpi-status-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        .rpi-status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #6B7280;
+        }
+        .rpi-status-indicator.online { background: #10B981; }
+        .rpi-status-indicator.updating { background: #F59E0B; animation: pulse 1s infinite; }
+        .rpi-status-indicator.error { background: #EF4444; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .rpi-status-info {
+            flex: 1;
+        }
+        .rpi-version {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .rpi-status-message {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        /* Release List */
+        .release-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .release-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .release-item:hover {
+            background: var(--bg-hover);
+        }
+        .release-item.selected {
+            border: 2px solid var(--primary);
+        }
+        .release-tag {
+            font-weight: 600;
+            color: var(--primary);
+        }
+        .release-date {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        /* Progress Bar */
+        .update-progress {
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 16px 0;
+            display: none;
+        }
+        .update-progress.active {
+            display: block;
+        }
+        .update-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), #10B981);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
     </style>
 </head>
 <body>
@@ -98,96 +217,236 @@
             <div class="content-container">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                     <div>
-                        <h1 class="page-title">OTA Firmware Updates</h1>
-                        <p class="page-subtitle">Push firmware updates to ESP32 devices over the air</p>
+                        <h1 class="page-title">OTA Updates</h1>
+                        <p class="page-subtitle">Manage firmware updates for ESP32 and Raspberry Pi devices</p>
                     </div>
                 </div>
 
-                <!-- Device Selector -->
-                <div class="section-card device-selector">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600;">Select Device:</label>
-                    <select id="device-select" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);">
-                        <option value="">Loading devices...</option>
-                    </select>
-                </div>
-
-                <!-- File Upload Area -->
-                <div class="section-card">
-                    <h2 class="section-title">Upload Firmware File</h2>
-                    <div class="file-upload-area" id="file-upload-area">
-                        <input type="file" id="file-input" accept=".ino,.cpp,.h" style="display: none;">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 16px; opacity: 0.5;">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="17 8 12 3 7 8"></polyline>
-                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                <!-- Tab Navigation -->
+                <div class="ota-tabs">
+                    <button class="ota-tab active" onclick="switchTab('esp32')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                            <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+                            <path d="M12 12h.01"></path>
+                            <path d="M17 12h.01"></path>
+                            <path d="M7 12h.01"></path>
                         </svg>
-                        <p style="margin: 0; font-weight: 600;">Click to upload or drag and drop</p>
-                        <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.7;">ESP32 firmware file (.ino, .cpp, .h)</p>
-                    </div>
+                        ESP32 Firmware
+                    </button>
+                    <button class="ota-tab" onclick="switchTab('rpi')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                            <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                            <rect x="9" y="9" width="6" height="6"></rect>
+                            <path d="M9 1v3"></path>
+                            <path d="M15 1v3"></path>
+                            <path d="M9 20v3"></path>
+                            <path d="M15 20v3"></path>
+                            <path d="M20 9h3"></path>
+                            <path d="M20 14h3"></path>
+                            <path d="M1 9h3"></path>
+                            <path d="M1 14h3"></path>
+                        </svg>
+                        RPi Dashboard
+                    </button>
                 </div>
 
-                <!-- Code Editor -->
-                <div class="section-card">
-                    <h2 class="section-title">Firmware Code Editor</h2>
-                    <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
-                        <strong>Important:</strong> Paste the actual Arduino code (from your .ino file), not encoded content. 
-                        The code should start with <code>#include</code> or have <code>void setup()</code> functions.
-                    </p>
-                    <div class="code-editor-container">
-                        <textarea id="code-editor" class="code-editor" placeholder="Paste your ESP32 firmware code here (the actual .ino file content) or upload a file above..."></textarea>
+                <!-- ESP32 Tab Content -->
+                <div id="esp32-content" class="ota-content active">
+                    <!-- Device Selector -->
+                    <div class="section-card device-selector">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Select Device:</label>
+                        <select id="device-select" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);">
+                            <option value="">Loading devices...</option>
+                        </select>
                     </div>
-                    
-                    <div class="form-group" style="margin-top: 16px;">
-                        <label for="bin-file-upload">📦 Compiled .bin File (Optional - for OTA updates)</label>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px 0;">
-                            Upload the compiled .bin file from Arduino IDE (Sketch → Export compiled Binary).
-                            If provided, a GitHub Release will be automatically created with auto-incremented version.
-                        </p>
-                        <input type="file" id="bin-file-upload" accept=".bin" style="display: none;" onchange="handleBinFileSelect(event)">
-                        <div class="file-upload-area" onclick="document.getElementById('bin-file-upload').click()">
-                            <p id="bin-file-status" style="margin: 0; color: var(--text-secondary);">
-                                Click to upload or drag & drop .bin file here
-                            </p>
+
+                    <!-- File Upload Area -->
+                    <div class="section-card">
+                        <h2 class="section-title">Upload Firmware File</h2>
+                        <div class="file-upload-area" id="file-upload-area">
+                            <input type="file" id="file-input" accept=".ino,.cpp,.h" style="display: none;">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 16px; opacity: 0.5;">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <p style="margin: 0; font-weight: 600;">Click to upload or drag and drop</p>
+                            <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.7;">ESP32 firmware file (.ino, .cpp, .h)</p>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 8px; margin-top: 12px;">
-                        <button class="btn btn-secondary" onclick="loadCurrentFirmware()">Load Current from GitHub</button>
-                        <button class="btn btn-secondary" onclick="clearEditor()">Clear</button>
-                    </div>
-                </div>
 
-                <!-- Commit Message -->
-                <div class="section-card">
-                    <h2 class="section-title">Commit Message</h2>
-                    <input type="text" id="commit-message" placeholder="Enter commit message (e.g., 'Bug fix: Motor timing issue')" 
-                           style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);"
-                           value="OTA firmware update">
-                </div>
+                    <!-- Code Editor -->
+                    <div class="section-card">
+                        <h2 class="section-title">Firmware Code Editor</h2>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
+                            <strong>Important:</strong> Paste the actual Arduino code (from your .ino file), not encoded content. 
+                            The code should start with <code>#include</code> or have <code>void setup()</code> functions.
+                        </p>
+                        <div class="code-editor-container">
+                            <textarea id="code-editor" class="code-editor" placeholder="Paste your ESP32 firmware code here (the actual .ino file content) or upload a file above..."></textarea>
+                        </div>
+                        
+                        <div class="form-group" style="margin-top: 16px;">
+                            <label for="bin-file-upload">📦 Compiled .bin File (Optional - for OTA updates)</label>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px 0;">
+                                Upload the compiled .bin file from Arduino IDE (Sketch → Export compiled Binary).
+                                If provided, a GitHub Release will be automatically created with auto-incremented version.
+                            </p>
+                            <input type="file" id="bin-file-upload" accept=".bin" style="display: none;" onchange="handleBinFileSelect(event)">
+                            <div class="file-upload-area" onclick="document.getElementById('bin-file-upload').click()">
+                                <p id="bin-file-status" style="margin: 0; color: var(--text-secondary);">
+                                    Click to upload or drag & drop .bin file here
+                                </p>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; margin-top: 12px;">
+                            <button class="btn btn-secondary" onclick="loadCurrentFirmware()">Load Current from GitHub</button>
+                            <button class="btn btn-secondary" onclick="clearEditor()">Clear</button>
+                        </div>
+                    </div>
 
-                <!-- Actions -->
-                <div class="section-card">
-                    <div class="ota-actions">
-                        <button class="btn btn-primary" onclick="pushToGitHub()">1. Push to GitHub</button>
-                        <button class="btn btn-secondary" onclick="testMQTT()" style="margin-left: 8px;">Test MQTT</button>
-                        <button class="btn btn-primary" id="trigger-update-btn" onclick="triggerOTAUpdate()" disabled>2. Send OTA Update</button>
+                    <!-- Commit Message -->
+                    <div class="section-card">
+                        <h2 class="section-title">Commit Message</h2>
+                        <input type="text" id="commit-message" placeholder="Enter commit message (e.g., 'Bug fix: Motor timing issue')" 
+                               style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);"
+                               value="OTA firmware update">
                     </div>
-                    <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary);">
-                        <div>Button Status: <span id="button-status">Disabled (push to GitHub first)</span></div>
-                        <div>Commit SHA: <span id="commit-sha-display">None</span></div>
-                    </div>
-                    <p style="font-size: 14px; color: var(--text-secondary); margin-top: 8px;">
-                        Step 1: Push your code to GitHub repository<br>
-                        Step 2: Send MQTT command to ESP32 to download and install the update
-                    </p>
-                </div>
 
-                <!-- Status Log -->
-                <div class="section-card">
-                    <h2 class="section-title">Update Status</h2>
-                    <div id="status-log" class="status-log">
-                        <div class="log-entry info">Ready to push firmware update...</div>
+                    <!-- Actions -->
+                    <div class="section-card">
+                        <div class="ota-actions">
+                            <button class="btn btn-primary" onclick="pushToGitHub()">1. Push to GitHub</button>
+                            <button class="btn btn-secondary" onclick="testMQTT()" style="margin-left: 8px;">Test MQTT</button>
+                            <button class="btn btn-primary" id="trigger-update-btn" onclick="triggerOTAUpdate()" disabled>2. Send OTA Update</button>
+                        </div>
+                        <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary);">
+                            <div>Button Status: <span id="button-status">Disabled (push to GitHub first)</span></div>
+                            <div>Commit SHA: <span id="commit-sha-display">None</span></div>
+                        </div>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-top: 8px;">
+                            Step 1: Push your code to GitHub repository<br>
+                            Step 2: Send MQTT command to ESP32 to download and install the update
+                        </p>
                     </div>
-                </div>
+
+                    <!-- Status Log -->
+                    <div class="section-card">
+                        <h2 class="section-title">Update Status</h2>
+                        <div id="status-log" class="status-log">
+                            <div class="log-entry info">Ready to push firmware update...</div>
+                        </div>
+                    </div>
+                </div><!-- End ESP32 Content -->
+
+                <!-- RPi Tab Content -->
+                <div id="rpi-content" class="ota-content">
+                    <!-- RPi Status Card -->
+                    <div class="section-card">
+                        <h2 class="section-title">Raspberry Pi Dashboard Status</h2>
+                        <div class="rpi-status-card">
+                            <div class="rpi-status-indicator" id="rpi-status-indicator"></div>
+                            <div class="rpi-status-info">
+                                <div class="rpi-version" id="rpi-version">Version: Checking...</div>
+                                <div class="rpi-status-message" id="rpi-status-message">Connecting to RPi...</div>
+                            </div>
+                            <button class="btn btn-secondary" onclick="checkRpiStatus()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle;">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                                Refresh
+                            </button>
+                        </div>
+                        
+                        <!-- Update Progress -->
+                        <div class="update-progress" id="rpi-update-progress">
+                            <div class="update-progress-bar" id="rpi-progress-bar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Available Releases -->
+                    <div class="section-card">
+                        <h2 class="section-title">Available Releases</h2>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
+                            Select a version to install on the Raspberry Pi dashboard
+                        </p>
+                        <div class="release-list" id="rpi-release-list">
+                            <div class="log-entry info">Loading releases...</div>
+                        </div>
+                        <input type="hidden" id="selected-rpi-version" value="latest">
+                    </div>
+
+                    <!-- RPi Actions -->
+                    <div class="section-card">
+                        <h2 class="section-title">Actions</h2>
+                        <div class="ota-actions">
+                            <button class="btn btn-secondary" onclick="rpiCheckUpdate()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <path d="m21 21-4.35-4.35"></path>
+                                </svg>
+                                Check for Updates
+                            </button>
+                            <button class="btn btn-primary" onclick="rpiTriggerUpdate()" id="rpi-update-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                Install Update
+                            </button>
+                            <button class="btn btn-secondary" onclick="rpiRestart()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                                Restart Dashboard
+                            </button>
+                            <button class="btn btn-warning" onclick="rpiRollback()" style="background: #F59E0B; border-color: #F59E0B;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                    <polyline points="1 4 1 10 7 10"></polyline>
+                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                                </svg>
+                                Rollback
+                            </button>
+                        </div>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-top: 8px;">
+                            <strong>Note:</strong> OTA updates require the RPi OTA Updater service to be running on the Raspberry Pi.
+                        </p>
+                    </div>
+
+                    <!-- RPi Status Log -->
+                    <div class="section-card">
+                        <h2 class="section-title">Update Log</h2>
+                        <div id="rpi-status-log" class="status-log">
+                            <div class="log-entry info">Ready for RPi dashboard updates...</div>
+                        </div>
+                    </div>
+
+                    <!-- Upload New Release -->
+                    <div class="section-card">
+                        <h2 class="section-title">Upload New Release</h2>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
+                            Upload a Flutter bundle (.tar.gz) to create a new GitHub release
+                        </p>
+                        <div class="file-upload-area" id="rpi-bundle-upload-area">
+                            <input type="file" id="rpi-bundle-input" accept=".tar.gz,.tgz,.zip" style="display: none;">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 16px; opacity: 0.5;">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <p style="margin: 0; font-weight: 600;" id="rpi-bundle-status">Click to upload or drag and drop</p>
+                            <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.7;">Flutter bundle archive (.tar.gz)</p>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center; margin-top: 12px;">
+                            <input type="text" id="rpi-version-input" placeholder="Version (e.g., v1.0.0 - leave empty for auto)" 
+                                   style="flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);">
+                            <button class="btn btn-primary" onclick="rpiPushRelease()" id="rpi-push-btn" disabled>
+                                Push Release
+                            </button>
+                        </div>
+                    </div>
+                </div><!-- End RPi Content -->
             </div>
         </div>
     </div>
@@ -486,6 +745,360 @@
 
         // Initialize on page load
         loadDevices();
+        
+        // ==================== Tab Switching ====================
+        
+        function switchTab(tab) {
+            // Update tab buttons
+            document.querySelectorAll('.ota-tab').forEach(t => t.classList.remove('active'));
+            event.target.closest('.ota-tab').classList.add('active');
+            
+            // Update content
+            document.querySelectorAll('.ota-content').forEach(c => c.classList.remove('active'));
+            document.getElementById(`${tab}-content`).classList.add('active');
+            
+            // Load data for the selected tab
+            if (tab === 'rpi') {
+                loadRpiReleases();
+                checkRpiStatus();
+            }
+        }
+        
+        // ==================== RPi OTA Functions ====================
+        
+        let rpiSelectedVersion = 'latest';
+        let rpiSelectedBundle = null;
+        
+        // Initialize RPi file upload
+        const rpiBundleUploadArea = document.getElementById('rpi-bundle-upload-area');
+        const rpiBundleInput = document.getElementById('rpi-bundle-input');
+        
+        rpiBundleUploadArea.addEventListener('click', () => rpiBundleInput.click());
+        
+        rpiBundleUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            rpiBundleUploadArea.classList.add('dragover');
+        });
+        
+        rpiBundleUploadArea.addEventListener('dragleave', () => {
+            rpiBundleUploadArea.classList.remove('dragover');
+        });
+        
+        rpiBundleUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            rpiBundleUploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                handleRpiBundleFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        rpiBundleInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleRpiBundleFile(e.target.files[0]);
+            }
+        });
+        
+        function handleRpiBundleFile(file) {
+            if (!file.name.match(/\.(tar\.gz|tgz|zip)$/i)) {
+                addRpiLog('error', 'Invalid file type. Please upload .tar.gz or .zip files');
+                return;
+            }
+            
+            rpiSelectedBundle = file;
+            document.getElementById('rpi-bundle-status').textContent = `Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+            document.getElementById('rpi-bundle-status').style.color = 'var(--primary)';
+            document.getElementById('rpi-push-btn').disabled = false;
+            addRpiLog('success', `Bundle file selected: ${file.name}`);
+        }
+        
+        async function loadRpiReleases() {
+            const releaseList = document.getElementById('rpi-release-list');
+            releaseList.innerHTML = '<div class="log-entry info">Loading releases...</div>';
+            
+            try {
+                const response = await fetch('/api/rpi-ota/releases');
+                const data = await response.json();
+                
+                if (data.success && data.releases && data.releases.length > 0) {
+                    releaseList.innerHTML = '';
+                    data.releases.forEach((release, index) => {
+                        const div = document.createElement('div');
+                        div.className = 'release-item' + (index === 0 ? ' selected' : '');
+                        div.onclick = () => selectRpiRelease(release.tag, div);
+                        
+                        const date = new Date(release.published_at);
+                        const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                        
+                        div.innerHTML = `
+                            <div>
+                                <span class="release-tag">${release.tag}</span>
+                                ${release.prerelease ? '<span style="color: #F59E0B; font-size: 12px; margin-left: 8px;">Pre-release</span>' : ''}
+                                <div class="release-date">${dateStr}</div>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">
+                                ${release.assets.length} asset${release.assets.length !== 1 ? 's' : ''}
+                            </div>
+                        `;
+                        releaseList.appendChild(div);
+                    });
+                    
+                    // Select latest by default
+                    if (data.releases.length > 0) {
+                        rpiSelectedVersion = data.releases[0].tag;
+                        document.getElementById('selected-rpi-version').value = rpiSelectedVersion;
+                    }
+                } else {
+                    releaseList.innerHTML = '<div class="log-entry warning">No releases found. Upload a bundle to create one.</div>';
+                }
+            } catch (error) {
+                releaseList.innerHTML = `<div class="log-entry error">Failed to load releases: ${error.message}</div>`;
+            }
+        }
+        
+        function selectRpiRelease(tag, element) {
+            document.querySelectorAll('.release-item').forEach(el => el.classList.remove('selected'));
+            element.classList.add('selected');
+            rpiSelectedVersion = tag;
+            document.getElementById('selected-rpi-version').value = tag;
+            addRpiLog('info', `Selected version: ${tag}`);
+        }
+        
+        async function checkRpiStatus() {
+            try {
+                const response = await fetch('/api/rpi-ota/status');
+                const data = await response.json();
+                
+                if (data.success && data.status) {
+                    updateRpiStatusUI(data.status);
+                }
+            } catch (error) {
+                updateRpiStatusUI({
+                    status: 'error',
+                    message: 'Failed to get status',
+                    current_version: 'unknown'
+                });
+            }
+        }
+        
+        function updateRpiStatusUI(status) {
+            const indicator = document.getElementById('rpi-status-indicator');
+            const version = document.getElementById('rpi-version');
+            const message = document.getElementById('rpi-status-message');
+            const progressBar = document.getElementById('rpi-update-progress');
+            const progressBarInner = document.getElementById('rpi-progress-bar');
+            
+            // Update indicator
+            indicator.className = 'rpi-status-indicator';
+            if (status.status === 'online' || status.status === 'complete' || status.status === 'up_to_date') {
+                indicator.classList.add('online');
+            } else if (status.status === 'downloading' || status.status === 'updating' || status.status === 'starting' || status.status === 'extracting' || status.status === 'applying') {
+                indicator.classList.add('updating');
+            } else if (status.status === 'error') {
+                indicator.classList.add('error');
+            }
+            
+            // Update version and message
+            version.textContent = `Version: ${status.current_version || 'unknown'}`;
+            message.textContent = status.message || status.status || 'Unknown';
+            
+            // Update progress bar
+            if (status.progress !== undefined && status.progress > 0 && status.progress < 100) {
+                progressBar.classList.add('active');
+                progressBarInner.style.width = `${status.progress}%`;
+            } else {
+                progressBar.classList.remove('active');
+            }
+            
+            // Add to log
+            if (status.message) {
+                const logType = status.status === 'error' ? 'error' : 
+                               status.status === 'complete' ? 'success' : 'info';
+                addRpiLog(logType, status.message);
+            }
+        }
+        
+        async function rpiCheckUpdate() {
+            addRpiLog('info', 'Sending check update command to RPi...');
+            
+            try {
+                const response = await fetch('/api/rpi-ota/check-update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addRpiLog('success', data.message);
+                } else {
+                    addRpiLog('error', data.error || 'Failed to send command');
+                }
+            } catch (error) {
+                addRpiLog('error', `Error: ${error.message}`);
+            }
+        }
+        
+        async function rpiTriggerUpdate() {
+            const version = rpiSelectedVersion || 'latest';
+            addRpiLog('info', `Triggering OTA update to version: ${version}`);
+            
+            try {
+                const response = await fetch('/api/rpi-ota/trigger-update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ version: version })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addRpiLog('success', data.message);
+                    addRpiLog('info', 'RPi will download and install the update. This may take a few minutes...');
+                    
+                    // Start polling for status updates
+                    startRpiStatusPolling();
+                } else {
+                    addRpiLog('error', data.error || 'Failed to trigger update');
+                }
+            } catch (error) {
+                addRpiLog('error', `Error: ${error.message}`);
+            }
+        }
+        
+        async function rpiRestart() {
+            addRpiLog('info', 'Sending restart command to RPi dashboard...');
+            
+            try {
+                const response = await fetch('/api/rpi-ota/restart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addRpiLog('success', data.message);
+                } else {
+                    addRpiLog('error', data.error || 'Failed to send restart command');
+                }
+            } catch (error) {
+                addRpiLog('error', `Error: ${error.message}`);
+            }
+        }
+        
+        async function rpiRollback() {
+            if (!confirm('Are you sure you want to rollback to the previous version?')) {
+                return;
+            }
+            
+            addRpiLog('warning', 'Sending rollback command to RPi...');
+            
+            try {
+                const response = await fetch('/api/rpi-ota/rollback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addRpiLog('success', data.message);
+                } else {
+                    addRpiLog('error', data.error || 'Failed to send rollback command');
+                }
+            } catch (error) {
+                addRpiLog('error', `Error: ${error.message}`);
+            }
+        }
+        
+        async function rpiPushRelease() {
+            if (!rpiSelectedBundle) {
+                addRpiLog('error', 'Please select a bundle file first');
+                return;
+            }
+            
+            const version = document.getElementById('rpi-version-input').value.trim() || null;
+            
+            addRpiLog('info', `Uploading bundle to GitHub...`);
+            
+            try {
+                // Read file as base64
+                const base64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result.split(',')[1]);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(rpiSelectedBundle);
+                });
+                
+                const response = await fetch('/api/rpi-ota/push-release', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bundle: base64,
+                        version: version,
+                        notes: 'RPi Dashboard Update'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addRpiLog('success', `Release ${data.version} created successfully!`);
+                    addRpiLog('info', `Release URL: ${data.release_url}`);
+                    
+                    // Refresh release list
+                    loadRpiReleases();
+                    
+                    // Reset upload
+                    rpiSelectedBundle = null;
+                    document.getElementById('rpi-bundle-status').textContent = 'Click to upload or drag and drop';
+                    document.getElementById('rpi-bundle-status').style.color = '';
+                    document.getElementById('rpi-push-btn').disabled = true;
+                    document.getElementById('rpi-version-input').value = '';
+                } else {
+                    addRpiLog('error', data.error || 'Failed to create release');
+                }
+            } catch (error) {
+                addRpiLog('error', `Error: ${error.message}`);
+            }
+        }
+        
+        let rpiStatusInterval = null;
+        
+        function startRpiStatusPolling() {
+            if (rpiStatusInterval) {
+                clearInterval(rpiStatusInterval);
+            }
+            
+            rpiStatusInterval = setInterval(async () => {
+                await checkRpiStatus();
+                
+                // Stop polling after completion or error
+                const indicator = document.getElementById('rpi-status-indicator');
+                if (indicator.classList.contains('online') || indicator.classList.contains('error')) {
+                    clearInterval(rpiStatusInterval);
+                    rpiStatusInterval = null;
+                }
+            }, 3000);
+            
+            // Stop after 5 minutes max
+            setTimeout(() => {
+                if (rpiStatusInterval) {
+                    clearInterval(rpiStatusInterval);
+                    rpiStatusInterval = null;
+                }
+            }, 300000);
+        }
+        
+        function addRpiLog(type, message) {
+            const log = document.getElementById('rpi-status-log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
     </script>
 </body>
 </html>

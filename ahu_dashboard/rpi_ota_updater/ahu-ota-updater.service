@@ -1,0 +1,32 @@
+[Unit]
+Description=AHU Dashboard OTA Updater Service
+After=network.target mosquitto.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/ahu_ota_updater
+ExecStart=/usr/bin/python3 /home/pi/ahu_ota_updater/rpi_ota_updater.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables (can be overridden in /etc/default/ahu-ota-updater)
+Environment="MQTT_BROKER=10.42.0.1"
+Environment="MQTT_PORT=1883"
+Environment="MQTT_USERNAME=ahu_user"
+Environment="MQTT_PASSWORD=ahu_pass_2024"
+Environment="DASHBOARD_DIR=/home/pi/ahu_dashboard"
+Environment="FLUTTER_PI_SERVICE=ahu-dashboard"
+Environment="GITHUB_REPO_OWNER=ESPUpdaterzaid"
+Environment="GITHUB_REPO_NAME=almed-rpi-dashboard"
+
+# Optional: Load additional environment from file
+EnvironmentFile=-/etc/default/ahu-ota-updater
+
+[Install]
+WantedBy=multi-user.target
+

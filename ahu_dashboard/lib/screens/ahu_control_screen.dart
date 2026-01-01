@@ -1296,16 +1296,16 @@ class _ComponentIndicators extends StatelessWidget {
         children: [
           _MotorIndicator(
             ahuId: ahuId,
-            icon: Icons.water_rounded,
-            label: 'Motor 1 (Drain)',
+            icon: Icons.cleaning_services_rounded,
+            label: 'Motor 1 (Filter)',
             isActive: data.state?.m1 ?? false,
             color: const Color(0xFF3B82F6),
           ),
           const SizedBox(width: 12),
           _MotorIndicator(
             ahuId: ahuId,
-            icon: Icons.cleaning_services_rounded,
-            label: 'Motor 2 (Filter)',
+            icon: Icons.water_rounded,
+            label: 'Motor 2 (Drain)',
             isActive: data.state?.m2 ?? false,
             color: const Color(0xFF60A5FA),
           ),
