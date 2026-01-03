@@ -2607,6 +2607,7 @@ def push_firmware_to_github():
         data = request.json
         firmware_code = data.get('code', '')
         firmware_bin_base64 = data.get('bin_file', '')  # Base64-encoded .bin file
+        firmware_bin_filename = data.get('bin_filename', '')  # Original filename from upload
         commit_message = data.get('message', 'OTA firmware update')
         version = data.get('version', '')  # Optional version tag (e.g., "v1.0.1")
 
@@ -2648,6 +2649,7 @@ def push_firmware_to_github():
             'Content-Type': 'application/json'
         }
 
+        # Initialize commit info (will be updated if source code is pushed)
         commit_sha = 'bin-only'
         commit_url = ''
 
@@ -2738,9 +2740,13 @@ def push_firmware_to_github():
                 upload_url = release_data.get('upload_url', '').split('{')[0]  # Remove {?name,label} suffix
                 release_url = release_data.get('html_url', '')
                 
-                # Upload .bin file as release asset
+                # Upload .bin file as release asset - use original filename if provided
                 firmware_bin_data = base64.b64decode(firmware_bin_base64)
-                asset_name = config.GITHUB_FIRMWARE_ASSET_NAME if hasattr(config, 'GITHUB_FIRMWARE_ASSET_NAME') else 'esp32_main.ino.bin'
+                # Priority: 1) Original filename from upload, 2) Config setting, 3) Default
+                if firmware_bin_filename and firmware_bin_filename.endswith('.bin'):
+                    asset_name = firmware_bin_filename
+                else:
+                    asset_name = config.GITHUB_FIRMWARE_ASSET_NAME if hasattr(config, 'GITHUB_FIRMWARE_ASSET_NAME') else 'esp32_firmware.ino.bin'
                 
                 upload_headers = {
                     'Authorization': f'token {config.GITHUB_TOKEN}',

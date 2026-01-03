@@ -56,7 +56,7 @@ GITHUB_REPO_OWNER = os.getenv('GITHUB_REPO_OWNER', 'ESPUpdaterzaid')  # Your Git
 GITHUB_REPO_NAME = os.getenv('GITHUB_REPO_NAME', 'almed-esp32-firmware')  # Repository name for ESP32 firmware (e.g., 'almed-esp32-firmware')
 GITHUB_REPO_BRANCH = os.getenv('GITHUB_REPO_BRANCH', 'main')  # Branch to push firmware to
 GITHUB_FIRMWARE_PATH = os.getenv('GITHUB_FIRMWARE_PATH', 'firmware/esp32_main.ino')  # Path in repo for firmware file
-GITHUB_FIRMWARE_ASSET_NAME = os.getenv('GITHUB_FIRMWARE_ASSET_NAME', 'esp32_main.ino.bin')  # Name of .bin file in GitHub Releases
+GITHUB_FIRMWARE_ASSET_NAME = os.getenv('GITHUB_FIRMWARE_ASSET_NAME', 'esp32_main_v2_active_high.ino.bin')  # Name of .bin file in GitHub Releases
 
 # GitHub OTA Configuration - RPi Dashboard
 RPI_GITHUB_REPO_NAME = os.getenv('RPI_GITHUB_REPO_NAME', 'almed-rpi-dashboard')  # Repository for RPi dashboard releases

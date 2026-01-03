@@ -411,7 +411,7 @@
                     <!-- Actions -->
                     <div class="section-card">
                         <div class="ota-actions">
-                            <button class="btn btn-primary" onclick="pushToGitHub()">1. Push to GitHub</button>
+                            <button class="btn btn-primary" onclick="pushToGitHub()" style="background: #22c55e !important;">1. Push to GitHub</button>
                             <button class="btn btn-secondary" onclick="testMQTT()" style="margin-left: 8px;">Test MQTT</button>
                             <button class="btn btn-primary" id="trigger-update-btn" onclick="triggerOTAUpdate()" disabled>2. Send OTA Update</button>
                         </div>
@@ -825,7 +825,8 @@
                     body: JSON.stringify({
                         code: code,
                         message: message,
-                        bin_file: binFileBase64  // Send base64-encoded .bin file
+                        bin_file: binFileBase64,  // Send base64-encoded .bin file
+                        bin_filename: selectedBinFile ? selectedBinFile.name : ''  // Send original filename
                     })
                 });
 
