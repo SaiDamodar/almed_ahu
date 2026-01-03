@@ -32,24 +32,24 @@ class SensorDisplay extends StatelessWidget {
               children: [
                 Expanded(
                   child: RepaintBoundary(
-                    child: _SensorCard(
-                      icon: Icons.thermostat,
-                      label: 'Temperature',
-                      value: telemetry?.tempDisplay ?? 'N/A',
-                      setpoint: state != null ? '${state!.tempSet.toStringAsFixed(1)}°C' : null,
-                      color: Colors.orange,
-                    ),
+                  child: _SensorCard(
+                    icon: Icons.thermostat,
+                    label: 'Temperature',
+                    value: telemetry?.tempDisplay ?? 'N/A',
+                    setpoint: state != null ? '${state!.tempSet.toStringAsFixed(1)}°C' : null,
+                    color: Colors.orange,
                   ),
+                ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: RepaintBoundary(
-                    child: _SensorCard(
-                      icon: Icons.water_drop,
-                      label: 'Humidity',
-                      value: telemetry?.humDisplay ?? 'N/A',
-                      setpoint: state != null ? '${state!.humSet.toStringAsFixed(1)}%' : null,
-                      color: Colors.blue,
+                  child: _SensorCard(
+                    icon: Icons.water_drop,
+                    label: 'Humidity',
+                    value: telemetry?.humDisplay ?? 'N/A',
+                    setpoint: state != null ? '${state!.humSet.toStringAsFixed(1)}%' : null,
+                    color: Colors.blue,
                     ),
                   ),
                 ),

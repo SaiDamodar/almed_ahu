@@ -19,7 +19,7 @@
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP2" // Unique identifier for your device, change this
+#define THINGNAME "KAVERI_BURNS_AHU1" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
 #define BUILD_VERSION "v2.5.0-STABLE"
@@ -322,9 +322,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "hospitalA";
-const char* ROOM = "icu1";
-const char* AHU  = "ahu-01";
+const char* SITE = "KauveryHospital";    // Kaveri Hospital
+const char* ROOM = "Burns_OT";         // Burns Ward
+const char* AHU  = "ahu-01";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -2052,30 +2052,52 @@ void handleOTAUpdate(JsonDocument& doc) {
   Serial.println("  Searching for asset: " + firmwareAssetName);
   
   // Step 2: Find the firmware asset in the release
+  // FLEXIBLE: First try exact match, then try any .bin file
   String firmwareUrl = "";
+  String foundAssetName = "";
   JsonArray assets = releaseDoc["assets"].as<JsonArray>();
   
+  // First pass: Try exact match with configured asset name
   for (JsonObject asset : assets) {
     String assetName = asset["name"].as<String>();
     Serial.println("  Found asset: " + assetName);
     
     if (assetName == firmwareAssetName) {
-      String assetId = asset["id"].as<String>();
+      String assetId = String(asset["id"].as<long>());
       firmwareUrl = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/assets/" + assetId;
-      Serial.println("✓ Found matching asset! ID: " + assetId);
+      foundAssetName = assetName;
+      Serial.println("✓ Found exact match! ID: " + assetId);
       break;
     }
   }
   
+  // Second pass: If no exact match, find ANY .bin file
   if (firmwareUrl.length() == 0) {
-    Serial.println("❌ Error: Could not find asset '" + firmwareAssetName + "' in the release.");
+    Serial.println("  No exact match found, searching for any .bin file...");
+    for (JsonObject asset : assets) {
+      String assetName = asset["name"].as<String>();
+      // Accept any .bin file (case insensitive)
+      if (assetName.endsWith(".bin") || assetName.endsWith(".BIN")) {
+        String assetId = String(asset["id"].as<long>());
+        firmwareUrl = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/assets/" + assetId;
+        foundAssetName = assetName;
+        Serial.println("✓ Found .bin file: " + assetName + " (ID: " + assetId + ")");
+        break;
+      }
+    }
+  }
+  
+  if (firmwareUrl.length() == 0) {
+    Serial.println("❌ Error: No .bin file found in the release.");
     Serial.println("  Available assets:");
     for (JsonObject asset : assets) {
       Serial.println("    - " + asset["name"].as<String>());
     }
-    publishOTAStatus("error", "Firmware asset not found in release");
+    publishOTAStatus("error", "No .bin firmware file found in release");
     return;
   }
+  
+  Serial.println("  Using firmware: " + foundAssetName);
   
   // Step 3: Download firmware binary from asset URL
   Serial.println("\n📥 Downloading firmware binary...");
@@ -2214,23 +2236,32 @@ void handleOTAUpdate(JsonDocument& doc) {
 }
 
 void publishOTAStatus(String status, String message) {
-  if (!client.connected()) return;
-  
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<384> doc;
   doc["type"] = "ota_status";
   doc["status"] = status;
   doc["message"] = message;
+  // Include device identification for web dashboard
+  doc["site"] = SITE;
+  doc["room"] = ROOM;
+  doc["ahu"] = AHU;
   doc["thing"] = THINGNAME;
+  doc["version"] = BUILD_VERSION;
   doc["ts"] = millis();
   
-  char buf[256];
+  char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
+  
+  // Publish to AWS IoT
+  if (client.connected()) {
+    client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
+  }
   
   // Also publish to local MQTT
   if (mqttLocal.connected()) {
     mqttLocal.publish((baseTopic() + "/ota/status").c_str(), (uint8_t*)buf, n, false);
   }
+  
+  Serial.printf("[OTA] Status: %s - %s\n", status.c_str(), message.c_str());
 }
 
 void publishStatusOnline(){
@@ -2990,19 +3021,36 @@ void setup()
       motorLogMsg(msg);
       Serial.println(msg);
       
-      // Also publish directly to log topic
+      // Publish OTA verification with device identification
+      StaticJsonDocument<512> verifyDoc;
+      verifyDoc["type"] = "ota_verify";
+      verifyDoc["status"] = "verified";
+      verifyDoc["msg"] = msg;
+      verifyDoc["num"] = i;
+      verifyDoc["version"] = BUILD_VERSION;
+      verifyDoc["date"] = BUILD_DATE;
+      verifyDoc["features"] = BUILD_FEATURES;
+      // Include device identification for web dashboard
+      verifyDoc["site"] = SITE;
+      verifyDoc["room"] = ROOM;
+      verifyDoc["ahu"] = AHU;
+      verifyDoc["thing"] = THINGNAME;
+      verifyDoc["verified"] = true;
+      verifyDoc["ts"] = millis();
+      
+      char buf[512];
+      size_t n = serializeJson(verifyDoc, buf, sizeof(buf));
+      
+      // Publish to AWS IoT for web dashboard
+      if (client.connected()) {
+        client.publish(AWS_IOT_PUBLISH_TOPIC, (uint8_t*)buf, n, false);
+        client.loop();
+      }
+      
+      // Also publish to local MQTT
       if (mqttLocal.connected()) {
-        StaticJsonDocument<384> logDoc;
-        logDoc["type"] = "ota_verify";
-        logDoc["msg"] = msg;
-        logDoc["num"] = i;
-        logDoc["version"] = BUILD_VERSION;
-        logDoc["date"] = BUILD_DATE;
-        logDoc["features"] = BUILD_FEATURES;
-        char buf[384];
-        size_t n = serializeJson(logDoc, buf, sizeof(buf));
         mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
-        mqttLocal.loop();  // Process immediately
+        mqttLocal.loop();
       }
       delay(500);  // 500ms between messages
     }

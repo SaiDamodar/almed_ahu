@@ -87,6 +87,37 @@
         .btn-assign:hover {
             background: #2563EB;
         }
+        .access-level-select {
+            padding: 6px 10px;
+            font-size: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            cursor: pointer;
+            min-width: 130px;
+        }
+        .access-level-select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .access-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .access-badge.operator {
+            background: #10B981;
+            color: white;
+        }
+        .access-badge.viewer {
+            background: #6B7280;
+            color: white;
+        }
         .empty-state {
             text-align: center;
             padding: 40px 20px;
@@ -329,6 +360,13 @@
                                 <div><strong>Phone:</strong> ${escapeHtml(user.phone_number)}</div>
                                 <div><strong>Registered:</strong> ${formatDate(user.created_at)}</div>
                             </div>
+                            <div style="margin: 12px 0;">
+                                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Access Level:</label>
+                                <select class="access-level-select" id="access-level-${user._id}">
+                                    <option value="operator">🔧 Operating Access</option>
+                                    <option value="viewer" selected>👁️ View Only</option>
+                                </select>
+                            </div>
                             <div class="user-actions">
                                 <button class="btn-small btn-approve" onclick="approveUser('${user._id}')">Approve</button>
                                 <button class="btn-small btn-reject" onclick="rejectUser('${user._id}')">Reject</button>
@@ -354,7 +392,7 @@
                 const registeredContainer = document.getElementById('registered-users');
                 if (registeredData.success && registeredData.users.length > 0) {
                     registeredContainer.innerHTML = registeredData.users.map(user => `
-                        <div class="user-card" data-user-id="${user._id}">
+                        <div class="user-card" data-user-id="${user._id}" data-access-level="${user.access_level || 'viewer'}">
                             <div class="user-header">
                                 <div class="user-info">
                                     <h4>${escapeHtml(user.username)}</h4>
@@ -367,6 +405,12 @@
                             <div class="user-details">
                                 <div><strong>Hospital:</strong> ${escapeHtml(user.hospital_name)}</div>
                                 <div><strong>Phone:</strong> ${escapeHtml(user.phone_number)}</div>
+                                <div style="margin-top: 6px;">
+                                    <strong>Access:</strong> 
+                                    <span class="access-badge ${user.access_level === 'operator' ? 'operator' : 'viewer'}">
+                                        ${user.access_level === 'operator' ? '🔧 Operating' : '👁️ View Only'}
+                                    </span>
+                                </div>
                                 ${user.assigned_ahu_ids && user.assigned_ahu_ids.length > 0 ? `
                                     <div><strong>Assigned AHUs:</strong></div>
                                     <div class="ahu-list">
@@ -376,6 +420,10 @@
                             </div>
                             <div class="user-actions">
                                 <button class="btn-small btn-assign" onclick="openAssignDialog('${user._id}')">Assign AHUs</button>
+                                <select class="access-level-select" onchange="updateAccessLevel('${user._id}', this.value)" style="margin-left: 8px;">
+                                    <option value="operator" ${user.access_level === 'operator' ? 'selected' : ''}>🔧 Operator</option>
+                                    <option value="viewer" ${user.access_level !== 'operator' ? 'selected' : ''}>👁️ Viewer</option>
+                                </select>
                             </div>
                         </div>
                     `).join('');
@@ -433,17 +481,23 @@
 
         // Approve user
         async function approveUser(userId) {
-            if (!confirm('Approve this user registration?')) return;
+            // Get selected access level
+            const accessLevelSelect = document.getElementById(`access-level-${userId}`);
+            const accessLevel = accessLevelSelect ? accessLevelSelect.value : 'viewer';
+            
+            const accessText = accessLevel === 'operator' ? 'Operating Access' : 'View Only';
+            if (!confirm(`Approve this user with ${accessText}?`)) return;
             
             try {
                 const response = await fetch(`/api/admin/users/${userId}/approve`, {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'}
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ access_level: accessLevel })
                 });
                 const data = await response.json();
                 
                 if (data.success) {
-                    alert('User approved successfully!');
+                    alert(`User approved with ${accessText}!`);
                     loadUsers();
                 } else {
                     alert('Failed to approve user: ' + (data.message || 'Unknown error'));
@@ -451,6 +505,40 @@
             } catch (error) {
                 console.error('Error approving user:', error);
                 alert('Failed to approve user. Please try again.');
+            }
+        }
+        
+        // Update access level for existing user
+        async function updateAccessLevel(userId, accessLevel) {
+            const accessText = accessLevel === 'operator' ? 'Operating Access' : 'View Only';
+            
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/access-level`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ access_level: accessLevel })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Update the badge display without reloading
+                    const userCard = document.querySelector(`[data-user-id="${userId}"]`);
+                    if (userCard) {
+                        const badge = userCard.querySelector('.access-badge');
+                        if (badge) {
+                            badge.className = `access-badge ${accessLevel}`;
+                            badge.textContent = accessLevel === 'operator' ? '🔧 Operating' : '👁️ View Only';
+                        }
+                    }
+                    console.log(`Access level updated to ${accessText}`);
+                } else {
+                    alert('Failed to update access level: ' + (data.message || 'Unknown error'));
+                    loadUsers(); // Reload to restore original value
+                }
+            } catch (error) {
+                console.error('Error updating access level:', error);
+                alert('Failed to update access level. Please try again.');
+                loadUsers(); // Reload to restore original value
             }
         }
 

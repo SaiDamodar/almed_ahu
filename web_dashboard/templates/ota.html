@@ -185,6 +185,81 @@
             transition: width 0.3s ease;
             width: 0%;
         }
+        /* OTA Status Indicator */
+        .ota-status-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .ota-status-card.pending { border-color: #6B7280; }
+        .ota-status-card.downloading { border-color: #3B82F6; }
+        .ota-status-card.installing { border-color: #F59E0B; }
+        .ota-status-card.success { border-color: #10B981; background: rgba(16, 185, 129, 0.1); }
+        .ota-status-card.verified { border-color: #10B981; background: rgba(16, 185, 129, 0.15); }
+        .ota-status-card.error { border-color: #EF4444; background: rgba(239, 68, 68, 0.1); }
+        
+        .ota-status-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            font-size: 24px;
+        }
+        .ota-status-icon.pending { color: #6B7280; }
+        .ota-status-icon.downloading { color: #3B82F6; animation: spin 1s linear infinite; }
+        .ota-status-icon.installing { color: #F59E0B; animation: pulse 1s infinite; }
+        .ota-status-icon.success { color: #10B981; }
+        .ota-status-icon.verified { color: #10B981; }
+        .ota-status-icon.error { color: #EF4444; }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .ota-status-info {
+            flex: 1;
+        }
+        .ota-status-title {
+            font-weight: 600;
+            font-size: 16px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .ota-status-message {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .ota-status-version {
+            font-size: 12px;
+            color: var(--primary);
+            margin-top: 4px;
+        }
+        
+        .verified-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            background: #10B981;
+            color: white;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .verified-badge svg {
+            width: 16px;
+            height: 16px;
+        }
     </style>
 </head>
 <body>
@@ -255,9 +330,29 @@
                     <!-- Device Selector -->
                     <div class="section-card device-selector">
                         <label style="display: block; margin-bottom: 8px; font-weight: 600;">Select Device:</label>
-                        <select id="device-select" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);">
+                        <select id="device-select" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);" onchange="onDeviceChange()">
                             <option value="">Loading devices...</option>
                         </select>
+                    </div>
+
+                    <!-- OTA Status Card -->
+                    <div id="esp32-ota-status" class="ota-status-card" style="display: none;">
+                        <div id="esp32-ota-icon" class="ota-status-icon pending">
+                            <span id="esp32-ota-icon-content">⏳</span>
+                        </div>
+                        <div class="ota-status-info">
+                            <div id="esp32-ota-title" class="ota-status-title">Waiting for update...</div>
+                            <div id="esp32-ota-message" class="ota-status-message">No OTA update in progress</div>
+                            <div id="esp32-ota-version" class="ota-status-version" style="display: none;"></div>
+                        </div>
+                        <div id="esp32-ota-badge" style="display: none;">
+                            <span class="verified-badge">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                                Verified
+                            </span>
+                        </div>
                     </div>
 
                     <!-- File Upload Area -->
@@ -453,9 +548,134 @@
 
     <script src="{{ url_for('static', filename='js/api.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script>
         let currentCommitSha = null;
         let devices = [];
+        let otaStatusPoller = null;
+        let currentOtaDeviceId = null;
+
+        // ==================== OTA Status Tracking ====================
+        
+        // Connect to WebSocket for real-time OTA status updates
+        const socket = io();
+        
+        socket.on('connect', () => {
+            console.log('[OTA] WebSocket connected');
+        });
+        
+        socket.on('ota_status_update', (data) => {
+            console.log('[OTA] Status update received:', data);
+            if (data.device_type === 'esp32' && data.device_id === currentOtaDeviceId) {
+                updateEsp32OtaStatus(data.status);
+            } else if (data.device_type === 'rpi') {
+                updateRpiOtaStatus(data.status);
+            }
+        });
+        
+        function updateEsp32OtaStatus(status) {
+            const card = document.getElementById('esp32-ota-status');
+            const icon = document.getElementById('esp32-ota-icon');
+            const iconContent = document.getElementById('esp32-ota-icon-content');
+            const title = document.getElementById('esp32-ota-title');
+            const message = document.getElementById('esp32-ota-message');
+            const version = document.getElementById('esp32-ota-version');
+            const badge = document.getElementById('esp32-ota-badge');
+            
+            card.style.display = 'flex';
+            
+            // Reset classes
+            card.className = 'ota-status-card';
+            icon.className = 'ota-status-icon';
+            
+            const statusMap = {
+                'pending': { icon: '⏳', title: 'Update Initiated', class: 'pending' },
+                'downloading': { icon: '⬇️', title: 'Downloading Firmware', class: 'downloading' },
+                'installing': { icon: '⚙️', title: 'Installing Firmware', class: 'installing' },
+                'success': { icon: '✅', title: 'Update Complete', class: 'success' },
+                'verified': { icon: '✅', title: 'Update Verified!', class: 'verified' },
+                'error': { icon: '❌', title: 'Update Failed', class: 'error' },
+                'unknown': { icon: '❓', title: 'Unknown Status', class: 'pending' }
+            };
+            
+            const s = statusMap[status.status] || statusMap['unknown'];
+            
+            card.classList.add(s.class);
+            icon.classList.add(s.class);
+            iconContent.textContent = s.icon;
+            title.textContent = s.title;
+            message.textContent = status.message || '';
+            
+            if (status.version && status.version !== 'unknown') {
+                version.style.display = 'block';
+                version.textContent = `Version: ${status.version}`;
+            } else {
+                version.style.display = 'none';
+            }
+            
+            // Show verified badge
+            if (status.verified || status.status === 'verified') {
+                badge.style.display = 'block';
+                addLog('success', `✅ OTA Update VERIFIED! Device is running the new firmware.`);
+                if (status.version) {
+                    addLog('success', `   Version: ${status.version}`);
+                }
+                // Stop polling - we're done!
+                if (otaStatusPoller) {
+                    clearInterval(otaStatusPoller);
+                    otaStatusPoller = null;
+                }
+            } else {
+                badge.style.display = 'none';
+            }
+            
+            // Stop polling on error
+            if (status.status === 'error') {
+                if (otaStatusPoller) {
+                    clearInterval(otaStatusPoller);
+                    otaStatusPoller = null;
+                }
+            }
+        }
+        
+        async function fetchEsp32OtaStatus(deviceId) {
+            try {
+                const response = await fetch(`/api/esp32-ota/status?device_id=${encodeURIComponent(deviceId)}`);
+                const data = await response.json();
+                if (data.success && data.status) {
+                    updateEsp32OtaStatus(data.status);
+                }
+            } catch (error) {
+                console.error('[OTA] Failed to fetch status:', error);
+            }
+        }
+        
+        function startOtaStatusPolling(deviceId) {
+            currentOtaDeviceId = deviceId;
+            
+            // Clear any existing poller
+            if (otaStatusPoller) {
+                clearInterval(otaStatusPoller);
+            }
+            
+            // Poll every 3 seconds
+            otaStatusPoller = setInterval(() => {
+                fetchEsp32OtaStatus(deviceId);
+            }, 3000);
+            
+            // Initial fetch
+            fetchEsp32OtaStatus(deviceId);
+        }
+        
+        function onDeviceChange() {
+            const deviceId = document.getElementById('device-select').value;
+            if (deviceId) {
+                currentOtaDeviceId = deviceId;
+                fetchEsp32OtaStatus(deviceId);
+            } else {
+                document.getElementById('esp32-ota-status').style.display = 'none';
+            }
+        }
 
         // Load devices on page load
         async function loadDevices() {
@@ -662,6 +882,20 @@
             }
 
             try {
+                // Clear previous status and initialize tracking
+                await fetch('/api/esp32-ota/clear-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId })
+                });
+                
+                // Show status card with pending state
+                updateEsp32OtaStatus({
+                    status: 'pending',
+                    message: 'Sending OTA command to device...',
+                    verified: false
+                });
+
                 const response = await fetch('/api/ota/trigger-update', {
                     method: 'POST',
                     headers: {
@@ -678,6 +912,11 @@
                 if (!response.ok) {
                     const errorText = await response.text();
                     addLog('error', `HTTP Error ${response.status}: ${errorText}`);
+                    updateEsp32OtaStatus({
+                        status: 'error',
+                        message: `HTTP Error ${response.status}`,
+                        verified: false
+                    });
                     return;
                 }
 
@@ -687,15 +926,38 @@
                 if (data.success) {
                     addLog('success', `✓ OTA update command sent to ${deviceId}`);
                     addLog('info', 'Device will now download and install the firmware...');
-                    addLog('info', 'Monitor Serial Monitor for update progress');
+                    addLog('info', 'Waiting for device to report status...');
                     addLog('info', `Firmware URL: ${data.firmware_url || 'N/A'}`);
+                    
+                    // Update status to downloading
+                    updateEsp32OtaStatus({
+                        status: 'downloading',
+                        message: 'Device is downloading firmware from GitHub...',
+                        verified: false
+                    });
+                    
+                    // Start polling for status updates
+                    startOtaStatusPolling(deviceId);
+                    
+                    addLog('info', '📡 Monitoring for OTA verification messages...');
+                    addLog('info', '✅ You will see a green checkmark when update is verified!');
                 } else {
                     addLog('error', 'Failed to send OTA command: ' + (data.error || 'Unknown error'));
+                    updateEsp32OtaStatus({
+                        status: 'error',
+                        message: data.error || 'Unknown error',
+                        verified: false
+                    });
                 }
             } catch (error) {
                 console.error('OTA Update Error:', error);
                 addLog('error', 'Error sending OTA command: ' + error.message);
                 addLog('error', 'Check browser console (F12) for details');
+                updateEsp32OtaStatus({
+                    status: 'error',
+                    message: error.message,
+                    verified: false
+                });
             }
         }
 

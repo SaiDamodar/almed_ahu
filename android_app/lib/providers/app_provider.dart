@@ -48,6 +48,13 @@ class AppProvider extends ChangeNotifier {
   bool get awsConnected => _awsIoTService.isConnected;
   bool get isInitialized => _isInitialized;
   
+  /// Check if current user can operate AHU (start/stop, change settings)
+  /// Admins and operators can operate, viewers cannot
+  bool get canOperate => _isAdmin || (_currentUser?.canOperate ?? false);
+  
+  /// Check if current user is view-only (no operating controls)
+  bool get isViewOnly => !_isAdmin && (_currentUser?.isViewOnly ?? true);
+  
   DeviceStatus? getDeviceStatus(String deviceId) {
     if (_useDirectAws && _awsIoTService.isConnected) {
       return _awsIoTService.getDeviceStatus(deviceId) ?? _deviceStatuses[deviceId];

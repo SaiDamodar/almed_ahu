@@ -492,6 +492,12 @@ def on_aws_iot_message(client, userdata, msg):
         elif msg_type == 'state':
             device_cache[device_id]['state'] = payload
             device_cache[device_id]['last_update'] = time.time()
+        elif msg_type == 'ota_status':
+            # OTA status update from ESP32
+            update_esp32_ota_status(device_id, payload)
+        elif msg_type == 'ota_verify':
+            # OTA verification message from ESP32 (after successful update)
+            update_esp32_ota_status(device_id, payload)
         
         # Persist for historical analysis
         store_historical_data(device_id, msg_type, payload)
@@ -1254,6 +1260,7 @@ def api_register():
             'phone_number': phone_number,
             'hospital_name': hospital_name,
             'status': 'pending',  # pending, approved, active, rejected, suspended
+            'access_level': 'viewer',  # viewer (read-only) or operator (full control)
             'assigned_ahu_ids': [],
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
@@ -1411,6 +1418,7 @@ def api_register_google():
             'hospital_name': hospital_name,
             'google_id': google_id,
             'status': 'pending',
+            'access_level': 'viewer',  # viewer (read-only) or operator (full control)
             'assigned_ahu_ids': [],
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
@@ -1523,6 +1531,7 @@ def api_user_login():
             'phone_number': user.get('phone_number', ''),
             'hospital_name': user.get('hospital_name', ''),
             'status': user.get('status', 'pending'),
+            'access_level': user.get('access_level', 'viewer'),  # viewer or operator
             'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
             'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', '')),
             'updated_at': user.get('updated_at', datetime.utcnow()).isoformat() if isinstance(user.get('updated_at'), datetime) else str(user.get('updated_at', ''))
@@ -1586,6 +1595,7 @@ def api_user_status():
             'phone_number': user.get('phone_number', ''),
             'hospital_name': user.get('hospital_name', ''),
             'status': user.get('status', 'pending'),
+            'access_level': user.get('access_level', 'viewer'),  # viewer or operator
             'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
             'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', '')),
             'updated_at': user.get('updated_at', datetime.utcnow()).isoformat() if isinstance(user.get('updated_at'), datetime) else str(user.get('updated_at', ''))
@@ -1669,6 +1679,7 @@ def api_user_login_google():
             'phone_number': user.get('phone_number', ''),
             'hospital_name': user.get('hospital_name', ''),
             'status': user.get('status', 'pending'),
+            'access_level': user.get('access_level', 'viewer'),  # viewer or operator
             'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
             'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', '')),
             'updated_at': user.get('updated_at', datetime.utcnow()).isoformat() if isinstance(user.get('updated_at'), datetime) else str(user.get('updated_at', ''))
@@ -1778,6 +1789,7 @@ def api_get_registered_users():
                 'phone_number': user.get('phone_number', ''),
                 'hospital_name': user.get('hospital_name', ''),
                 'status': user.get('status', 'approved'),
+                'access_level': user.get('access_level', 'viewer'),  # viewer or operator
                 'assigned_ahu_ids': user.get('assigned_ahu_ids', []),
                 'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', ''))
             }
@@ -1818,12 +1830,21 @@ def api_approve_user(user_id):
         }), 403
     
     try:
-        # Update user status to 'approved'
+        # Get access level from request (default to 'viewer' for safety)
+        data = request.json or {}
+        access_level = data.get('access_level', 'viewer')
+        
+        # Validate access level
+        if access_level not in ['operator', 'viewer']:
+            access_level = 'viewer'
+        
+        # Update user status to 'approved' and set access level
         result = mongo_users_collection.update_one(
             {'_id': ObjectId(user_id), 'status': 'pending'},
             {
                 '$set': {
                     'status': 'approved',
+                    'access_level': access_level,
                     'updated_at': datetime.utcnow()
                 }
             }
@@ -1835,9 +1856,10 @@ def api_approve_user(user_id):
                 'message': 'User not found or already processed'
             }), 404
         
+        access_text = 'Operating Access' if access_level == 'operator' else 'View Only'
         return jsonify({
             'success': True,
-            'message': 'User approved successfully'
+            'message': f'User approved with {access_text}'
         })
         
     except Exception as e:
@@ -1847,6 +1869,65 @@ def api_approve_user(user_id):
         return jsonify({
             'success': False,
             'message': f'Failed to approve user: {str(e)}'
+        }), 500
+
+@app.route('/api/admin/users/<user_id>/access-level', methods=['POST'])
+@login_required
+def api_update_access_level(user_id):
+    """Update user access level (admin only)"""
+    if mongo_users_collection is None:
+        return jsonify({
+            'success': False,
+            'message': 'Database connection unavailable'
+        }), 500
+    
+    if not session.get('authenticated'):
+        return jsonify({
+            'success': False,
+            'message': 'Admin access required'
+        }), 403
+    
+    try:
+        data = request.json
+        access_level = data.get('access_level', 'viewer')
+        
+        # Validate access level
+        if access_level not in ['operator', 'viewer']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid access level. Must be "operator" or "viewer"'
+            }), 400
+        
+        # Update user access level
+        result = mongo_users_collection.update_one(
+            {'_id': ObjectId(user_id)},
+            {
+                '$set': {
+                    'access_level': access_level,
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        
+        access_text = 'Operating Access' if access_level == 'operator' else 'View Only'
+        return jsonify({
+            'success': True,
+            'message': f'Access level updated to {access_text}'
+        })
+        
+    except Exception as e:
+        print(f"Update access level error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Failed to update access level: {str(e)}'
         }), 500
 
 @app.route('/api/admin/users/<user_id>/reject', methods=['POST'])
@@ -2844,6 +2925,51 @@ def trigger_ota_update():
         }), 500
 
 
+# ==================== OTA Status Tracking ====================
+
+# ESP32 OTA status tracking (per device)
+esp32_ota_status = {}  # device_id -> status dict
+
+def update_esp32_ota_status(device_id, status_data):
+    """Update ESP32 OTA status and broadcast via WebSocket"""
+    global esp32_ota_status
+    
+    if device_id not in esp32_ota_status:
+        esp32_ota_status[device_id] = {
+            'status': 'unknown',
+            'message': '',
+            'version': 'unknown',
+            'verified': False,
+            'verify_count': 0,
+            'last_update': None
+        }
+    
+    esp32_ota_status[device_id].update({
+        'status': status_data.get('status', 'unknown'),
+        'message': status_data.get('message', ''),
+        'version': status_data.get('version', esp32_ota_status[device_id].get('version', 'unknown')),
+        'last_update': time.time()
+    })
+    
+    # Check for verification messages
+    if status_data.get('type') == 'ota_verify':
+        esp32_ota_status[device_id]['verified'] = True
+        esp32_ota_status[device_id]['verify_count'] = status_data.get('num', 0)
+        esp32_ota_status[device_id]['version'] = status_data.get('version', esp32_ota_status[device_id].get('version'))
+        esp32_ota_status[device_id]['status'] = 'verified'
+        esp32_ota_status[device_id]['message'] = f"OTA Verified ({status_data.get('num', 0)}/10)"
+    
+    # Broadcast to WebSocket clients
+    socketio.emit('ota_status_update', {
+        'device_type': 'esp32',
+        'device_id': device_id,
+        'status': esp32_ota_status[device_id],
+        'timestamp': time.time()
+    })
+    
+    print(f"[OTA] ESP32 {device_id}: {esp32_ota_status[device_id]['status']} - {esp32_ota_status[device_id]['message']}")
+
+
 # ==================== RPi Dashboard OTA API ====================
 
 # RPi OTA MQTT Topics
@@ -2855,11 +2981,97 @@ rpi_ota_status = {
     'status': 'unknown',
     'message': 'No status received yet',
     'current_version': 'unknown',
+    'verified': False,
     'last_update': None
 }
 
+def update_rpi_ota_status(status_data):
+    """Update RPi OTA status and broadcast via WebSocket"""
+    global rpi_ota_status
+    
+    rpi_ota_status.update({
+        'status': status_data.get('status', 'unknown'),
+        'message': status_data.get('message', ''),
+        'current_version': status_data.get('current_version', rpi_ota_status.get('current_version', 'unknown')),
+        'target_version': status_data.get('target_version', ''),
+        'progress': status_data.get('progress', None),
+        'verified': status_data.get('status') == 'complete',
+        'last_update': time.time()
+    })
+    
+    # Broadcast to WebSocket clients
+    socketio.emit('ota_status_update', {
+        'device_type': 'rpi',
+        'device_id': 'rpi_dashboard',
+        'status': rpi_ota_status,
+        'timestamp': time.time()
+    })
+    
+    print(f"[OTA] RPi Dashboard: {rpi_ota_status['status']} - {rpi_ota_status['message']}")
+
 # GitHub config for RPi dashboard (uses similar config as ESP32)
 RPI_GITHUB_REPO_NAME = os.getenv('RPI_GITHUB_REPO_NAME', 'almed-rpi-dashboard')
+
+
+@app.route('/api/esp32-ota/status', methods=['GET'])
+@login_required
+def get_esp32_ota_status():
+    """Get ESP32 OTA status for all devices or a specific device"""
+    device_id = request.args.get('device_id', None)
+    
+    if device_id:
+        if device_id in esp32_ota_status:
+            return jsonify({
+                'success': True,
+                'device_id': device_id,
+                'status': esp32_ota_status[device_id]
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'device_id': device_id,
+                'status': {
+                    'status': 'unknown',
+                    'message': 'No OTA status received yet',
+                    'verified': False
+                }
+            })
+    else:
+        return jsonify({
+            'success': True,
+            'devices': esp32_ota_status
+        })
+
+
+@app.route('/api/esp32-ota/clear-status', methods=['POST'])
+@login_required
+def clear_esp32_ota_status():
+    """Clear OTA status for a device (before starting new update)"""
+    data = request.json
+    device_id = data.get('device_id', None)
+    
+    if device_id and device_id in esp32_ota_status:
+        esp32_ota_status[device_id] = {
+            'status': 'pending',
+            'message': 'OTA update initiated...',
+            'version': 'unknown',
+            'verified': False,
+            'verify_count': 0,
+            'last_update': time.time()
+        }
+        return jsonify({'success': True, 'message': f'Status cleared for {device_id}'})
+    elif device_id:
+        esp32_ota_status[device_id] = {
+            'status': 'pending',
+            'message': 'OTA update initiated...',
+            'version': 'unknown',
+            'verified': False,
+            'verify_count': 0,
+            'last_update': time.time()
+        }
+        return jsonify({'success': True, 'message': f'Status initialized for {device_id}'})
+    
+    return jsonify({'success': False, 'error': 'device_id required'}), 400
 
 
 @app.route('/api/rpi-ota/status', methods=['GET'])

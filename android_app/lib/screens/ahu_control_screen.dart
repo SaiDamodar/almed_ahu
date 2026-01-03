@@ -264,17 +264,88 @@ class _ActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, bool>(
-      selector: (_, provider) => provider.isAdmin,
-      builder: (context, isAdmin, child) {
+    return Selector<AppProvider, ({bool isAdmin, bool canOperate})>(
+      selector: (_, provider) => (isAdmin: provider.isAdmin, canOperate: provider.canOperate),
+      builder: (context, data, child) {
         return Row(
           children: [
-            Expanded(child: _StartStopButton(deviceId: deviceId)),
-            if (isAdmin) ...[
+            // Only show Start/Stop button if user can operate
+            if (data.canOperate)
+              Expanded(child: _StartStopButton(deviceId: deviceId))
+            else
+              Expanded(child: _ViewOnlyStatusBanner(deviceId: deviceId)),
+            if (data.isAdmin) ...[
               SizedBox(width: ScreenUtils.getPadding(context, 10)),
               _SettingsButton(deviceId: deviceId),
             ],
           ],
+        );
+      },
+    );
+  }
+}
+
+/// View-only status banner shown instead of Start/Stop button for viewers
+class _ViewOnlyStatusBanner extends StatelessWidget {
+  final String deviceId;
+
+  const _ViewOnlyStatusBanner({required this.deviceId});
+
+  @override
+  Widget build(BuildContext context) {
+    final buttonHeight = ScreenUtils.getButtonHeight(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Selector<AppProvider, bool>(
+      selector: (_, provider) => provider.getDeviceStatus(deviceId)?.isRunning ?? false,
+      builder: (context, isRunning, child) {
+        return Container(
+          height: buttonHeight,
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+            border: Border.all(
+              color: isRunning ? AppTheme.success.withOpacity(0.5) : Colors.grey.withOpacity(0.3),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.visibility_rounded,
+                color: isDark ? Colors.white70 : Colors.black54,
+                size: ScreenUtils.getIconSize(context, 18),
+              ),
+              SizedBox(width: ScreenUtils.getPadding(context, 8)),
+              Text(
+                'View Only Mode',
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  fontWeight: FontWeight.w500,
+                  fontSize: ScreenUtils.getFontSize(context, 14),
+                ),
+              ),
+              SizedBox(width: ScreenUtils.getPadding(context, 12)),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: ScreenUtils.getPadding(context, 8),
+                  vertical: ScreenUtils.getPadding(context, 4),
+                ),
+                decoration: BoxDecoration(
+                  color: isRunning ? AppTheme.success.withOpacity(0.2) : Colors.grey.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 6)),
+                ),
+                child: Text(
+                  isRunning ? 'Running' : 'Stopped',
+                  style: TextStyle(
+                    color: isRunning ? AppTheme.success : (isDark ? Colors.white70 : Colors.black54),
+                    fontWeight: FontWeight.bold,
+                    fontSize: ScreenUtils.getFontSize(context, 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -432,9 +503,15 @@ class _SensorControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, DeviceStatus?>(
-      selector: (_, provider) => provider.getDeviceStatus(deviceId),
-      builder: (context, status, child) {
+    return Selector<AppProvider, ({DeviceStatus? status, bool canOperate})>(
+      selector: (_, provider) => (
+        status: provider.getDeviceStatus(deviceId),
+        canOperate: provider.canOperate,
+      ),
+      builder: (context, data, child) {
+        final status = data.status;
+        final canOperate = data.canOperate;
+        
         if (status == null) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -452,9 +529,10 @@ class _SensorControls extends StatelessWidget {
               color: AppTheme.temperature,
               min: 15,
               max: 30,
-              onChanged: (value) {
-                context.read<AppProvider>().setTemperature(deviceId, value);
-              },
+              enabled: canOperate, // Disable for view-only users
+              onChanged: canOperate 
+                ? (value) => context.read<AppProvider>().setTemperature(deviceId, value)
+                : null,
             ),
             SizedBox(height: ScreenUtils.getSpacing(context, 14)),
             _SmoothSensorControl(
@@ -468,9 +546,10 @@ class _SensorControls extends StatelessWidget {
               color: AppTheme.humidity,
               min: 30,
               max: 80,
-              onChanged: (value) {
-                context.read<AppProvider>().setHumidity(deviceId, value);
-              },
+              enabled: canOperate, // Disable for view-only users
+              onChanged: canOperate
+                ? (value) => context.read<AppProvider>().setHumidity(deviceId, value)
+                : null,
             ),
           ],
         );
@@ -490,7 +569,8 @@ class _SmoothSensorControl extends StatefulWidget {
   final Color color;
   final double min;
   final double max;
-  final ValueChanged<double> onChanged;
+  final bool enabled; // Whether controls are enabled (false for view-only users)
+  final ValueChanged<double>? onChanged; // Nullable for view-only mode
 
   const _SmoothSensorControl({
     super.key,
@@ -503,7 +583,8 @@ class _SmoothSensorControl extends StatefulWidget {
     required this.color,
     required this.min,
     required this.max,
-    required this.onChanged,
+    this.enabled = true,
+    this.onChanged,
   });
 
   @override
@@ -537,6 +618,8 @@ class _SmoothSensorControlState extends State<_SmoothSensorControl> {
   }
 
   void _updateSetpoint(double newValue) {
+    // Don't allow changes if disabled (view-only mode)
+    if (!widget.enabled || widget.onChanged == null) return;
     if (newValue < widget.min || newValue > widget.max) return;
     
     setState(() {
@@ -547,7 +630,7 @@ class _SmoothSensorControlState extends State<_SmoothSensorControl> {
     // Debounce API call - wait 300ms after last tap
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      widget.onChanged(_localSetpoint);
+      widget.onChanged?.call(_localSetpoint);
       // Reset editing state after a short delay
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) {
@@ -593,8 +676,9 @@ class _SmoothSensorControlState extends State<_SmoothSensorControl> {
                   color: widget.color,
                   min: widget.min,
                   max: widget.max,
-                  onIncrement: () => _updateSetpoint(_localSetpoint + 0.5),
-                  onDecrement: () => _updateSetpoint(_localSetpoint - 0.5),
+                  enabled: widget.enabled,
+                  onIncrement: widget.enabled ? () => _updateSetpoint(_localSetpoint + 0.5) : null,
+                  onDecrement: widget.enabled ? () => _updateSetpoint(_localSetpoint - 0.5) : null,
                 ),
               ],
             ),
@@ -698,8 +782,9 @@ class _SmoothSetpointControls extends StatelessWidget {
   final Color color;
   final double min;
   final double max;
-  final VoidCallback onIncrement;
-  final VoidCallback onDecrement;
+  final bool enabled;
+  final VoidCallback? onIncrement; // Nullable for view-only mode
+  final VoidCallback? onDecrement; // Nullable for view-only mode
 
   const _SmoothSetpointControls({
     required this.setpoint,
@@ -707,8 +792,9 @@ class _SmoothSetpointControls extends StatelessWidget {
     required this.color,
     required this.min,
     required this.max,
-    required this.onIncrement,
-    required this.onDecrement,
+    this.enabled = true,
+    this.onIncrement,
+    this.onDecrement,
   });
 
   @override
@@ -741,7 +827,7 @@ class _SmoothSetpointControls extends StatelessWidget {
               _ControlButton(
                 icon: Icons.remove,
                 color: color,
-                onPressed: setpoint > min ? onDecrement : null,
+                onPressed: (enabled && setpoint > min) ? onDecrement : null,
               ),
               SizedBox(width: ScreenUtils.getPadding(context, 14)),
               AnimatedContainer(
@@ -775,10 +861,22 @@ class _SmoothSetpointControls extends StatelessWidget {
               _ControlButton(
                 icon: Icons.add,
                 color: color,
-                onPressed: setpoint < max ? onIncrement : null,
+                onPressed: (enabled && setpoint < max) ? onIncrement : null,
               ),
             ],
           ),
+          // Show view-only indicator if disabled
+          if (!enabled) ...[
+            SizedBox(height: ScreenUtils.getSpacing(context, 8)),
+            Text(
+              'View Only',
+              style: TextStyle(
+                fontSize: ScreenUtils.getFontSize(context, 10),
+                color: color.withOpacity(0.5),
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -846,6 +944,7 @@ class _ComponentStatus extends StatelessWidget {
         return _ComponentStatusData(
           status: status,
           isFanPending: provider.isCommandPending(deviceId, 'fan'),
+          canOperate: provider.canOperate,
         );
       },
       builder: (context, data, child) {
@@ -854,6 +953,7 @@ class _ComponentStatus extends StatelessWidget {
         final state = data.status!.state;
         final isOnline = data.status!.isOnline;
         final isRunning = data.status!.isRunning;
+        final canOperate = data.canOperate;
 
         return Container(
           padding: ScreenUtils.getCardPadding(context),
@@ -907,7 +1007,7 @@ class _ComponentStatus extends StatelessWidget {
                     ),
                     SizedBox(width: ScreenUtils.getPadding(context, 8)),
                     GestureDetector(
-                      onTap: (isOnline && isRunning && !data.isFanPending)
+                      onTap: (canOperate && isOnline && isRunning && !data.isFanPending)
                           ? () {
                               final currentSpeed = state?.fanSpeed ?? 0;
                               final newSpeed = (currentSpeed + 1) % 4;
@@ -919,7 +1019,7 @@ class _ComponentStatus extends StatelessWidget {
                         label: state?.fanSpeedDisplay ?? 'Fan',
                         isActive: state?.fan ?? false,
                         color: AppTheme.success,
-                        isClickable: isOnline && isRunning,
+                        isClickable: canOperate && isOnline && isRunning,
                         isPending: data.isFanPending,
                       ),
                     ),
@@ -937,18 +1037,24 @@ class _ComponentStatus extends StatelessWidget {
 class _ComponentStatusData {
   final DeviceStatus? status;
   final bool isFanPending;
+  final bool canOperate;
 
-  _ComponentStatusData({required this.status, required this.isFanPending});
+  _ComponentStatusData({
+    required this.status, 
+    required this.isFanPending, 
+    required this.canOperate,
+  });
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is _ComponentStatusData &&
           status == other.status &&
-          isFanPending == other.isFanPending;
+          isFanPending == other.isFanPending &&
+          canOperate == other.canOperate;
 
   @override
-  int get hashCode => status.hashCode ^ isFanPending.hashCode;
+  int get hashCode => status.hashCode ^ isFanPending.hashCode ^ canOperate.hashCode;
 }
 
 class _StatusIndicator extends StatelessWidget {
