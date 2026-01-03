@@ -411,7 +411,7 @@
                     <!-- Actions -->
                     <div class="section-card">
                         <div class="ota-actions">
-                            <button class="btn btn-primary" onclick="pushToGitHub()" style="background: #22c55e !important;">1. Push to GitHub</button>
+                            <button class="btn btn-primary" onclick="pushToGitHub()">1. Push to GitHub</button>
                             <button class="btn btn-secondary" onclick="testMQTT()" style="margin-left: 8px;">Test MQTT</button>
                             <button class="btn btn-primary" id="trigger-update-btn" onclick="triggerOTAUpdate()" disabled>2. Send OTA Update</button>
                         </div>
@@ -437,86 +437,85 @@
                 <!-- RPi Tab Content -->
                 <div id="rpi-content" class="ota-content">
                     <!-- ESP32 Gateway Selection -->
-                    <div class="section-card">
-                        <h2 class="section-title">🔗 Select ESP32 Gateway</h2>
-                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
-                            Commands are sent through the ESP32 connected to the RPi via local MQTT.
+                    <div class="section-card" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1)); border: 1px solid rgba(139, 92, 246, 0.3);">
+                        <h2 class="section-title" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">🔗</span> Select ESP32 Gateway
+                        </h2>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
+                            The Raspberry Pi connected to this ESP32 will receive the update via <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px;">git pull</code>
                         </p>
-                        <select id="rpi-esp-select" class="device-select" style="width: 100%; padding: 12px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px;">
-                            <option value="">-- Select ESP32 gateway --</option>
+                        <select id="rpi-esp-select" class="device-select" style="width: 100%; padding: 14px; background: var(--card-bg); border: 2px solid var(--border); border-radius: 10px; color: var(--text); font-size: 15px; cursor: pointer;">
+                            <option value="">-- Select ESP32 device --</option>
                         </select>
+                        <p style="font-size: 13px; color: var(--text-secondary); margin-top: 10px; opacity: 0.8;">
+                            💡 Commands flow: Web → AWS IoT → ESP32 → Local MQTT → RPi
+                        </p>
                     </div>
 
                     <!-- RPi Status Card -->
                     <div class="section-card">
-                        <h2 class="section-title">🍓 Raspberry Pi Dashboard</h2>
-                        <div class="rpi-status-card">
-                            <div class="rpi-status-indicator" id="rpi-status-indicator"></div>
-                            <div class="rpi-status-info">
-                                <div class="rpi-version" id="rpi-version">Git: Checking...</div>
-                                <div class="rpi-status-message" id="rpi-status-message">Select ESP32 and click Refresh</div>
+                        <h2 class="section-title" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">🍓</span> RPi Dashboard Status
+                        </h2>
+                        <div class="rpi-status-card" style="display: flex; align-items: center; gap: 16px; padding: 16px; background: rgba(0,0,0,0.1); border-radius: 10px;">
+                            <div class="rpi-status-indicator" id="rpi-status-indicator" style="width: 16px; height: 16px; border-radius: 50%; background: #6b7280;"></div>
+                            <div class="rpi-status-info" style="flex: 1;">
+                                <div class="rpi-version" id="rpi-version" style="font-weight: 600; font-size: 16px;">Select ESP32 first</div>
+                                <div class="rpi-status-message" id="rpi-status-message" style="font-size: 14px; color: var(--text-secondary);">Waiting for connection...</div>
                             </div>
-                            <button class="btn btn-secondary" onclick="checkRpiStatus()">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle;">
-                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-                                </svg>
-                                Refresh
-                            </button>
                         </div>
                         
                         <!-- Update Progress -->
-                        <div class="update-progress" id="rpi-update-progress">
-                            <div class="update-progress-bar" id="rpi-progress-bar"></div>
+                        <div class="update-progress" id="rpi-update-progress" style="height: 6px; background: rgba(0,0,0,0.2); border-radius: 3px; margin-top: 16px; overflow: hidden; display: none;">
+                            <div class="update-progress-bar" id="rpi-progress-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #8B5CF6, #3B82F6); transition: width 0.3s;"></div>
                         </div>
                     </div>
 
-                    <!-- Simple Git Pull Actions -->
+                    <!-- Actions -->
                     <div class="section-card">
-                        <h2 class="section-title">📦 Update Actions</h2>
-                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
-                            Updates are done via <code style="background: var(--card-bg); padding: 2px 6px; border-radius: 4px;">git pull origin main</code> on the RPi.
-                        </p>
+                        <h2 class="section-title">Quick Actions</h2>
                         <div class="ota-actions" style="display: flex; flex-wrap: wrap; gap: 12px;">
-                            <button class="btn btn-secondary" onclick="rpiCheckUpdate()" style="flex: 1; min-width: 150px;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                            <button class="btn btn-secondary" onclick="checkRpiStatus()" style="flex: 1; min-width: 140px;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                                Get Status
+                            </button>
+                            <button class="btn btn-secondary" onclick="rpiCheckUpdate()" style="flex: 1; min-width: 140px;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <path d="m21 21-4.35-4.35"></path>
                                 </svg>
-                                Check for Updates
+                                Check Updates
                             </button>
-                            <button class="btn btn-primary" onclick="rpiTriggerUpdate()" id="rpi-update-btn" style="flex: 1; min-width: 150px; background: #22c55e; border-color: #22c55e;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                            <button class="btn btn-primary" onclick="rpiTriggerUpdate()" id="rpi-update-btn" style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #8B5CF6, #3B82F6);">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                     <polyline points="7 10 12 15 17 10"></polyline>
                                     <line x1="12" y1="15" x2="12" y2="3"></line>
                                 </svg>
-                                Git Pull & Restart
+                                🚀 Git Pull & Restart
                             </button>
-                            <button class="btn btn-secondary" onclick="rpiRestart()" style="flex: 1; min-width: 150px;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                            <button class="btn btn-secondary" onclick="rpiRestart()" style="flex: 1; min-width: 140px;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
                                     <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
                                 </svg>
                                 Restart Only
                             </button>
                         </div>
-                    </div>
-
-                    <!-- How It Works -->
-                    <div class="section-card" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));">
-                        <h2 class="section-title" style="color: #22c55e;">ℹ️ How It Works</h2>
-                        <div style="font-size: 14px; color: var(--text-secondary); line-height: 1.8;">
-                            <p style="margin: 0 0 8px 0;"><strong>1.</strong> Push your code changes to GitHub (<code>git push origin main</code>)</p>
-                            <p style="margin: 0 0 8px 0;"><strong>2.</strong> Select the ESP32 connected to the RPi above</p>
-                            <p style="margin: 0 0 8px 0;"><strong>3.</strong> Click <strong>"Git Pull & Restart"</strong></p>
-                            <p style="margin: 0;"><strong>4.</strong> RPi will run <code>git pull</code> and restart the dashboard automatically</p>
+                        <div style="margin-top: 16px; padding: 12px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3B82F6;">
+                            <p style="margin: 0; font-size: 14px; color: var(--text-secondary);">
+                                <strong>How it works:</strong> Click "Git Pull & Restart" to run <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px;">git pull origin main</code> on the RPi, then restart the dashboard.
+                            </p>
                         </div>
                     </div>
 
-                    <!-- RPi Status Log -->
+                    <!-- Status Log -->
                     <div class="section-card">
-                        <h2 class="section-title">📋 Update Log</h2>
-                        <div id="rpi-status-log" class="status-log">
-                            <div class="log-entry info">Ready for RPi updates via git pull...</div>
+                        <h2 class="section-title">Update Log</h2>
+                        <div id="rpi-status-log" class="status-log" style="max-height: 300px; overflow-y: auto;">
+                            <div class="log-entry info">Select an ESP32 device to begin...</div>
                         </div>
                     </div>
                 </div><!-- End RPi Content -->
@@ -1005,193 +1004,45 @@
             }
         }
         
-        // ==================== RPi OTA Functions ====================
+        // ==================== RPi OTA Functions (Git Pull Based) ====================
         
-        let rpiSelectedVersion = 'latest';
-        let rpiSelectedBundle = null;
-        
-        // Initialize RPi file upload
-        const rpiBundleUploadArea = document.getElementById('rpi-bundle-upload-area');
-        const rpiBundleInput = document.getElementById('rpi-bundle-input');
-        
-        rpiBundleUploadArea.addEventListener('click', () => rpiBundleInput.click());
-        
-        rpiBundleUploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            rpiBundleUploadArea.classList.add('dragover');
-        });
-        
-        rpiBundleUploadArea.addEventListener('dragleave', () => {
-            rpiBundleUploadArea.classList.remove('dragover');
-        });
-        
-        rpiBundleUploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            rpiBundleUploadArea.classList.remove('dragover');
-            if (e.dataTransfer.files.length > 0) {
-                handleRpiBundleFile(e.dataTransfer.files[0]);
-            }
-        });
-        
-        rpiBundleInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleRpiBundleFile(e.target.files[0]);
-            }
-        });
-        
-        function handleRpiBundleFile(file) {
-            if (!file.name.match(/\.(tar\.gz|tgz|zip)$/i)) {
-                addRpiLog('error', 'Invalid file type. Please upload .tar.gz or .zip files');
-                return;
-            }
-            
-            rpiSelectedBundle = file;
-            document.getElementById('rpi-bundle-status').textContent = `Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-            document.getElementById('rpi-bundle-status').style.color = 'var(--primary)';
-            document.getElementById('rpi-push-btn').disabled = false;
-            addRpiLog('success', `Bundle file selected: ${file.name}`);
-        }
-        
-        async function loadRpiReleases() {
-            const releaseList = document.getElementById('rpi-release-list');
-            releaseList.innerHTML = '<div class="log-entry info">Loading releases...</div>';
-            
-            try {
-                const response = await fetch('/api/rpi-ota/releases');
-                const data = await response.json();
-                
-                if (data.success && data.releases && data.releases.length > 0) {
-                    releaseList.innerHTML = '';
-                    data.releases.forEach((release, index) => {
-                        const div = document.createElement('div');
-                        div.className = 'release-item' + (index === 0 ? ' selected' : '');
-                        div.onclick = () => selectRpiRelease(release.tag, div);
-                        
-                        const date = new Date(release.published_at);
-                        const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-                        
-                        div.innerHTML = `
-                            <div>
-                                <span class="release-tag">${release.tag}</span>
-                                ${release.prerelease ? '<span style="color: #F59E0B; font-size: 12px; margin-left: 8px;">Pre-release</span>' : ''}
-                                <div class="release-date">${dateStr}</div>
-                            </div>
-                            <div style="font-size: 12px; color: var(--text-secondary);">
-                                ${release.assets.length} asset${release.assets.length !== 1 ? 's' : ''}
-                            </div>
-                        `;
-                        releaseList.appendChild(div);
-                    });
-                    
-                    // Select latest by default
-                    if (data.releases.length > 0) {
-                        rpiSelectedVersion = data.releases[0].tag;
-                        document.getElementById('selected-rpi-version').value = rpiSelectedVersion;
-                    }
-                } else {
-                    releaseList.innerHTML = '<div class="log-entry warning">No releases found. Upload a bundle to create one.</div>';
-                }
-            } catch (error) {
-                releaseList.innerHTML = `<div class="log-entry error">Failed to load releases: ${error.message}</div>`;
-            }
-        }
-        
-        function selectRpiRelease(tag, element) {
-            document.querySelectorAll('.release-item').forEach(el => el.classList.remove('selected'));
-            element.classList.add('selected');
-            rpiSelectedVersion = tag;
-            document.getElementById('selected-rpi-version').value = tag;
-            addRpiLog('info', `Selected version: ${tag}`);
-        }
-        
-        async function checkRpiStatus() {
-            try {
-                const response = await fetch('/api/rpi-ota/status');
-                const data = await response.json();
-                
-                if (data.success && data.status) {
-                    updateRpiStatusUI(data.status);
-                }
-            } catch (error) {
-                updateRpiStatusUI({
-                    status: 'error',
-                    message: 'Failed to get status',
-                    current_version: 'unknown'
-                });
-            }
-        }
-        
-        function updateRpiStatusUI(status) {
-            const indicator = document.getElementById('rpi-status-indicator');
-            const version = document.getElementById('rpi-version');
-            const message = document.getElementById('rpi-status-message');
-            const progressBar = document.getElementById('rpi-update-progress');
-            const progressBarInner = document.getElementById('rpi-progress-bar');
-            
-            // Update indicator color
-            indicator.className = 'rpi-status-indicator';
-            if (status.status === 'online' || status.status === 'complete' || status.status === 'up_to_date' || status.status === 'restarted') {
-                indicator.classList.add('online');
-            } else if (status.status === 'pulling' || status.status === 'restarting' || status.status === 'starting' || status.status === 'checking') {
-                indicator.classList.add('updating');
-            } else if (status.status === 'error') {
-                indicator.classList.add('error');
-            } else if (status.status === 'update_available') {
-                indicator.classList.add('updating');
-            }
-            
-            // Update version (git commit hash)
-            version.textContent = `Git: ${status.current_version || 'unknown'}`;
-            message.textContent = status.message || status.status || 'Unknown';
-            
-            // Update progress bar
-            if (status.progress !== undefined && status.progress > 0 && status.progress < 100) {
-                progressBar.classList.add('active');
-                progressBarInner.style.width = `${status.progress}%`;
-            } else {
-                progressBar.classList.remove('active');
-            }
-            
-            // Add to log
-            if (status.message) {
-                const logType = status.status === 'error' ? 'error' : 
-                               status.status === 'complete' ? 'success' : 'info';
-                addRpiLog(logType, status.message);
-            }
-        }
-        
-        // Load ESP32 devices for RPi relay dropdown
+        // Load ESP32 devices for RPi gateway dropdown
         async function loadRpiEspDevices() {
             try {
                 const response = await fetch('/api/devices');
                 const data = await response.json();
                 
                 const select = document.getElementById('rpi-esp-select');
-                select.innerHTML = '<option value="">-- Select ESP32 to relay commands --</option>';
+                select.innerHTML = '<option value="">-- Select ESP32 device --</option>';
                 
                 if (data.devices && data.devices.length > 0) {
                     data.devices.forEach(device => {
                         const option = document.createElement('option');
                         option.value = device.id;
-                        option.textContent = `${device.name || device.id} (${device.status || 'unknown'})`;
+                        const status = device.online ? '🟢' : '⚫';
+                        option.textContent = `${status} ${device.name || device.id}`;
                         select.appendChild(option);
                     });
+                    addRpiLog('info', `Found ${data.devices.length} ESP32 device(s)`);
+                } else {
+                    addRpiLog('warning', 'No ESP32 devices found');
                 }
             } catch (error) {
-                console.error('Failed to load ESP32 devices for RPi:', error);
+                addRpiLog('error', 'Failed to load devices');
             }
         }
         
-        // Send RPi OTA command through selected ESP32
-        async function sendRpiCommandViaEsp(command, version = 'latest') {
+        // Send command to RPi via selected ESP32
+        async function sendRpiCommandViaEsp(command) {
             const espDeviceId = document.getElementById('rpi-esp-select').value;
             
             if (!espDeviceId) {
-                addRpiLog('error', 'Please select an ESP32 device to relay commands to RPi');
+                addRpiLog('error', '⚠️ Please select an ESP32 device first');
                 return false;
             }
             
-            addRpiLog('info', `Sending "${command}" via ESP32: ${espDeviceId}`);
+            addRpiLog('info', `📡 Sending "${command}" via ESP32...`);
+            showRpiProgress(true);
             
             try {
                 const response = await fetch('/api/rpi-ota/via-esp', {
@@ -1199,24 +1050,30 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         esp_device_id: espDeviceId,
-                        command: command,
-                        version: version
+                        command: command
                     })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    addRpiLog('success', `✓ Command sent to ESP32 → RPi`);
+                    addRpiLog('success', `✓ Command sent to RPi via ${espDeviceId}`);
                     return true;
                 } else {
-                    addRpiLog('error', data.error || 'Failed to send command via ESP32');
+                    addRpiLog('error', `✗ ${data.error || 'Failed'}`);
+                    showRpiProgress(false);
                     return false;
                 }
             } catch (error) {
-                addRpiLog('error', `Error: ${error.message}`);
+                addRpiLog('error', `✗ Error: ${error.message}`);
+                showRpiProgress(false);
                 return false;
             }
+        }
+        
+        // Action buttons
+        async function checkRpiStatus() {
+            await sendRpiCommandViaEsp('status');
         }
         
         async function rpiCheckUpdate() {
@@ -1224,11 +1081,10 @@
         }
         
         async function rpiTriggerUpdate() {
-            addRpiLog('info', '🔄 Triggering git pull on RPi...');
-            
+            addRpiLog('info', '🚀 Starting git pull update...');
             const success = await sendRpiCommandViaEsp('ota_update');
             if (success) {
-                addRpiLog('info', 'RPi will run git pull and restart dashboard...');
+                addRpiLog('info', '⏳ Waiting for RPi to pull and restart...');
             }
         }
         
@@ -1236,94 +1092,44 @@
             await sendRpiCommandViaEsp('restart');
         }
         
-        async function rpiRollback() {
-            if (!confirm('Are you sure you want to rollback to the previous version?')) {
-                return;
-            }
-            await sendRpiCommandViaEsp('rollback');
-        }
-        
-        async function checkRpiStatus() {
-            await sendRpiCommandViaEsp('status');
-        }
-        
-        async function rpiPushRelease() {
-            if (!rpiSelectedBundle) {
-                addRpiLog('error', 'Please select a bundle file first');
-                return;
-            }
-            
-            const version = document.getElementById('rpi-version-input').value.trim() || null;
-            
-            addRpiLog('info', `Uploading bundle to GitHub...`);
-            
-            try {
-                // Read file as base64
-                const base64 = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result.split(',')[1]);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(rpiSelectedBundle);
-                });
-                
-                const response = await fetch('/api/rpi-ota/push-release', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        bundle: base64,
-                        version: version,
-                        notes: 'RPi Dashboard Update'
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    addRpiLog('success', `Release ${data.version} created successfully!`);
-                    addRpiLog('info', `Release URL: ${data.release_url}`);
-                    
-                    // Refresh release list
-                    loadRpiReleases();
-                    
-                    // Reset upload
-                    rpiSelectedBundle = null;
-                    document.getElementById('rpi-bundle-status').textContent = 'Click to upload or drag and drop';
-                    document.getElementById('rpi-bundle-status').style.color = '';
-                    document.getElementById('rpi-push-btn').disabled = true;
-                    document.getElementById('rpi-version-input').value = '';
-                } else {
-                    addRpiLog('error', data.error || 'Failed to create release');
-                }
-            } catch (error) {
-                addRpiLog('error', `Error: ${error.message}`);
+        function showRpiProgress(show) {
+            const progress = document.getElementById('rpi-update-progress');
+            progress.style.display = show ? 'block' : 'none';
+            if (show) {
+                document.getElementById('rpi-progress-bar').style.width = '30%';
             }
         }
         
-        let rpiStatusInterval = null;
-        
-        function startRpiStatusPolling() {
-            if (rpiStatusInterval) {
-                clearInterval(rpiStatusInterval);
+        // Update RPi status UI from WebSocket messages
+        function updateRpiStatusUI(status) {
+            const indicator = document.getElementById('rpi-status-indicator');
+            const version = document.getElementById('rpi-version');
+            const message = document.getElementById('rpi-status-message');
+            const progressBar = document.getElementById('rpi-progress-bar');
+            
+            // Update indicator color
+            if (status.status === 'online' || status.status === 'complete' || status.status === 'up_to_date') {
+                indicator.style.background = '#22c55e';
+                showRpiProgress(false);
+            } else if (status.status === 'pulling' || status.status === 'restarting' || status.status === 'starting') {
+                indicator.style.background = '#f59e0b';
+                showRpiProgress(true);
+                if (status.progress) progressBar.style.width = `${status.progress}%`;
+            } else if (status.status === 'error') {
+                indicator.style.background = '#ef4444';
+                showRpiProgress(false);
+            } else {
+                indicator.style.background = '#6b7280';
             }
             
-            rpiStatusInterval = setInterval(async () => {
-                await checkRpiStatus();
-                
-                // Stop polling after completion or error
-                const indicator = document.getElementById('rpi-status-indicator');
-                if (indicator.classList.contains('online') || indicator.classList.contains('error')) {
-                    clearInterval(rpiStatusInterval);
-                    rpiStatusInterval = null;
-                }
-            }, 3000);
+            version.textContent = `Version: ${status.current_version || 'unknown'}`;
+            message.textContent = status.message || status.status || 'Unknown';
             
-            // Stop after 5 minutes max
-            setTimeout(() => {
-                if (rpiStatusInterval) {
-                    clearInterval(rpiStatusInterval);
-                    rpiStatusInterval = null;
-                }
-            }, 300000);
+            if (status.message) {
+                const logType = status.status === 'error' ? 'error' : 
+                               status.status === 'complete' ? 'success' : 'info';
+                addRpiLog(logType, status.message);
+            }
         }
         
         function addRpiLog(type, message) {
@@ -1338,3 +1144,4 @@
     </script>
 </body>
 </html>
+
