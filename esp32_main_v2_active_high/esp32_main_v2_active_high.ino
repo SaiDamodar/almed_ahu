@@ -827,15 +827,25 @@ void motorLogMsg(const String& s){
   Serial.println(s); 
   pushMotorHTML(s);
   
-  // Also publish to dashboard via Local MQTT (non-blocking)
+  // Also publish to dashboard via Local MQTT (non-blocking, watchdog protected)
   if (mqttLocal.connected()) {
+    esp_task_wdt_reset();
     StaticJsonDocument<256> logDoc;
     logDoc["type"] = "log";
     logDoc["msg"] = s;
     logDoc["ts"] = millis();
+    // Add log level based on message content
+    if (s.indexOf("ERROR") >= 0 || s.indexOf("FAILED") >= 0) {
+      logDoc["lvl"] = "ERROR";
+    } else if (s.indexOf("WARN") >= 0 || s.indexOf("⚠️") >= 0) {
+      logDoc["lvl"] = "WARN";
+    } else {
+      logDoc["lvl"] = "INFO";
+    }
     char buf[256];
     size_t n = serializeJson(logDoc, buf, sizeof(buf));
     mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
+    esp_task_wdt_reset();
   }
 }
 
@@ -1281,10 +1291,13 @@ void publishTelemetryAWS(){
 }
 
 void publishTelemetryLocal(){
+  // Quick check - don't block if not connected
   if(!mqttLocal.connected()) {
-    Serial.println("⚠️ [Local MQTT] Not connected - skipping telemetry");
-    return;
+    return;  // Silent skip - connection will be restored by ensureMqtt()
   }
+  
+  // Feed watchdog BEFORE any MQTT operation
+  esp_task_wdt_reset();
   
   // Dashboard-compatible format (extended for combo sensors)
   StaticJsonDocument<768> doc;  // Increased for combo sensor data
@@ -1348,12 +1361,17 @@ void publishTelemetryLocal(){
   char buf[896];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   
+  // Non-blocking publish with watchdog protection
+  esp_task_wdt_reset();
   bool success = mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
-  if (success) {
-    Serial.println("✓ Telemetry → Local MQTT (" + tTelemetry() + ")");
-  } else {
-    Serial.println("❌ Telemetry publish to Local MQTT FAILED!");
+  esp_task_wdt_reset();
+  
+  if (!success) {
+    // Mark as unhealthy - self-healing will recover
+    selfHealing.mqttLocalHealthy = false;
+    selfHealing.mqttLocalFailCount++;
   }
+  // Removed noisy success logging - telemetry published every 2s
 }
 
 void publishStateAWS(){
@@ -1391,6 +1409,8 @@ void publishStateAWS(){
 void publishStateLocal(){
   if(!mqttLocal.connected()) return;
   
+  esp_task_wdt_reset();  // Feed watchdog before MQTT
+  
   // Dashboard-compatible format (exact match to original backup)
   StaticJsonDocument<512> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
@@ -1409,7 +1429,10 @@ void publishStateLocal(){
   doc["onlineMode"] = onlineMode;
   char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
+  
+  esp_task_wdt_reset();
   mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
+  esp_task_wdt_reset();
 }
 
 // ---------- Sensor Read ----------
