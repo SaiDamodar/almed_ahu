@@ -28,7 +28,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'change-this-secret-key-in-production')
 DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
 HOST = os.getenv('HOST', '0.0.0.0')
 # Railway sets PORT automatically, fallback to 5000 for local development
-PORT = int(os.getenv('PORT', 80))
+PORT = int(os.getenv('PORT', 5000))
 
 # SSL Configuration
 SSL_ENABLED = os.getenv('SSL_ENABLED', 'True').lower() == 'true'
