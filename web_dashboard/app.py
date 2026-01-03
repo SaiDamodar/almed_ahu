@@ -3427,6 +3427,7 @@ def handle_subscribe_device(data):
         })
 
 if __name__ == '__main__':
+    # Test update - git pull permission test
     print("=" * 50)
     print("ALMED AHU Web Dashboard")
     print("=" * 50)
