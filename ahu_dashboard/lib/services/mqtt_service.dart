@@ -50,10 +50,13 @@ class MqttService {
         ..port = port
         ..logging(on: false)
         ..keepAlivePeriod = 60
+        ..connectTimeoutPeriod = 3000  // 3 second timeout - don't block UI
         ..onConnected = _onConnected
         ..onDisconnected = _onDisconnected
         ..onSubscribed = _onSubscribed
-        ..pongCallback = _pong;
+        ..pongCallback = _pong
+        ..autoReconnect = true  // Auto-reconnect in background
+        ..resubscribeOnAutoReconnect = true;
 
       if (useTLS) {
         _client!.secure = true;
@@ -68,7 +71,13 @@ class MqttService {
         .startClean()
         .withWillQos(MqttQos.atLeastOnce);
 
-      await _client!.connect();
+      await _client!.connect().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          debugPrint('MQTT: Connection timeout - will retry in background');
+          return null;
+        },
+      );
 
       if (_client!.connectionStatus!.state == MqttConnectionState.connected) {
         debugPrint('MQTT: Connected to $broker:$port ${useTLS ? "(TLS)" : ""}');

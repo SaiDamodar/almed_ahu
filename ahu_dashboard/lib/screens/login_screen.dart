@@ -346,48 +346,20 @@ class _CompactRoleCard extends StatelessWidget {
     }
 
     provider.setUserRole(role);
-    final connected = await provider.initializeMqtt();
     provider.loadDefaultAhus();
+    
+    // Start MQTT connection but don't wait - it will auto-reconnect in background
+    // This prevents UI lag on startup
+    provider.initializeMqtt();
 
     if (context.mounted) {
       Navigator.of(context).pop();
-
-      if (connected) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        );
-      } else {
-        _showConnectionError(context);
-      }
+      
+      // Always navigate to dashboard - MQTT will connect/reconnect in background
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const DashboardScreen()),
+      );
     }
-  }
-  
-  void _showConnectionError(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.error_outline_rounded, color: AppTheme.error, size: 20),
-            SizedBox(width: 8),
-            Text('Connection Failed', style: TextStyle(fontSize: 16)),
-          ],
-        ),
-        content: const Text(
-          'Could not connect to MQTT broker.',
-          style: TextStyle(fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -484,47 +456,20 @@ class _ModernRoleCard extends StatelessWidget {
     }
 
     provider.setUserRole(role);
-    final connected = await provider.initializeMqtt();
     provider.loadDefaultAhus();
+    
+    // Start MQTT connection but don't wait - it will auto-reconnect in background
+    // This prevents UI lag on startup
+    provider.initializeMqtt();
 
     if (context.mounted) {
       Navigator.of(context).pop();
-
-      if (connected) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        );
-      } else {
-        _showConnectionError(context);
-      }
+      
+      // Always navigate to dashboard - MQTT will connect/reconnect in background
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const DashboardScreen()),
+      );
     }
-  }
-  
-  void _showConnectionError(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.error_outline_rounded, color: AppTheme.error),
-            SizedBox(width: 12),
-            Text('Connection Failed'),
-          ],
-        ),
-        content: const Text(
-          'Could not connect to MQTT broker. Please check your network.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
   }
 }
 
