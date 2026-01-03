@@ -800,8 +800,9 @@
             const code = codeEditor.value.trim();
             const message = document.getElementById('commit-message').value.trim() || 'OTA firmware update';
 
-            if (!code) {
-                addLog('error', 'Please enter firmware code or upload a file');
+            // Allow push if either code is provided OR a .bin file is selected
+            if (!code && !selectedBinFile) {
+                addLog('error', 'Please enter firmware code or upload a .bin file');
                 return;
             }
 

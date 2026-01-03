@@ -2602,7 +2602,7 @@ def notifications_page():
 @app.route('/api/ota/push-to-github', methods=['POST'])
 @login_required
 def push_firmware_to_github():
-    """Push ESP32 firmware code to GitHub repository AND create release with .bin file"""
+    """Push ESP32 firmware code to GitHub repository AND/OR create release with .bin file"""
     try:
         data = request.json
         firmware_code = data.get('code', '')
@@ -2610,27 +2610,30 @@ def push_firmware_to_github():
         commit_message = data.get('message', 'OTA firmware update')
         version = data.get('version', '')  # Optional version tag (e.g., "v1.0.1")
 
-        if not firmware_code:
+        # Allow either code OR bin_file (or both)
+        if not firmware_code and not firmware_bin_base64:
             return jsonify({
                 'success': False,
-                'error': 'Firmware code is required'
+                'error': 'Either firmware code or .bin file is required'
             }), 400
 
-        # Check if code looks like it's already base64 encoded (common mistake)
-        if len(firmware_code) > 100 and not any(keyword in firmware_code for keyword in ['#include', 'void setup', 'void loop', 'Serial.', 'WiFi.', '//', '/*']):
-            try:
-                decoded = base64.b64decode(firmware_code).decode('utf-8')
-                if any(keyword in decoded for keyword in ['#include', 'void setup', 'void loop']):
-                    firmware_code = decoded
-            except:
-                pass
+        # If code is provided, validate it
+        if firmware_code:
+            # Check if code looks like it's already base64 encoded (common mistake)
+            if len(firmware_code) > 100 and not any(keyword in firmware_code for keyword in ['#include', 'void setup', 'void loop', 'Serial.', 'WiFi.', '//', '/*']):
+                try:
+                    decoded = base64.b64decode(firmware_code).decode('utf-8')
+                    if any(keyword in decoded for keyword in ['#include', 'void setup', 'void loop']):
+                        firmware_code = decoded
+                except:
+                    pass
 
-        # Validate it looks like Arduino code
-        if not any(keyword in firmware_code for keyword in ['#include', 'void setup', 'void loop', 'setup()', 'loop()']):
-            return jsonify({
-                'success': False,
-                'error': 'Code does not appear to be valid Arduino/ESP32 code.'
-            }), 400
+            # Validate it looks like Arduino code
+            if not any(keyword in firmware_code for keyword in ['#include', 'void setup', 'void loop', 'setup()', 'loop()']):
+                return jsonify({
+                    'success': False,
+                    'error': 'Code does not appear to be valid Arduino/ESP32 code.'
+                }), 400
 
         # Validate GitHub configuration
         if not config.GITHUB_TOKEN or not config.GITHUB_REPO_OWNER or not config.GITHUB_REPO_NAME:
@@ -2645,42 +2648,46 @@ def push_firmware_to_github():
             'Content-Type': 'application/json'
         }
 
-        # Step 1: Push .ino source code to repo
-        api_url = f"https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/contents/{config.GITHUB_FIRMWARE_PATH}"
-        
-        # Check if file exists and get SHA
-        response = requests.get(api_url, headers=headers, params={'ref': config.GITHUB_REPO_BRANCH})
-        sha = None
-        if response.status_code == 200:
-            sha = response.json().get('sha')
-        elif response.status_code != 404:
-            return jsonify({
-                'success': False,
-                'error': f'GitHub API error: {response.status_code}'
-            }), 500
+        commit_sha = 'bin-only'
+        commit_url = ''
 
-        # Encode firmware code to base64
-        firmware_encoded = base64.b64encode(firmware_code.encode('utf-8')).decode('utf-8')
+        # Step 1: Push .ino source code to repo (only if code is provided)
+        if firmware_code:
+            api_url = f"https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/contents/{config.GITHUB_FIRMWARE_PATH}"
+            
+            # Check if file exists and get SHA
+            response = requests.get(api_url, headers=headers, params={'ref': config.GITHUB_REPO_BRANCH})
+            sha = None
+            if response.status_code == 200:
+                sha = response.json().get('sha')
+            elif response.status_code != 404:
+                return jsonify({
+                    'success': False,
+                    'error': f'GitHub API error: {response.status_code}'
+                }), 500
 
-        payload = {
-            'message': commit_message,
-            'content': firmware_encoded,
-            'branch': config.GITHUB_REPO_BRANCH
-        }
-        if sha:
-            payload['sha'] = sha
+            # Encode firmware code to base64
+            firmware_encoded = base64.b64encode(firmware_code.encode('utf-8')).decode('utf-8')
 
-        response = requests.put(api_url, headers=headers, json=payload)
-        if response.status_code not in [200, 201]:
-            error_msg = response.json().get('message', response.text) if response.text else 'Unknown error'
-            return jsonify({
-                'success': False,
-                'error': f'Failed to push source code ({response.status_code}): {error_msg}'
-            }), 500
+            payload = {
+                'message': commit_message,
+                'content': firmware_encoded,
+                'branch': config.GITHUB_REPO_BRANCH
+            }
+            if sha:
+                payload['sha'] = sha
 
-        result = response.json()
-        commit_sha = result.get('commit', {}).get('sha', 'unknown')
-        commit_url = result.get('commit', {}).get('html_url', '')
+            response = requests.put(api_url, headers=headers, json=payload)
+            if response.status_code not in [200, 201]:
+                error_msg = response.json().get('message', response.text) if response.text else 'Unknown error'
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to push source code ({response.status_code}): {error_msg}'
+                }), 500
+
+            result = response.json()
+            commit_sha = result.get('commit', {}).get('sha', 'unknown')
+            commit_url = result.get('commit', {}).get('html_url', '')
 
         # Step 2: Create GitHub Release with .bin file (if provided)
         release_tag = version
