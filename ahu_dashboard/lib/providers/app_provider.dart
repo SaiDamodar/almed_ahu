@@ -188,30 +188,79 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Clear all data - start fresh (forget previous devices and logs)
+  void clearAllData() {
+    debugPrint('AppProvider: Clearing all previous device data and logs');
+    _ahuUnits.clear();
+    _telemetryData.clear();
+    _stateData.clear();
+    _logData.clear();
+    _statusData.clear();
+    _cachedAhuUnits = null;
+    _ahuUnitsChanged = true;
+    notifyListeners();
+  }
+
   /// Load default AHU units
   void loadDefaultAhus() {
+    // Clear any previous data first to start fresh
+    clearAllData();
+    
+    // Register the default AHU - matches the current ESP32 device
+    // ESP32 topic: almed/ahu/kaveriHospital/burnsWard/ahu-01
     final defaultAhu = AhuUnit(
       id: 'ahu-01',
-      name: 'ICU-1 AHU',
-      site: 'hospitalA',
-      room: 'icu1',
+      name: 'Burns Ward AHU',
+      site: 'kaveriHospital',
+      room: 'burnsWard',
       org: 'almed',
     );
     addAhuUnit(defaultAhu);
+    debugPrint('AppProvider: Loaded default AHU - ${defaultAhu.baseTopic}');
   }
 
+  /// Check if AHU is registered - only process data from known AHUs
+  /// (Disabled auto-discovery to prevent old retained messages from creating ghost devices)
+  bool _isAhuRegistered(String topicData) {
+    final parts = topicData.split('|');
+    final ahuId = parts.isNotEmpty ? parts[0] : topicData;
+    final site = parts.length > 1 ? parts[1] : '';
+    final room = parts.length > 2 ? parts[2] : '';
+    
+    // Check if this matches any of our registered AHUs
+    for (final ahu in _ahuUnits.values) {
+      if (ahu.id == ahuId && ahu.site == site && ahu.room == room) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
   /// Auto-discover and register AHU when data arrives from unknown ID
+  /// Only registers if the device is actively publishing (not just retained messages)
   void _ensureAhuRegistered(String topicData, {String? site, String? room}) {
     final parts = topicData.split('|');
     final ahuId = parts.isNotEmpty ? parts[0] : topicData;
-    final discoveredSite = parts.length > 1 ? parts[1] : (site ?? 'hospitalA');
-    final discoveredRoom = parts.length > 2 ? parts[2] : (room ?? 'room1');
+    final discoveredSite = parts.length > 1 ? parts[1] : (site ?? 'kaveriHospital');
+    final discoveredRoom = parts.length > 2 ? parts[2] : (room ?? 'burnsWard');
     
-    if (_ahuUnits.containsKey(ahuId)) return;
+    // Check if already registered with same id, site, and room
+    for (final ahu in _ahuUnits.values) {
+      if (ahu.id == ahuId && ahu.site == discoveredSite && ahu.room == discoveredRoom) {
+        return; // Already registered
+      }
+    }
+    
+    // Only auto-register if it matches our expected device
+    // This prevents old retained messages from creating ghost devices
+    if (discoveredSite != 'kaveriHospital' || discoveredRoom != 'burnsWard') {
+      debugPrint('AppProvider: Ignoring message from unknown device $ahuId at $discoveredSite/$discoveredRoom');
+      return;
+    }
     
     final newAhu = AhuUnit(
       id: ahuId,
-      name: 'AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
+      name: 'Burns Ward AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
       site: discoveredSite,
       room: discoveredRoom,
       org: 'almed',
@@ -221,94 +270,185 @@ class AppProvider extends ChangeNotifier {
     debugPrint('AppProvider: Auto-discovered new AHU - $ahuId at $discoveredSite/$discoveredRoom');
   }
 
+  /// Check if MQTT is ready for commands
+  bool get canSendCommands => _mqttService != null && _isConnected;
+
   /// Start AHU
-  void startAhu(String ahuId) {
+  bool startAhu(String ahuId) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send start command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.startAhu(ahu);
+      _mqttService!.startAhu(ahu);
+      debugPrint('AppProvider: Start command sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Stop AHU
-  void stopAhu(String ahuId) {
+  bool stopAhu(String ahuId) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send stop command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.stopAhu(ahu);
+      _mqttService!.stopAhu(ahu);
+      debugPrint('AppProvider: Stop command sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Toggle AHU
-  void toggleAhu(String ahuId) {
+  bool toggleAhu(String ahuId) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send toggle command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.toggleAhu(ahu);
+      _mqttService!.toggleAhu(ahu);
+      debugPrint('AppProvider: Toggle command sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Set temperature setpoint
-  void setTemperature(String ahuId, double temp) {
+  bool setTemperature(String ahuId, double temp) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send temperature command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.setTemperature(ahu, temp);
+      _mqttService!.setTemperature(ahu, temp);
+      debugPrint('AppProvider: Temperature command ($temp) sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Set humidity setpoint
-  void setHumidity(String ahuId, double humidity) {
+  bool setHumidity(String ahuId, double humidity) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send humidity command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.setHumidity(ahu, humidity);
+      _mqttService!.setHumidity(ahu, humidity);
+      debugPrint('AppProvider: Humidity command ($humidity) sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Set fan speed (0=OFF, 1=LOW, 2=MED, 3=HIGH)
-  void setFanSpeed(String ahuId, int speed) {
+  bool setFanSpeed(String ahuId, int speed) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send fan speed command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.setFanSpeed(ahu, speed);
+      _mqttService!.setFanSpeed(ahu, speed);
+      debugPrint('AppProvider: Fan speed command ($speed) sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Toggle fan speed
-  void toggleFanSpeed(String ahuId) {
+  bool toggleFanSpeed(String ahuId) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send fan toggle command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.toggleFanSpeed(ahu);
+      _mqttService!.toggleFanSpeed(ahu);
+      debugPrint('AppProvider: Fan toggle command sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Set operation mode (Admin only)
-  void setMode(String ahuId, bool onlineMode) {
-    if (_currentRole != UserRole.admin) return;
+  bool setMode(String ahuId, bool onlineMode) {
+    if (_currentRole != UserRole.admin) return false;
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send mode command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.setMode(ahu, onlineMode);
+      _mqttService!.setMode(ahu, onlineMode);
+      debugPrint('AppProvider: Mode command (${onlineMode ? 'online' : 'offline'}) sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Set CP mode (dual or single) - Available to all users
-  void setCpMode(String ahuId, String mode) {
+  bool setCpMode(String ahuId, String mode) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send CP mode command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.setCpMode(ahu, mode);
+      _mqttService!.setCpMode(ahu, mode);
+      debugPrint('AppProvider: CP mode command ($mode) sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Set active CP (1 or 2) - Available to all users
-  void setCpActive(String ahuId, int cpActive) {
+  bool setCpActive(String ahuId, int cpActive) {
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send CP active command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.setCpActive(ahu, cpActive);
+      _mqttService!.setCpActive(ahu, cpActive);
+      debugPrint('AppProvider: CP active command ($cpActive) sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Reset ESP32 (Admin only) - same as pressing physical reset button
-  void resetEsp32(String ahuId) {
-    if (_currentRole != UserRole.admin) return;
+  bool resetEsp32(String ahuId) {
+    if (_currentRole != UserRole.admin) return false;
+    if (!canSendCommands) {
+      debugPrint('AppProvider: Cannot send reset command - MQTT not connected');
+      return false;
+    }
     final ahu = _ahuUnits[ahuId];
     if (ahu != null) {
-      _mqttService?.resetEsp32(ahu);
+      _mqttService!.resetEsp32(ahu);
+      debugPrint('AppProvider: Reset command sent to ${ahu.cmdTopic}');
+      return true;
     }
+    debugPrint('AppProvider: AHU $ahuId not found');
+    return false;
   }
 
   /// Provision WiFi (admin only)

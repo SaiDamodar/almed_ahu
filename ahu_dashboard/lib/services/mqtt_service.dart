@@ -120,11 +120,26 @@ class MqttService {
   }
 
   /// Send command to AHU
-  void sendCommand(AhuUnit ahu, Map<String, dynamic> command) {
-    if (_client == null || !_isConnected) return;
+  bool sendCommand(AhuUnit ahu, Map<String, dynamic> command) {
+    if (_client == null) {
+      debugPrint('MQTT: Cannot send command - client is null');
+      return false;
+    }
+    if (!_isConnected) {
+      debugPrint('MQTT: Cannot send command - not connected');
+      return false;
+    }
 
-    final builder = MqttClientPayloadBuilder()..addString(jsonEncode(command));
-    _client!.publishMessage(ahu.cmdTopic, MqttQos.atLeastOnce, builder.payload!);
+    try {
+      final payload = jsonEncode(command);
+      final builder = MqttClientPayloadBuilder()..addString(payload);
+      _client!.publishMessage(ahu.cmdTopic, MqttQos.atLeastOnce, builder.payload!);
+      debugPrint('MQTT: Command sent to ${ahu.cmdTopic}: $payload');
+      return true;
+    } catch (e) {
+      debugPrint('MQTT: Error sending command: $e');
+      return false;
+    }
   }
 
   /// Start AHU
