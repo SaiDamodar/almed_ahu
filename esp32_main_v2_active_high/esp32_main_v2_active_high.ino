@@ -3160,9 +3160,9 @@ void loop()
     checkForNewSensor();
   }
   
-  // Debug: Log sensor mode periodically (every 60 seconds to reduce log spam)
-  static unsigned long lastSensorModeLog = 0;
-  if (now - lastSensorModeLog > 60000) {
+    // Debug: Log sensor mode periodically (every 60 seconds to reduce log spam)
+    static unsigned long lastSensorModeLog = 0;
+    if (now - lastSensorModeLog > 60000) {
     lastSensorModeLog = now;
     esp_task_wdt_reset();
     Serial.printf("[DEBUG] Sensors: SEN66=%s SDP810=%s SHT45=%s\n", 
