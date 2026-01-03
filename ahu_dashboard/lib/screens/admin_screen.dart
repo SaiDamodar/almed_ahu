@@ -119,7 +119,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                       ),
                     ),
-                    // Exit button
+                    // Exit to Desktop button (Kiosk mode exit)
                     Container(
                       decoration: BoxDecoration(
                         color: Theme.of(context).cardColor,
@@ -129,9 +129,9 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                       ),
                       child: IconButton(
-                        icon: const Icon(Icons.exit_to_app_rounded),
+                        icon: const Icon(Icons.desktop_windows_rounded),
                         onPressed: () => _exitApplication(context),
-                        tooltip: 'Exit Application',
+                        tooltip: 'Exit to Desktop',
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -735,14 +735,18 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 }
 
-/// Helper function to exit the application
+/// Helper function to exit the application and return to desktop
 void _exitApplication(BuildContext context) {
   showDialog(
     context: context,
     builder: (BuildContext dialogContext) {
+      final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
       return AlertDialog(
-        title: const Text('Exit Application'),
-        content: const Text('Are you sure you want to exit the AHU Dashboard?'),
+        title: const Text('Exit to Desktop'),
+        content: const Text(
+          'This will close the AHU Dashboard and return to the Raspberry Pi desktop.\n\n'
+          'The dashboard will automatically restart on next boot.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
@@ -751,21 +755,38 @@ void _exitApplication(BuildContext context) {
           TextButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
-              // Exit the application
-              if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
-                exit(0);
-              } else {
-                SystemNavigator.pop();
-              }
+              _exitToDesktop();
             },
             style: TextButton.styleFrom(
-              foregroundColor: Colors.red,
+              foregroundColor: Colors.orange,
             ),
-            child: const Text('Exit'),
+            child: const Text('Exit to Desktop'),
           ),
         ],
       );
     },
   );
+}
+
+/// Exit kiosk mode and return to Raspberry Pi desktop
+void _exitToDesktop() async {
+  if (Platform.isLinux) {
+    // Try to run the exit script first
+    try {
+      final scriptPath = '/home/almed/Documents/almed_ahu/ahu_dashboard/rpi_kiosk_setup/exit_to_desktop.sh';
+      final result = await Process.run('bash', [scriptPath]);
+      if (result.exitCode != 0) {
+        // Script failed, just exit the app
+        exit(0);
+      }
+    } catch (e) {
+      // If script doesn't exist or fails, just exit normally
+      exit(0);
+    }
+  } else if (Platform.isWindows || Platform.isMacOS) {
+    exit(0);
+  } else {
+    SystemNavigator.pop();
+  }
 }
 

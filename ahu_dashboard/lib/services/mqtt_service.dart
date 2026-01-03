@@ -75,8 +75,9 @@ class MqttService {
         _isConnected = true;
         _connectionController.add(true);
 
-        // Subscribe to all AHU topics
-        _client!.subscribe('almed/ahu/#', MqttQos.atLeastOnce);
+        // Subscribe only to ICU-1 (ahu-01) topics - not all AHUs
+        // This prevents other ESPs (ICU 2, ICU 3) from appearing in dashboard
+        _client!.subscribe('almed/ahu/hospitalA/icu1/ahu-01/#', MqttQos.atLeastOnce);
         _client!.updates!.listen(_onMessage);
 
         return true;

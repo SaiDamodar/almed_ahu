@@ -57,39 +57,7 @@ class DashboardScreen extends StatelessWidget {
   }
 }
 
-/// Helper function to exit the application
-void _exitApplication(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (BuildContext dialogContext) {
-      return AlertDialog(
-        title: const Text('Exit Application'),
-        content: const Text('Are you sure you want to exit the AHU Dashboard?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-              // Exit the application
-              if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
-                exit(0);
-              } else {
-                SystemNavigator.pop();
-              }
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.red,
-            ),
-            child: const Text('Exit'),
-          ),
-        ],
-      );
-    },
-  );
-}
+// Exit functionality moved to Admin screen only
 
 class _DashboardTopBar extends StatelessWidget {
   final bool isDark;
@@ -152,13 +120,6 @@ class _DashboardTopBar extends StatelessWidget {
               child: _ConnectionStatus(),
             ),
           // Action buttons - smaller on Pi
-          _ActionButton(
-            icon: Icons.exit_to_app_rounded,
-            tooltip: 'Exit Application',
-            isSmall: isSmallScreen,
-            onPressed: () => _exitApplication(context),
-          ),
-          SizedBox(width: isSmallScreen ? 6 : 12),
           _ActionButton(
             icon: Icons.logout_rounded,
             tooltip: 'Logout',
