@@ -1,90 +1,101 @@
 #!/bin/bash
-# ================================================================
-# AHU Dashboard OTA Updater Installation Script
-# Run this on the Raspberry Pi to install the OTA updater service
-# ================================================================
+# RPi OTA Updater Installation Script
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "${GREEN}"
-echo "========================================"
-echo "AHU Dashboard OTA Updater Installation"
-echo "========================================"
-echo -e "${NC}"
+echo "======================================"
+echo "  RPi OTA Updater Installation"
+echo "  Simple Git Pull Based Updates"
+echo "======================================"
 
 # Check if running as root
-if [ "$EUID" -eq 0 ]; then
-    echo -e "${RED}Please do not run as root. Run as 'pi' user.${NC}"
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root (sudo ./install.sh)"
     exit 1
 fi
 
-# Configuration
-INSTALL_DIR="/home/pi/ahu_ota_updater"
-SERVICE_NAME="ahu-ota-updater"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-echo "Installation directory: $INSTALL_DIR"
-echo "Script directory: $SCRIPT_DIR"
 echo ""
+echo "1. Installing Python dependencies..."
+pip3 install paho-mqtt --break-system-packages 2>/dev/null || pip3 install paho-mqtt
 
-# Step 1: Create installation directory
-echo -e "${YELLOW}[1/6] Creating installation directory...${NC}"
-mkdir -p "$INSTALL_DIR"
+echo ""
+echo "2. Creating environment config..."
+cat > /etc/default/ahu-ota-updater << 'EOF'
+# RPi OTA Updater Configuration
+MQTT_BROKER=10.42.0.1
+MQTT_PORT=1883
+MQTT_USERNAME=ahu_user
+MQTT_PASSWORD=ahu_pass_2024
+DASHBOARD_DIR=/home/pi/ahu_dashboard
+FLUTTER_PI_SERVICE=ahu-dashboard
+GIT_BRANCH=main
+EOF
 
-# Step 2: Copy files
-echo -e "${YELLOW}[2/6] Copying files...${NC}"
-cp "$SCRIPT_DIR/rpi_ota_updater.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/"
+echo ""
+echo "3. Copying service file..."
+cat > /etc/systemd/system/ahu-ota-updater.service << EOF
+[Unit]
+Description=AHU Dashboard OTA Updater (Git Pull)
+After=network.target mosquitto.service
 
-# Step 3: Install Python dependencies
-echo -e "${YELLOW}[3/6] Installing Python dependencies...${NC}"
-pip3 install --user -r "$INSTALL_DIR/requirements.txt"
+[Service]
+Type=simple
+User=pi
+EnvironmentFile=/etc/default/ahu-ota-updater
+ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/rpi_ota_updater.py
+WorkingDirectory=${SCRIPT_DIR}
+Restart=always
+RestartSec=10
 
-# Step 4: Create log file with proper permissions
-echo -e "${YELLOW}[4/6] Setting up logging...${NC}"
-sudo touch /var/log/ahu_ota_updater.log
-sudo chown pi:pi /var/log/ahu_ota_updater.log
+[Install]
+WantedBy=multi-user.target
+EOF
 
-# Step 5: Install systemd service
-echo -e "${YELLOW}[5/6] Installing systemd service...${NC}"
-sudo cp "$SCRIPT_DIR/ahu-ota-updater.service" /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME"
-
-# Step 6: Configure sudoers for systemctl commands (no password needed)
-echo -e "${YELLOW}[6/6] Configuring sudoers...${NC}"
-SUDOERS_FILE="/etc/sudoers.d/ahu-ota-updater"
-sudo tee "$SUDOERS_FILE" > /dev/null << 'EOF'
-# Allow pi user to control ahu-dashboard service without password
+echo ""
+echo "4. Setting up sudoers for service control..."
+cat > /etc/sudoers.d/ahu-ota-updater << 'EOF'
+# Allow pi user to restart dashboard service without password
+pi ALL=(ALL) NOPASSWD: /bin/systemctl restart ahu-dashboard
 pi ALL=(ALL) NOPASSWD: /bin/systemctl start ahu-dashboard
 pi ALL=(ALL) NOPASSWD: /bin/systemctl stop ahu-dashboard
-pi ALL=(ALL) NOPASSWD: /bin/systemctl restart ahu-dashboard
-pi ALL=(ALL) NOPASSWD: /bin/systemctl status ahu-dashboard
 EOF
-sudo chmod 440 "$SUDOERS_FILE"
+chmod 440 /etc/sudoers.d/ahu-ota-updater
 
 echo ""
-echo -e "${GREEN}========================================"
-echo "Installation Complete!"
-echo "========================================${NC}"
-echo ""
-echo "To configure, edit /etc/default/ahu-ota-updater:"
-echo "  GITHUB_TOKEN=your_github_token"
-echo "  MQTT_BROKER=10.42.0.1"
-echo ""
-echo "To start the service:"
-echo "  sudo systemctl start $SERVICE_NAME"
-echo ""
-echo "To view logs:"
-echo "  sudo journalctl -u $SERVICE_NAME -f"
-echo ""
-echo "To test MQTT commands, publish to: almed/rpi/ota/command"
-echo "  Example: {\"type\": \"check_update\"}"
-echo ""
+echo "5. Creating log file..."
+touch /var/log/ahu_ota_updater.log
+chown pi:pi /var/log/ahu_ota_updater.log
 
+echo ""
+echo "6. Reloading systemd..."
+systemctl daemon-reload
+
+echo ""
+echo "7. Enabling service..."
+systemctl enable ahu-ota-updater
+
+echo ""
+echo "8. Starting service..."
+systemctl start ahu-ota-updater
+
+echo ""
+echo "======================================"
+echo "  Installation Complete!"
+echo "======================================"
+echo ""
+echo "Service Status:"
+systemctl status ahu-ota-updater --no-pager || true
+echo ""
+echo "Commands:"
+echo "  sudo systemctl status ahu-ota-updater  - Check status"
+echo "  sudo journalctl -u ahu-ota-updater -f  - View logs"
+echo ""
+echo "The service will:"
+echo "  1. Listen for commands from ESP32 via local MQTT"
+echo "  2. Run 'git pull origin main' when update requested"
+echo "  3. Restart the dashboard service"
+echo "  4. Send confirmation back"
+echo ""

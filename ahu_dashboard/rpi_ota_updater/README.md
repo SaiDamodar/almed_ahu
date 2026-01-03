@@ -1,253 +1,178 @@
 # Raspberry Pi OTA Updater for AHU Dashboard
 
-This service enables Over-The-Air (OTA) updates for the Flutter dashboard running on Raspberry Pi. It works similar to the ESP32 OTA system, allowing updates to be triggered from the web admin panel.
+Simple `git pull` based OTA updates for the Flutter dashboard running on Raspberry Pi. Commands are sent through ESP32 via local MQTT.
 
 ## Architecture
 
 ```
-┌─────────────────────┐       ┌──────────────────────┐       ┌────────────────────┐
-│   Web Dashboard     │──────▶│    Local MQTT        │──────▶│   RPi OTA Updater  │
-│   (Admin Panel)     │       │    Broker            │       │   (This Service)   │
-└─────────────────────┘       └──────────────────────┘       └────────────────────┘
-         │                                                            │
-         │                                                            ▼
-         ▼                                                   ┌────────────────────┐
-┌─────────────────────┐                                      │  GitHub Releases   │
-│  GitHub Repository  │◀─────────────────────────────────────│  (Downloads)       │
-│  (Push releases)    │                                      └────────────────────┘
-└─────────────────────┘
+┌─────────────────┐    AWS IoT     ┌─────────────┐   Local MQTT   ┌─────────────┐
+│  Web Dashboard  │ ────────────▶ │   ESP32     │ ─────────────▶ │ Raspberry   │
+│  (Select ESP)   │               │  (Gateway)  │                │     Pi      │
+└─────────────────┘               └─────────────┘                └─────────────┘
+        ▲                                │                              │
+        │                                │                              ▼
+        └────────────────────────────────┘                      ┌─────────────────┐
+              Status relay back                                 │   git pull      │
+                                                                │   origin main   │
+                                                                └─────────────────┘
 ```
 
-## Features
+## How It Works
 
-- **OTA Updates**: Download and install Flutter dashboard updates from GitHub releases
-- **Version Tracking**: Tracks current version and compares with available releases
-- **Backup & Rollback**: Automatically backs up current version before update, supports rollback
-- **Status Reporting**: Reports real-time status via MQTT for web dashboard monitoring
-- **Service Control**: Can restart/stop the Flutter-Pi dashboard service
+1. User selects ESP32 in web dashboard OTA page
+2. Web dashboard sends command to ESP32 via AWS IoT MQTT
+3. ESP32 relays command to RPi via local MQTT
+4. RPi runs `git pull origin main`
+5. RPi restarts the Flutter dashboard service
+6. RPi sends confirmation back via MQTT
+7. ESP32 relays status to AWS IoT → Web dashboard
 
 ## Installation
 
-### Prerequisites
+### 1. Copy files to Raspberry Pi
 
-- Raspberry Pi running Raspbian/Raspberry Pi OS
-- Python 3.7+
-- Local MQTT broker (Mosquitto) running on the Pi or network
-- Flutter-Pi installed for running the dashboard
+```bash
+# From your Mac/PC
+scp -r rpi_ota_updater/ pi@<RPI_IP>:/home/pi/
+```
 
-### Quick Install
+### 2. SSH into RPi and install
 
-1. Copy the `rpi_ota_updater` folder to your Raspberry Pi:
-   ```bash
-   scp -r rpi_ota_updater/ pi@<PI_IP>:/home/pi/
-   ```
+```bash
+ssh pi@<RPI_IP>
+cd /home/pi/rpi_ota_updater
+chmod +x install.sh
+sudo ./install.sh
+```
 
-2. SSH into the Pi and run the installer:
-   ```bash
-   ssh pi@<PI_IP>
-   cd /home/pi/rpi_ota_updater
-   chmod +x install.sh
-   ./install.sh
-   ```
+### 3. Verify the dashboard is a git repo
 
-3. Configure environment (optional):
-   ```bash
-   sudo nano /etc/default/ahu-ota-updater
-   ```
-   
-   Add your GitHub token for private repos:
-   ```
-   GITHUB_TOKEN=ghp_your_token_here
-   ```
+```bash
+cd /home/pi/ahu_dashboard
+git status  # Should show git repo info
+git remote -v  # Should show origin URL
+```
 
-4. Start the service:
-   ```bash
-   sudo systemctl start ahu-ota-updater
-   ```
+### 4. Start the service
 
-### Manual Installation
-
-1. Install Python dependencies:
-   ```bash
-   pip3 install --user paho-mqtt requests
-   ```
-
-2. Copy the service file:
-   ```bash
-   sudo cp ahu-ota-updater.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable ahu-ota-updater
-   ```
-
-3. Create log file:
-   ```bash
-   sudo touch /var/log/ahu_ota_updater.log
-   sudo chown pi:pi /var/log/ahu_ota_updater.log
-   ```
-
-4. Configure sudoers for service control:
-   ```bash
-   sudo visudo -f /etc/sudoers.d/ahu-ota-updater
-   ```
-   Add:
-   ```
-   pi ALL=(ALL) NOPASSWD: /bin/systemctl start ahu-dashboard
-   pi ALL=(ALL) NOPASSWD: /bin/systemctl stop ahu-dashboard
-   pi ALL=(ALL) NOPASSWD: /bin/systemctl restart ahu-dashboard
-   ```
+```bash
+sudo systemctl start ahu-ota-updater
+sudo systemctl status ahu-ota-updater
+```
 
 ## Configuration
 
-Environment variables (set in `/etc/default/ahu-ota-updater` or systemd service):
+Environment variables (set in `/etc/default/ahu-ota-updater`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MQTT_BROKER` | 10.42.0.1 | MQTT broker IP address |
+| `MQTT_BROKER` | 10.42.0.1 | Local MQTT broker IP (ESP32 hotspot) |
 | `MQTT_PORT` | 1883 | MQTT broker port |
 | `MQTT_USERNAME` | ahu_user | MQTT username |
 | `MQTT_PASSWORD` | ahu_pass_2024 | MQTT password |
-| `DASHBOARD_DIR` | /home/pi/ahu_dashboard | Flutter dashboard directory |
-| `BACKUP_DIR` | /home/pi/ahu_dashboard_backup | Backup directory |
-| `FLUTTER_PI_SERVICE` | ahu-dashboard | Systemd service name for Flutter-Pi |
-| `GITHUB_TOKEN` | (empty) | GitHub token for private repos |
-| `GITHUB_REPO_OWNER` | ESPUpdaterzaid | GitHub username/org |
-| `GITHUB_REPO_NAME` | almed-rpi-dashboard | Repository name |
+| `DASHBOARD_DIR` | /home/pi/ahu_dashboard | Flutter dashboard git directory |
+| `FLUTTER_PI_SERVICE` | ahu-dashboard | Systemd service name |
+| `GIT_BRANCH` | main | Git branch to pull from |
 
-## MQTT Topics
+## MQTT Commands
 
-### Subscribe (Commands)
-- `almed/rpi/ota/command` - Receive OTA commands
+Commands are sent to `almed/rpi/ota/command`:
 
-### Publish (Status)
-- `almed/rpi/ota/status` - Report status updates
-- `almed/rpi/ota/log` - Log messages
-
-## Command Format
-
-Send JSON commands to `almed/rpi/ota/command`:
+### Update (git pull + restart)
+```json
+{"type": "ota_update", "from_esp": "KAVERI_BURNS_AHU1"}
+```
 
 ### Check for Updates
 ```json
-{
-  "type": "check_update",
-  "timestamp": 1704067200
-}
-```
-
-### Trigger Update
-```json
-{
-  "type": "ota_update",
-  "version": "v1.2.0",  // or "latest"
-  "timestamp": 1704067200
-}
+{"type": "check_update"}
 ```
 
 ### Restart Dashboard
 ```json
-{
-  "type": "restart",
-  "timestamp": 1704067200
-}
-```
-
-### Rollback to Previous Version
-```json
-{
-  "type": "rollback",
-  "timestamp": 1704067200
-}
+{"type": "restart"}
 ```
 
 ### Get Status
 ```json
-{
-  "type": "status",
-  "timestamp": 1704067200
-}
+{"type": "status"}
 ```
 
-## Status Response Format
+## Status Responses
 
-The service publishes status updates to `almed/rpi/ota/status`:
+Published to `almed/rpi/ota/status`:
 
 ```json
 {
-  "status": "downloading",
-  "message": "Downloaded 50%",
-  "timestamp": "2024-01-01T12:00:00",
-  "current_version": "v1.1.0",
-  "target_version": "v1.2.0",
-  "progress": 50
+  "status": "complete",
+  "message": "✅ Updated: abc123 → def456",
+  "current_version": "def456",
+  "progress": 100,
+  "timestamp": "2024-01-01T12:00:00"
 }
 ```
 
 Status values:
-- `online` - Service is running and ready
+- `online` - Service ready
 - `checking` - Checking for updates
-- `update_available` - New version available
-- `up_to_date` - Already on latest version
-- `backup` - Creating backup
-- `stopping` - Stopping dashboard service
-- `downloading` - Downloading update package
-- `extracting` - Extracting update
-- `applying` - Applying update files
-- `starting` - Starting updated dashboard
-- `complete` - Update completed successfully
-- `error` - Error occurred
-- `rolled_back` - Rollback completed
+- `update_available` - New commits found
+- `up_to_date` - Already on latest
+- `starting` - Update starting
+- `pulling` - Running git pull
+- `pulled` - Code updated
+- `restarting` - Restarting service
+- `complete` - Update finished ✅
+- `error` - Something went wrong
 
-## GitHub Release Format
+## Testing from Command Line
 
-Create releases with the following structure:
-- Tag: Version number (e.g., `v1.2.0`)
-- Asset: `ahu_dashboard_v1.2.0.tar.gz` containing the Flutter bundle
-
-The tar.gz should contain the Flutter assets directory (`flutter_assets/` or direct contents).
-
-## Troubleshooting
-
-### View Service Logs
 ```bash
-sudo journalctl -u ahu-ota-updater -f
+# On the RPi, test MQTT manually:
+
+# Check status
+mosquitto_pub -h 10.42.0.1 -u ahu_user -P ahu_pass_2024 \
+  -t "almed/rpi/ota/command" -m '{"type": "status"}'
+
+# Trigger update
+mosquitto_pub -h 10.42.0.1 -u ahu_user -P ahu_pass_2024 \
+  -t "almed/rpi/ota/command" -m '{"type": "ota_update"}'
+
+# Watch status responses
+mosquitto_sub -h 10.42.0.1 -u ahu_user -P ahu_pass_2024 \
+  -t "almed/rpi/ota/status"
 ```
 
-### View Application Logs
+## Logs
+
 ```bash
+# View service logs
+sudo journalctl -u ahu-ota-updater -f
+
+# View application log
 tail -f /var/log/ahu_ota_updater.log
 ```
 
-### Test MQTT Connection
+## Troubleshooting
+
+### Service not starting
 ```bash
-mosquitto_pub -h 10.42.0.1 -u ahu_user -P ahu_pass_2024 \
-  -t "almed/rpi/ota/command" -m '{"type": "status"}'
+sudo systemctl status ahu-ota-updater
+sudo journalctl -u ahu-ota-updater -n 50
 ```
 
-### Subscribe to Status Updates
+### Git pull fails
 ```bash
-mosquitto_sub -h 10.42.0.1 -u ahu_user -P ahu_pass_2024 \
-  -t "almed/rpi/ota/#"
+cd /home/pi/ahu_dashboard
+git status
+git remote -v
+git fetch origin main
 ```
 
-### Manual Update Test
+### MQTT not connecting
 ```bash
-python3 /home/pi/ahu_ota_updater/rpi_ota_updater.py
+# Check if mosquitto is running
+systemctl status mosquitto
+
+# Test connection
+mosquitto_sub -h 10.42.0.1 -u ahu_user -P ahu_pass_2024 -t "test"
 ```
-
-## Web Admin Integration
-
-The web admin panel (`/ota` page) includes an "RPi Dashboard" tab where you can:
-- View current RPi dashboard version
-- Check for available updates
-- Trigger OTA updates
-- View update progress
-- Restart the dashboard
-- Rollback to previous version
-- Upload and push new releases
-
-## Security Notes
-
-- The GitHub token is stored in the environment file (`/etc/default/ahu-ota-updater`)
-- MQTT communication should be secured in production (TLS)
-- Sudoers configuration is limited to specific systemctl commands
-

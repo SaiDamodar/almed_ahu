@@ -3097,6 +3097,73 @@ def get_rpi_ota_status():
     })
 
 
+@app.route('/api/rpi-ota/via-esp', methods=['POST'])
+@login_required
+def rpi_ota_via_esp():
+    """Send RPi OTA command through ESP32 via AWS IoT MQTT"""
+    try:
+        data = request.json
+        esp_device_id = data.get('esp_device_id', '')
+        command = data.get('command', '')  # check_update, ota_update, restart, rollback, status
+        version = data.get('version', 'latest')
+        
+        if not esp_device_id:
+            return jsonify({'success': False, 'error': 'ESP32 device ID required'}), 400
+        
+        if not command:
+            return jsonify({'success': False, 'error': 'Command required'}), 400
+        
+        # Create payload for ESP32 to relay to RPi
+        payload = {
+            'type': 'rpi_ota',
+            'command': command,
+            'version': version,
+            'timestamp': int(time.time())
+        }
+        
+        # Send via AWS IoT MQTT to the ESP32
+        topic = config.AWS_IOT_SUBSCRIBE_TOPIC  # esp32/sub
+        
+        try:
+            # Use the AWS IoT MQTT client to publish
+            if aws_iot_mqtt_client and aws_iot_mqtt_client.is_connected():
+                aws_iot_mqtt_client.publish(topic, json.dumps(payload))
+                print(f"[RPi OTA] Sent via ESP32 ({esp_device_id}): {command}")
+                return jsonify({
+                    'success': True,
+                    'message': f'Command "{command}" sent to RPi via ESP32 ({esp_device_id})'
+                })
+            else:
+                # Fallback: Use HTTP API to publish
+                import requests as req
+                
+                # Use AWS IoT Data endpoint
+                iot_endpoint = config.AWS_IOT_ENDPOINT
+                url = f"https://{iot_endpoint}/topics/{topic}?qos=1"
+                
+                headers = {
+                    'Content-Type': 'application/json'
+                }
+                
+                # This requires proper AWS credentials setup
+                # For now, use the existing MQTT publish mechanism
+                print(f"[RPi OTA] AWS IoT MQTT not connected, cannot send command")
+                return jsonify({
+                    'success': False,
+                    'error': 'AWS IoT MQTT not connected'
+                }), 500
+                
+        except Exception as e:
+            print(f"[RPi OTA] Error sending via AWS IoT: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+            
+    except Exception as e:
+        print(f"[RPi OTA via ESP] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/rpi-ota/check-update', methods=['POST'])
 @login_required
 def rpi_check_update():

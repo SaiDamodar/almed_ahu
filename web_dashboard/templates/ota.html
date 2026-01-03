@@ -436,14 +436,25 @@
 
                 <!-- RPi Tab Content -->
                 <div id="rpi-content" class="ota-content">
+                    <!-- ESP32 Gateway Selection -->
+                    <div class="section-card">
+                        <h2 class="section-title">🔗 Select ESP32 Gateway</h2>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
+                            Commands are sent through the ESP32 connected to the RPi via local MQTT.
+                        </p>
+                        <select id="rpi-esp-select" class="device-select" style="width: 100%; padding: 12px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px;">
+                            <option value="">-- Select ESP32 gateway --</option>
+                        </select>
+                    </div>
+
                     <!-- RPi Status Card -->
                     <div class="section-card">
-                        <h2 class="section-title">Raspberry Pi Dashboard Status</h2>
+                        <h2 class="section-title">🍓 Raspberry Pi Dashboard</h2>
                         <div class="rpi-status-card">
                             <div class="rpi-status-indicator" id="rpi-status-indicator"></div>
                             <div class="rpi-status-info">
-                                <div class="rpi-version" id="rpi-version">Version: Checking...</div>
-                                <div class="rpi-status-message" id="rpi-status-message">Connecting to RPi...</div>
+                                <div class="rpi-version" id="rpi-version">Git: Checking...</div>
+                                <div class="rpi-status-message" id="rpi-status-message">Select ESP32 and click Refresh</div>
                             </div>
                             <button class="btn btn-secondary" onclick="checkRpiStatus()">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle;">
@@ -459,86 +470,53 @@
                         </div>
                     </div>
 
-                    <!-- Available Releases -->
+                    <!-- Simple Git Pull Actions -->
                     <div class="section-card">
-                        <h2 class="section-title">Available Releases</h2>
+                        <h2 class="section-title">📦 Update Actions</h2>
                         <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
-                            Select a version to install on the Raspberry Pi dashboard
+                            Updates are done via <code style="background: var(--card-bg); padding: 2px 6px; border-radius: 4px;">git pull origin main</code> on the RPi.
                         </p>
-                        <div class="release-list" id="rpi-release-list">
-                            <div class="log-entry info">Loading releases...</div>
-                        </div>
-                        <input type="hidden" id="selected-rpi-version" value="latest">
-                    </div>
-
-                    <!-- RPi Actions -->
-                    <div class="section-card">
-                        <h2 class="section-title">Actions</h2>
-                        <div class="ota-actions">
-                            <button class="btn btn-secondary" onclick="rpiCheckUpdate()">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                        <div class="ota-actions" style="display: flex; flex-wrap: wrap; gap: 12px;">
+                            <button class="btn btn-secondary" onclick="rpiCheckUpdate()" style="flex: 1; min-width: 150px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <path d="m21 21-4.35-4.35"></path>
                                 </svg>
                                 Check for Updates
                             </button>
-                            <button class="btn btn-primary" onclick="rpiTriggerUpdate()" id="rpi-update-btn">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                            <button class="btn btn-primary" onclick="rpiTriggerUpdate()" id="rpi-update-btn" style="flex: 1; min-width: 150px; background: #22c55e; border-color: #22c55e;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                     <polyline points="7 10 12 15 17 10"></polyline>
                                     <line x1="12" y1="15" x2="12" y2="3"></line>
                                 </svg>
-                                Install Update
+                                Git Pull & Restart
                             </button>
-                            <button class="btn btn-secondary" onclick="rpiRestart()">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                            <button class="btn btn-secondary" onclick="rpiRestart()" style="flex: 1; min-width: 150px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
                                     <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
                                 </svg>
-                                Restart Dashboard
-                            </button>
-                            <button class="btn btn-warning" onclick="rpiRollback()" style="background: #F59E0B; border-color: #F59E0B;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
-                                    <polyline points="1 4 1 10 7 10"></polyline>
-                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-                                </svg>
-                                Rollback
+                                Restart Only
                             </button>
                         </div>
-                        <p style="font-size: 14px; color: var(--text-secondary); margin-top: 8px;">
-                            <strong>Note:</strong> OTA updates require the RPi OTA Updater service to be running on the Raspberry Pi.
-                        </p>
+                    </div>
+
+                    <!-- How It Works -->
+                    <div class="section-card" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));">
+                        <h2 class="section-title" style="color: #22c55e;">ℹ️ How It Works</h2>
+                        <div style="font-size: 14px; color: var(--text-secondary); line-height: 1.8;">
+                            <p style="margin: 0 0 8px 0;"><strong>1.</strong> Push your code changes to GitHub (<code>git push origin main</code>)</p>
+                            <p style="margin: 0 0 8px 0;"><strong>2.</strong> Select the ESP32 connected to the RPi above</p>
+                            <p style="margin: 0 0 8px 0;"><strong>3.</strong> Click <strong>"Git Pull & Restart"</strong></p>
+                            <p style="margin: 0;"><strong>4.</strong> RPi will run <code>git pull</code> and restart the dashboard automatically</p>
+                        </div>
                     </div>
 
                     <!-- RPi Status Log -->
                     <div class="section-card">
-                        <h2 class="section-title">Update Log</h2>
+                        <h2 class="section-title">📋 Update Log</h2>
                         <div id="rpi-status-log" class="status-log">
-                            <div class="log-entry info">Ready for RPi dashboard updates...</div>
-                        </div>
-                    </div>
-
-                    <!-- Upload New Release -->
-                    <div class="section-card">
-                        <h2 class="section-title">Upload New Release</h2>
-                        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
-                            Upload a Flutter bundle (.tar.gz) to create a new GitHub release
-                        </p>
-                        <div class="file-upload-area" id="rpi-bundle-upload-area">
-                            <input type="file" id="rpi-bundle-input" accept=".tar.gz,.tgz,.zip" style="display: none;">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 16px; opacity: 0.5;">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                <polyline points="17 8 12 3 7 8"></polyline>
-                                <line x1="12" y1="3" x2="12" y2="15"></line>
-                            </svg>
-                            <p style="margin: 0; font-weight: 600;" id="rpi-bundle-status">Click to upload or drag and drop</p>
-                            <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.7;">Flutter bundle archive (.tar.gz)</p>
-                        </div>
-                        <div style="display: flex; gap: 12px; align-items: center; margin-top: 12px;">
-                            <input type="text" id="rpi-version-input" placeholder="Version (e.g., v1.0.0 - leave empty for auto)" 
-                                   style="flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary);">
-                            <button class="btn btn-primary" onclick="rpiPushRelease()" id="rpi-push-btn" disabled>
-                                Push Release
-                            </button>
+                            <div class="log-entry info">Ready for RPi updates via git pull...</div>
                         </div>
                     </div>
                 </div><!-- End RPi Content -->
@@ -1023,8 +1001,7 @@
             
             // Load data for the selected tab
             if (tab === 'rpi') {
-                loadRpiReleases();
-                checkRpiStatus();
+                loadRpiEspDevices();  // Load ESP32 devices for relay
             }
         }
         
@@ -1151,18 +1128,20 @@
             const progressBar = document.getElementById('rpi-update-progress');
             const progressBarInner = document.getElementById('rpi-progress-bar');
             
-            // Update indicator
+            // Update indicator color
             indicator.className = 'rpi-status-indicator';
-            if (status.status === 'online' || status.status === 'complete' || status.status === 'up_to_date') {
+            if (status.status === 'online' || status.status === 'complete' || status.status === 'up_to_date' || status.status === 'restarted') {
                 indicator.classList.add('online');
-            } else if (status.status === 'downloading' || status.status === 'updating' || status.status === 'starting' || status.status === 'extracting' || status.status === 'applying') {
+            } else if (status.status === 'pulling' || status.status === 'restarting' || status.status === 'starting' || status.status === 'checking') {
                 indicator.classList.add('updating');
             } else if (status.status === 'error') {
                 indicator.classList.add('error');
+            } else if (status.status === 'update_available') {
+                indicator.classList.add('updating');
             }
             
-            // Update version and message
-            version.textContent = `Version: ${status.current_version || 'unknown'}`;
+            // Update version (git commit hash)
+            version.textContent = `Git: ${status.current_version || 'unknown'}`;
             message.textContent = status.message || status.status || 'Unknown';
             
             // Update progress bar
@@ -1181,98 +1160,91 @@
             }
         }
         
-        async function rpiCheckUpdate() {
-            addRpiLog('info', 'Sending check update command to RPi...');
-            
+        // Load ESP32 devices for RPi relay dropdown
+        async function loadRpiEspDevices() {
             try {
-                const response = await fetch('/api/rpi-ota/check-update', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
+                const response = await fetch('/api/devices');
                 const data = await response.json();
                 
-                if (data.success) {
-                    addRpiLog('success', data.message);
-                } else {
-                    addRpiLog('error', data.error || 'Failed to send command');
+                const select = document.getElementById('rpi-esp-select');
+                select.innerHTML = '<option value="">-- Select ESP32 to relay commands --</option>';
+                
+                if (data.devices && data.devices.length > 0) {
+                    data.devices.forEach(device => {
+                        const option = document.createElement('option');
+                        option.value = device.id;
+                        option.textContent = `${device.name || device.id} (${device.status || 'unknown'})`;
+                        select.appendChild(option);
+                    });
                 }
             } catch (error) {
-                addRpiLog('error', `Error: ${error.message}`);
+                console.error('Failed to load ESP32 devices for RPi:', error);
             }
         }
         
-        async function rpiTriggerUpdate() {
-            const version = rpiSelectedVersion || 'latest';
-            addRpiLog('info', `Triggering OTA update to version: ${version}`);
+        // Send RPi OTA command through selected ESP32
+        async function sendRpiCommandViaEsp(command, version = 'latest') {
+            const espDeviceId = document.getElementById('rpi-esp-select').value;
+            
+            if (!espDeviceId) {
+                addRpiLog('error', 'Please select an ESP32 device to relay commands to RPi');
+                return false;
+            }
+            
+            addRpiLog('info', `Sending "${command}" via ESP32: ${espDeviceId}`);
             
             try {
-                const response = await fetch('/api/rpi-ota/trigger-update', {
+                const response = await fetch('/api/rpi-ota/via-esp', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ version: version })
+                    body: JSON.stringify({
+                        esp_device_id: espDeviceId,
+                        command: command,
+                        version: version
+                    })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    addRpiLog('success', data.message);
-                    addRpiLog('info', 'RPi will download and install the update. This may take a few minutes...');
-                    
-                    // Start polling for status updates
-                    startRpiStatusPolling();
+                    addRpiLog('success', `✓ Command sent to ESP32 → RPi`);
+                    return true;
                 } else {
-                    addRpiLog('error', data.error || 'Failed to trigger update');
+                    addRpiLog('error', data.error || 'Failed to send command via ESP32');
+                    return false;
                 }
             } catch (error) {
                 addRpiLog('error', `Error: ${error.message}`);
+                return false;
+            }
+        }
+        
+        async function rpiCheckUpdate() {
+            await sendRpiCommandViaEsp('check_update');
+        }
+        
+        async function rpiTriggerUpdate() {
+            addRpiLog('info', '🔄 Triggering git pull on RPi...');
+            
+            const success = await sendRpiCommandViaEsp('ota_update');
+            if (success) {
+                addRpiLog('info', 'RPi will run git pull and restart dashboard...');
             }
         }
         
         async function rpiRestart() {
-            addRpiLog('info', 'Sending restart command to RPi dashboard...');
-            
-            try {
-                const response = await fetch('/api/rpi-ota/restart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    addRpiLog('success', data.message);
-                } else {
-                    addRpiLog('error', data.error || 'Failed to send restart command');
-                }
-            } catch (error) {
-                addRpiLog('error', `Error: ${error.message}`);
-            }
+            await sendRpiCommandViaEsp('restart');
         }
         
         async function rpiRollback() {
             if (!confirm('Are you sure you want to rollback to the previous version?')) {
                 return;
             }
-            
-            addRpiLog('warning', 'Sending rollback command to RPi...');
-            
-            try {
-                const response = await fetch('/api/rpi-ota/rollback', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    addRpiLog('success', data.message);
-                } else {
-                    addRpiLog('error', data.error || 'Failed to send rollback command');
-                }
-            } catch (error) {
-                addRpiLog('error', `Error: ${error.message}`);
-            }
+            await sendRpiCommandViaEsp('rollback');
+        }
+        
+        async function checkRpiStatus() {
+            await sendRpiCommandViaEsp('status');
         }
         
         async function rpiPushRelease() {

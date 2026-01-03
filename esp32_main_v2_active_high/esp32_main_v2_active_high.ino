@@ -442,6 +442,7 @@ void recoverMqttLocal() {
     mqttLocal.subscribe(tProvWifi().c_str(), 1);
     mqttLocal.subscribe(tProvBroker().c_str(), 1);
     mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
+    mqttLocal.subscribe("almed/rpi/ota/status", 1);  // Subscribe to RPi OTA status
     selfHealing.mqttLocalHealthy = true;
     Serial.println("✓ [SELF-HEAL] Local MQTT reconnected!");
   }
@@ -1805,6 +1806,41 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     return; // Don't process other commands during OTA
   }
   
+  // Handle RPi OTA commands - relay to local MQTT for RPi
+  if (doc.containsKey("type") && doc["type"] == "rpi_ota") {
+    Serial.println("🍓 RPi OTA command detected - relaying to local MQTT...");
+    String rpiCommand = doc["command"].as<String>();
+    String rpiVersion = doc["version"] | "latest";
+    
+    // Create command for RPi OTA updater
+    StaticJsonDocument<256> rpiDoc;
+    rpiDoc["type"] = rpiCommand;  // check_update, ota_update, restart, rollback, status
+    rpiDoc["version"] = rpiVersion;
+    rpiDoc["timestamp"] = millis();
+    rpiDoc["from_esp"] = THINGNAME;
+    
+    char rpiPayload[256];
+    size_t rpiLen = serializeJson(rpiDoc, rpiPayload, sizeof(rpiPayload));
+    
+    // Publish to RPi OTA topic via local MQTT
+    if (mqttLocal.connected()) {
+      bool sent = mqttLocal.publish("almed/rpi/ota/command", (uint8_t*)rpiPayload, rpiLen, false);
+      if (sent) {
+        Serial.println("✓ RPi OTA command forwarded to local MQTT");
+        Serial.println("  Topic: almed/rpi/ota/command");
+        Serial.println("  Command: " + rpiCommand);
+        motorLogMsg("📡 RPi OTA: " + rpiCommand + " command sent");
+      } else {
+        Serial.println("❌ Failed to forward RPi OTA command");
+        motorLogMsg("❌ RPi OTA: Failed to send " + rpiCommand);
+      }
+    } else {
+      Serial.println("❌ Local MQTT not connected - cannot relay to RPi");
+      motorLogMsg("❌ RPi OTA: Local MQTT disconnected");
+    }
+    return;
+  }
+  
   // Handle motor timing provisioning
   if (doc.containsKey("m1_start")) { 
     M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL; 
@@ -2316,6 +2352,35 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   StaticJsonDocument<320> doc;
   if (deserializeJson(doc, payload, len)) return;
 
+  // Handle RPi OTA status - relay to AWS IoT
+  if (tStr == "almed/rpi/ota/status") {
+    Serial.println("🍓 RPi OTA Status received - relaying to AWS...");
+    
+    // Add ESP32 identifier and forward to AWS
+    StaticJsonDocument<512> awsDoc;
+    awsDoc["type"] = "rpi_ota_status";
+    awsDoc["esp_thing"] = THINGNAME;
+    awsDoc["site"] = SITE;
+    awsDoc["room"] = ROOM;
+    awsDoc["ahu"] = AHU;
+    awsDoc["rpi_status"] = doc["status"];
+    awsDoc["rpi_message"] = doc["message"];
+    awsDoc["rpi_version"] = doc["current_version"];
+    awsDoc["rpi_progress"] = doc["progress"];
+    awsDoc["ts"] = millis();
+    
+    char awsBuf[512];
+    size_t awsLen = serializeJson(awsDoc, awsBuf, sizeof(awsBuf));
+    
+    if (client.connected()) {
+      client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(awsBuf), awsLen, false);
+      Serial.println("✓ RPi OTA status forwarded to AWS IoT");
+    } else {
+      Serial.println("⚠️ AWS IoT not connected - RPi status not forwarded");
+    }
+    return;
+  }
+
   // Handle provisioning
   if (tStr == tProvWifi()){
     if (doc.containsKey("primary")){
@@ -2648,6 +2713,7 @@ void ensureMqtt(){
     mqttLocal.subscribe(tProvWifi().c_str(), 1);
     mqttLocal.subscribe(tProvBroker().c_str(), 1);
     mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
+    mqttLocal.subscribe("almed/rpi/ota/status", 1);  // Subscribe to RPi OTA status
     Serial.println("✓ Local MQTT connected");
     publishStateLocal();
   }
