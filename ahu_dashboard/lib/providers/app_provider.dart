@@ -7,9 +7,10 @@ import '../models/ahu_log.dart';
 import '../models/user_role.dart';
 import '../services/mqtt_service.dart';
 
-/// Main application state provider with optimized updates
+/// Main application state provider with optimized updates for RPi
 class AppProvider extends ChangeNotifier {
   Timer? _debounceTimer;
+  Timer? _stateDebounceTimer;
   MqttService? _mqttService;
   UserRole? _currentRole;
   final Map<String, AhuUnit> _ahuUnits = {};
@@ -22,6 +23,10 @@ class AppProvider extends ChangeNotifier {
   // Cache for frequently accessed data
   List<AhuUnit>? _cachedAhuUnits;
   bool _ahuUnitsChanged = true;
+  
+  // RPi Performance: Track if updates are pending to batch notifications
+  bool _hasPendingUpdates = false;
+  DateTime _lastNotify = DateTime.now();
 
   // Getters
   UserRole? get currentRole => _currentRole;
@@ -80,23 +85,23 @@ class AppProvider extends ChangeNotifier {
       notifyListeners();
     });
 
-    // Listen to telemetry updates (debounced for performance)
+    // Listen to telemetry updates (debounced for RPi performance)
     _mqttService!.telemetryStream.listen((entry) {
       final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
       _telemetryData[ahuId] = entry.value;
-      _debouncedNotify();
+      _debouncedNotify();  // 250ms debounce for RPi
     });
 
-    // Listen to state updates
+    // Listen to state updates (also debounced for RPi)
     _mqttService!.stateStream.listen((entry) {
       final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
       _stateData[ahuId] = entry.value;
-      notifyListeners();
+      _debouncedStateNotify();  // Debounced for RPi performance
     });
 
-    // Listen to log updates (throttled)
+    // Listen to log updates (heavily throttled for RPi)
     _mqttService!.logStream.listen((entry) {
       final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
@@ -104,19 +109,19 @@ class AppProvider extends ChangeNotifier {
       final logs = _logData.putIfAbsent(ahuId, () => []);
       logs.add(entry.value);
       
-      // Keep only last 500 logs (increased for better history)
-      if (logs.length > 500) {
+      // Keep only last 70 logs - FIFO (oldest gets deleted as new ones arrive)
+      while (logs.length > 70) {
         logs.removeAt(0);
       }
-      _debouncedNotify();
+      _debouncedNotify();  // Debounced for RPi
     });
 
-    // Listen to status updates
+    // Listen to status updates (debounced for RPi)
     _mqttService!.statusStream.listen((entry) {
       final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
       _statusData[ahuId] = entry.value;
-      notifyListeners();
+      _debouncedStateNotify();  // Debounced for RPi
     });
 
     final connected = await _mqttService!.connect();
@@ -129,10 +134,39 @@ class AppProvider extends ChangeNotifier {
     return parts.isNotEmpty ? parts[0] : topicData;
   }
 
-  /// Debounced notify to reduce UI rebuilds
+  /// Debounced notify to reduce UI rebuilds (optimized for RPi)
   void _debouncedNotify() {
+    _hasPendingUpdates = true;
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 100), notifyListeners);
+    // RPi Performance: Increased debounce from 100ms to 250ms
+    _debounceTimer = Timer(const Duration(milliseconds: 250), () {
+      if (_hasPendingUpdates) {
+        _hasPendingUpdates = false;
+        _lastNotify = DateTime.now();
+        notifyListeners();
+      }
+    });
+  }
+  
+  /// Debounced state notify (for critical state changes)
+  void _debouncedStateNotify() {
+    _stateDebounceTimer?.cancel();
+    // State updates need faster response but still debounced
+    _stateDebounceTimer = Timer(const Duration(milliseconds: 150), () {
+      _lastNotify = DateTime.now();
+      notifyListeners();
+    });
+  }
+  
+  /// Throttled notify - ensures minimum time between notifications
+  void _throttledNotify() {
+    final now = DateTime.now();
+    if (now.difference(_lastNotify).inMilliseconds > 300) {
+      _lastNotify = now;
+      notifyListeners();
+    } else {
+      _debouncedNotify();
+    }
   }
 
   /// Add AHU unit to monitor
@@ -338,6 +372,7 @@ class AppProvider extends ChangeNotifier {
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _stateDebounceTimer?.cancel();
     _mqttService?.dispose();
     super.dispose();
   }

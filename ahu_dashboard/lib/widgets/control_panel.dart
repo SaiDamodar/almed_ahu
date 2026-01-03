@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/ahu_state.dart';
 import '../providers/app_provider.dart';
 
-/// Control panel for AHU operations
+/// Control panel for AHU operations - optimized for RPi
 class ControlPanel extends StatelessWidget {
   final String ahuId;
   final AhuState? state;
@@ -21,25 +21,34 @@ class ControlPanel extends StatelessWidget {
     final isRunning = state?.run ?? false;
 
     return Card(
-      elevation: 4,
+      elevation: 2, // RPi: Reduced elevation
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16.0), // RPi: Reduced padding
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Control Panel',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            // RPi: Wrap each section in RepaintBoundary
+            RepaintBoundary(
+              child: _StartStopButton(ahuId: ahuId, isRunning: isRunning, isOnline: isOnline),
             ),
             const SizedBox(height: 20),
-            _StartStopButton(ahuId: ahuId, isRunning: isRunning, isOnline: isOnline),
-            const SizedBox(height: 24),
-            _SetpointControls(ahuId: ahuId, state: state, isOnline: isOnline),
-            const SizedBox(height: 24),
-            _FanControl(ahuId: ahuId, state: state, isOnline: isOnline),
-            const SizedBox(height: 24),
-            _CpModeControl(ahuId: ahuId, state: state, isOnline: isOnline),
+            RepaintBoundary(
+              child: _SetpointControls(ahuId: ahuId, state: state, isOnline: isOnline),
+            ),
+            const SizedBox(height: 20),
+            RepaintBoundary(
+              child: _FanControl(ahuId: ahuId, state: state, isOnline: isOnline),
+            ),
+            const SizedBox(height: 20),
+            RepaintBoundary(
+              child: _CpModeControl(ahuId: ahuId, state: state, isOnline: isOnline),
+            ),
           ],
         ),
       ),

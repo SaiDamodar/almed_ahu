@@ -21,6 +21,11 @@
 
 #define THINGNAME "AHU_ESP2" // Unique identifier for your device, change this
 
+// Build version for OTA verification
+#define BUILD_VERSION "v2.5.0-STABLE"
+#define BUILD_DATE "2026-01-02"
+#define BUILD_FEATURES "15s-CP-delay, deferred-writes, self-healing, fast-mqtt"
+
 // ============ GitHub OTA Configuration (Hardcoded) ============
 #define GITHUB_REPO_OWNER "ESPUpdaterzaid"
 #define GITHUB_REPO_NAME "almed-esp32-firmware"
@@ -28,7 +33,7 @@
 #define GITHUB_FIRMWARE_PATH "firmware/esp32_main.ino"
 // For GitHub Releases, specify the asset name (compiled .bin file)
 // If using direct file download, this is the path to the .ino file
-#define GITHUB_FIRMWARE_ASSET_NAME "esp32_main.ino.bin"  // Name of the .bin file in GitHub Releases
+#define GITHUB_FIRMWARE_ASSET_NAME "esp32_main_v2_active_high.ino.bin"  // Name of the .bin file in GitHub Releases
 // GitHub token - set this if you want to use private repos
 #define GITHUB_TOKEN "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"  // Your GitHub token for private repo access
 
@@ -203,6 +208,13 @@ float filtTempC = NAN, filtHum = NAN;
 unsigned long lastSensorAt = 0;
 const unsigned long SENSOR_PERIOD = 2000;
 
+// ---------- Significant Change Logging ----------
+// Log when temp or humidity changes by 5 units
+float lastLoggedTemp = NAN;
+float lastLoggedHum = NAN;
+const float TEMP_LOG_THRESHOLD = 5.0;  // Log when temp changes by 5°C
+const float HUM_LOG_THRESHOLD = 5.0;   // Log when humidity changes by 5%
+
 const float TEMP_JUMP_MAX = 12.0;
 const float HUM_JUMP_MAX  = 18.0;
 const float TEMP_FAIL_THRESHOLD = 5.0;
@@ -271,6 +283,11 @@ const unsigned long CP_MIN_OFF_MS = 5000;
 const unsigned long CP_MIN_ON_MS  = 3000;
 const unsigned long CP_CYCLE_DELAY_MS = 60UL * 1000UL;  // 1 minute delay between CP cycles
 unsigned long cpLastOnAt  = 0, cpLastOffAt = 0;
+
+// CP Switch Safety Delay - prevents both CPs from running during switch
+const unsigned long CP_SWITCH_DELAY_MS = 15000;  // 15 seconds delay when switching CPs
+unsigned long cpSwitchStartedAt = 0;  // When CP switch was initiated
+bool cpSwitchInProgress = false;  // True = waiting for switch delay
 
 bool   heatOn = false;
 float  humSet = 55.0;
@@ -398,25 +415,41 @@ void recoverWiFi() {
   Serial.println("✓ [SELF-HEAL] WiFi recovery initiated");
 }
 
-// MQTT Recovery - reconnects to broker without reset
+// MQTT Recovery - fast reconnection without reset
 void recoverMqttLocal() {
   Serial.println("🔧 [SELF-HEAL] Recovering Local MQTT...");
+  
+  esp_task_wdt_reset();
   
   if (mqttLocal.connected()) {
     mqttLocal.disconnect();
   }
-  delay(100);
+  delay(50);  // Shorter delay
   
   mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
   mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);
   mqttLocal.setCallback(onMqttMessageLocal);
-  mqttLocal.setSocketTimeout(3);
+  mqttLocal.setSocketTimeout(1);  // Fast timeout
+  
+  // Immediate reconnection attempt
+  String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
+  esp_task_wdt_reset();
+  bool ok = mqttLocal.connect(clientId.c_str(), MQTT_USER, MQTT_PASS, tStatus().c_str(), 1, true, "offline");
+  esp_task_wdt_reset();
+  
+  if (ok) {
+    mqttLocal.subscribe(tCmd().c_str(), 1);
+    mqttLocal.subscribe(tProvWifi().c_str(), 1);
+    mqttLocal.subscribe(tProvBroker().c_str(), 1);
+    mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
+    selfHealing.mqttLocalHealthy = true;
+    Serial.println("✓ [SELF-HEAL] Local MQTT reconnected!");
+  }
   
   selfHealing.lastMqttLocalRecovery = millis();
   selfHealing.mqttLocalFailCount = 0;
   selfHealing.totalRecoveries++;
-  
-  Serial.println("✓ [SELF-HEAL] Local MQTT recovery initiated");
+  lastMqttAttempt = millis();  // Reset retry timer
 }
 
 // Sensor Recovery - reinitializes sensors without reset
@@ -494,8 +527,8 @@ void performHealthCheck() {
     }
   }
   
-  // Check Local MQTT health
-  if (selfHealing.mqttLocalFailCount >= 10 && (now - selfHealing.lastMqttLocalRecovery > 120000)) {
+  // Check Local MQTT health - FAST recovery (5 failures or 30s disconnected)
+  if (selfHealing.mqttLocalFailCount >= 5 && (now - selfHealing.lastMqttLocalRecovery > 30000)) {
     Serial.printf("⚠️ [HEALTH] MQTT failures: %d - recovering\n", selfHealing.mqttLocalFailCount);
     recoverMqttLocal();
   }
@@ -789,11 +822,56 @@ void clearSystemState(){
   // Note: cpMode, cpActive, and onlineMode are NOT cleared - they persist across system stops
 }
 
-// ---------- Logging (Simplified - Serial only to avoid MQTT overload) ----------
+// ---------- Logging (Serial + MQTT to Dashboard) ----------
 void motorLogMsg(const String& s){ 
   Serial.println(s); 
   pushMotorHTML(s);
-  // MQTT logging disabled to keep connection stable
+  
+  // Also publish to dashboard via Local MQTT (non-blocking)
+  if (mqttLocal.connected()) {
+    StaticJsonDocument<256> logDoc;
+    logDoc["type"] = "log";
+    logDoc["msg"] = s;
+    logDoc["ts"] = millis();
+    char buf[256];
+    size_t n = serializeJson(logDoc, buf, sizeof(buf));
+    mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
+  }
+}
+
+// Check and log significant temperature/humidity changes (5 units)
+void checkAndLogEnvChanges() {
+  // Check temperature change
+  if (!isnan(filtTempC)) {
+    if (isnan(lastLoggedTemp)) {
+      // First reading - log it
+      lastLoggedTemp = filtTempC;
+      motorLogMsg("📊 Temp: " + String(filtTempC, 1) + "°C (initial)");
+    } else {
+      float tempDiff = filtTempC - lastLoggedTemp;
+      if (abs(tempDiff) >= TEMP_LOG_THRESHOLD) {
+        String direction = (tempDiff > 0) ? "↑" : "↓";
+        motorLogMsg("🌡️ Temp " + direction + String(abs(tempDiff), 1) + "°C → " + String(filtTempC, 1) + "°C");
+        lastLoggedTemp = filtTempC;
+      }
+    }
+  }
+  
+  // Check humidity change
+  if (!isnan(filtHum)) {
+    if (isnan(lastLoggedHum)) {
+      // First reading - log it
+      lastLoggedHum = filtHum;
+      motorLogMsg("📊 Humidity: " + String(filtHum, 1) + "% (initial)");
+    } else {
+      float humDiff = filtHum - lastLoggedHum;
+      if (abs(humDiff) >= HUM_LOG_THRESHOLD) {
+        String direction = (humDiff > 0) ? "↑" : "↓";
+        motorLogMsg("💧 Humidity " + direction + String(abs(humDiff), 1) + "% → " + String(filtHum, 1) + "%");
+        lastLoggedHum = filtHum;
+      }
+    }
+  }
 }
 
 // ---------- AQI Calculation (EPA PM2.5 Standard) ----------
@@ -971,15 +1049,30 @@ void controlCP(float t){
 
   unsigned long now = millis();
   
+  // CP SWITCH DELAY: Wait 5 seconds after switching before allowing new CP to turn on
+  if (cpSwitchInProgress) {
+    if (now - cpSwitchStartedAt >= CP_SWITCH_DELAY_MS) {
+      cpSwitchInProgress = false;
+      motorLogMsg("✓ CP switch delay complete - CP" + String(cpActive) + " ready");
+    } else {
+      // Still in delay period - don't turn on any CP
+      return;
+    }
+  }
+  
   // Dual CP auto-switch logic: switch every hour when both CPs are OFF
-  if (cpMode == CP_DUAL_AUTO && !cpOn && !cp2On) {
+  if (cpMode == CP_DUAL_AUTO && !cpOn && !cp2On && !cpSwitchInProgress) {
     if (cpLastSwitchAt == 0) {
       cpLastSwitchAt = now;
       cpActive = 1;
     } else if (now - cpLastSwitchAt >= CP_SWITCH_INTERVAL_MS) {
+      int oldCp = cpActive;
       cpActive = (cpActive == 1) ? 2 : 1;
       cpLastSwitchAt = now;
-      motorLogMsg("CP auto-switched to CP" + String(cpActive));
+      cpSwitchStartedAt = now;
+      cpSwitchInProgress = true;
+      motorLogMsg("⏳ CP auto-switching: CP" + String(oldCp) + " → CP" + String(cpActive) + " (15s delay)");
+      return;  // Don't turn on new CP yet
     }
   }
   
@@ -997,7 +1090,7 @@ void controlCP(float t){
         motorLogMsg("CP1 ON (cooling)");
       } else if (cpOn && shouldBeOff){
         cpWrite(false); cpOn = false; cpLastOffAt = now;
-        motorLogMsg("CP1 OFF (reached temp setpoint) - 1 min delay before next cycle");
+        motorLogMsg("CP1 OFF (temp OK)");
       }
     } else {
       if (!cp2On && shouldBeOn){
@@ -1005,7 +1098,7 @@ void controlCP(float t){
         motorLogMsg("CP2 ON (cooling)");
       } else if (cp2On && shouldBeOff){
         cp2Write(false); cp2On = false; cpLastOffAt = now;
-        motorLogMsg("CP2 OFF (reached temp setpoint) - 1 min delay before next cycle");
+        motorLogMsg("CP2 OFF (temp OK)");
       }
     }
   } else {
@@ -1016,7 +1109,7 @@ void controlCP(float t){
         motorLogMsg("CP1 ON (cooling)");
       } else if (cpOn && shouldBeOff){
         cpWrite(false); cpOn = false; cpLastOffAt = now;
-        motorLogMsg("CP1 OFF (reached temp setpoint) - 1 min delay before next cycle");
+        motorLogMsg("CP1 OFF (temp OK)");
       }
     } else {
       if (!cp2On && shouldBeOn){
@@ -1024,7 +1117,7 @@ void controlCP(float t){
         motorLogMsg("CP2 ON (cooling)");
       } else if (cp2On && shouldBeOff){
         cp2Write(false); cp2On = false; cpLastOffAt = now;
-        motorLogMsg("CP2 OFF (reached temp setpoint) - 1 min delay before next cycle");
+        motorLogMsg("CP2 OFF (temp OK)");
       }
     }
   }
@@ -1716,6 +1809,13 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     Serial.println("✓ M2 delay updated: " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
   }
 
+  // Rate limiting for rapid changes - prevents flash write crashes
+  static unsigned long lastAwsPrefWrite = 0;
+  static bool pendingAwsPrefWrite = false;
+  unsigned long now = millis();
+  
+  esp_task_wdt_reset();  // Feed watchdog at start
+  
   bool stateChanged = false;
   
   if (doc.containsKey("start") && doc["start"] == true)  { 
@@ -1734,19 +1834,22 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     stateChanged = true;
   }
 
+  // SAFE setpoint handling - NO immediate flash write
   if (doc.containsKey("setpoint")){
     float sp = doc["setpoint"];
     if (sp >= 1 && sp <= 100){
-      tempSet = sp; prefs.putFloat("tempSet", tempSet);
-      Serial.println("✓ Temp setpoint: " + String(tempSet,1) + "°C");
+      tempSet = sp;
+      pendingAwsPrefWrite = true;
+      Serial.println("✓ Temp: " + String(tempSet,1) + "°C");
       stateChanged = true;
     }
   }
   if (doc.containsKey("humset")){
     float hs = doc["humset"];
     if (hs >= 10 && hs <= 90){
-      humSet = hs; prefs.putFloat("humSet", humSet);
-      Serial.println("✓ Humidity setpoint: " + String(humSet,1) + "%");
+      humSet = hs;
+      pendingAwsPrefWrite = true;
+      Serial.println("✓ Hum: " + String(humSet,1) + "%");
       stateChanged = true;
     }
   }
@@ -1754,22 +1857,19 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     int fanCmd = doc["fan"];
     if (fanCmd >= 0 && fanCmd <= 3){
       if (!runState && fanCmd != 0){
-        Serial.println("❌ Fan rejected: system not running");
+        Serial.println("❌ Fan rejected");
       } else {
-        Serial.println("✓ Fan speed: " + String(fanCmd));
         setFanSpeed((FanSpeed)fanCmd);
-        prefs.putInt("fanSpeed", fanCmd);
+        pendingAwsPrefWrite = true;
         stateChanged = true;
       }
-    } else {
-      Serial.println("❌ Invalid fan speed: " + String(fanCmd));
     }
   }
   
   // Handle fanToggle
   if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
     if (!runState){
-      Serial.println("❌ Fan toggle rejected: system not running");
+      Serial.println("❌ Fan toggle rejected");
     } else {
       FanSpeed newSpeed;
       switch(fanSpeed){
@@ -1779,11 +1879,21 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
         case FAN_HIGH: newSpeed = FAN_LOW;  break;
         default:       newSpeed = FAN_LOW;  break;
       }
-      Serial.println("✓ Fan toggle: " + String((int)fanSpeed) + " → " + String((int)newSpeed));
       setFanSpeed(newSpeed);
-      prefs.putInt("fanSpeed", (int)newSpeed);
+      pendingAwsPrefWrite = true;
       stateChanged = true;
     }
+  }
+  
+  // DEFERRED preference write - only if 2+ seconds since last write
+  if (pendingAwsPrefWrite && (now - lastAwsPrefWrite > 2000)) {
+    esp_task_wdt_reset();
+    prefs.putFloat("tempSet", tempSet);
+    prefs.putFloat("humSet", humSet);
+    prefs.putInt("fanSpeed", (int)fanSpeed);
+    lastAwsPrefWrite = now;
+    pendingAwsPrefWrite = false;
+    esp_task_wdt_reset();
   }
   
   // Handle mode switching (online/offline)
@@ -1792,8 +1902,8 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     bool newMode = (modeStr == "online");
     if (newMode != onlineMode) {
       onlineMode = newMode;
-      prefs.putBool("onlineMode", onlineMode);
-      Serial.println("✓ Operation mode changed: " + String(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)"));
+      // Defer preference write
+      Serial.println("✓ Mode: " + String(onlineMode ? "ONLINE" : "OFFLINE"));
       if (!onlineMode) {
         // Disconnect AWS IoT when switching to offline mode
         if (client.connected()) {
@@ -2067,6 +2177,7 @@ void handleOTAUpdate(JsonDocument& doc) {
     prefs.putString("ota_version", latestVersion);
     prefs.putString("ota_commit", commitSha);
     prefs.putString("ota_updated_at", String(millis() / 1000));
+    prefs.putBool("ota_just_completed", true);  // Flag for verification messages on next boot
     publishOTAStatus("success", "OTA update completed. Version: " + latestVersion + ". Rebooting...");
     delay(2000);
     ESP.restart();
@@ -2219,31 +2330,53 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   // Handle commands (same as AWS)
   bool stateChanged = false;
   
-  if (doc.containsKey("start") && doc["start"] == true)  { Serial.println("→ START (Local)"); startSystem(); stateChanged = true; }
-  else if (doc.containsKey("stop") && doc["stop"] == true)   { Serial.println("→ STOP (Local)"); stopSystem(); stateChanged = true; }
-  else if (doc.containsKey("toggle") && doc["toggle"] == true) { Serial.println("→ TOGGLE (Local)"); toggleSystem(); stateChanged = true; }
+  // Rate limiting for rapid changes - prevents flash write crashes
+  static unsigned long lastPrefWrite = 0;
+  static bool pendingPrefWrite = false;
+  unsigned long now = millis();
+  
+  esp_task_wdt_reset();  // Feed watchdog at start of message handling
+  
+  if (doc.containsKey("start") && doc["start"] == true)  { Serial.println("→ START"); startSystem(); stateChanged = true; }
+  else if (doc.containsKey("stop") && doc["stop"] == true)   { Serial.println("→ STOP"); stopSystem(); stateChanged = true; }
+  else if (doc.containsKey("toggle") && doc["toggle"] == true) { Serial.println("→ TOGGLE"); toggleSystem(); stateChanged = true; }
 
+  // SAFE setpoint handling - NO immediate flash write (prevents crash on rapid changes)
   if (doc.containsKey("setpoint")){
     float sp = doc["setpoint"];
-    if (sp >= 1 && sp <= 100){ tempSet = sp; prefs.putFloat("tempSet", tempSet); Serial.println("✓ Temp setpoint: " + String(tempSet,1) + "°C (Local)"); stateChanged = true; }
+    if (sp >= 1 && sp <= 100){ 
+      tempSet = sp; 
+      pendingPrefWrite = true;  // Defer write
+      Serial.println("✓ Temp: " + String(tempSet,1) + "°C"); 
+      stateChanged = true; 
+    }
   }
   if (doc.containsKey("humset")){
     float hs = doc["humset"];
-    if (hs >= 10 && hs <= 90){ humSet = hs; prefs.putFloat("humSet", humSet); Serial.println("✓ Humidity setpoint: " + String(humSet,1) + "% (Local)"); stateChanged = true; }
+    if (hs >= 10 && hs <= 90){ 
+      humSet = hs; 
+      pendingPrefWrite = true;  // Defer write
+      Serial.println("✓ Hum: " + String(humSet,1) + "%"); 
+      stateChanged = true; 
+    }
   }
   if (doc.containsKey("fan")){
     int fanCmd = doc["fan"];
     if (fanCmd >= 0 && fanCmd <= 3){
-      if (!runState && fanCmd != 0){ Serial.println("❌ Fan rejected (Local)"); }
-      else { Serial.println("✓ Fan speed: " + String(fanCmd) + " (Local)"); setFanSpeed((FanSpeed)fanCmd); prefs.putInt("fanSpeed", fanCmd); stateChanged = true; }
+      if (!runState && fanCmd != 0){ Serial.println("❌ Fan rejected"); }
+      else { 
+        setFanSpeed((FanSpeed)fanCmd); 
+        pendingPrefWrite = true;
+        stateChanged = true; 
+      }
     }
   }
   
-  // Handle fanToggle (cycle through LOW → MED → HIGH → LOW, skip OFF when running)
+  // Handle fanToggle
   if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
     if (!runState){
-      Serial.println("❌ Fan toggle rejected: system not running (Local)");
-      } else {
+      Serial.println("❌ Fan toggle rejected");
+    } else {
       FanSpeed newSpeed;
       switch(fanSpeed){
         case FAN_OFF:
@@ -2252,11 +2385,23 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
         case FAN_HIGH: newSpeed = FAN_LOW;  break;
         default:       newSpeed = FAN_LOW;  break;
       }
-      Serial.println("✓ Fan toggle (Local): " + String((int)fanSpeed) + " → " + String((int)newSpeed));
       setFanSpeed(newSpeed);
-      prefs.putInt("fanSpeed", (int)newSpeed);
+      pendingPrefWrite = true;
       stateChanged = true;
     }
+  }
+  
+  // DEFERRED preference write - only if 2+ seconds since last write
+  if (pendingPrefWrite && (now - lastPrefWrite > 2000)) {
+    esp_task_wdt_reset();
+    prefs.putFloat("tempSet", tempSet);
+    prefs.putFloat("humSet", humSet);
+    prefs.putInt("fanSpeed", (int)fanSpeed);
+    prefs.putInt("cpMode", (int)cpMode);
+    prefs.putInt("cpActive", cpActive);
+    lastPrefWrite = now;
+    pendingPrefWrite = false;
+    esp_task_wdt_reset();
   }
   
   // Handle mode switching (online/offline)
@@ -2265,7 +2410,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     bool newMode = (modeStr == "online");
     if (newMode != onlineMode) {
       onlineMode = newMode;
-      prefs.putBool("onlineMode", onlineMode);
+      // Defer preference write
       Serial.println("✓ Operation mode changed (Local): " + String(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)"));
       if (!onlineMode) {
         // Disconnect AWS IoT when switching to offline mode
@@ -2280,48 +2425,102 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     }
   }
   
-  // Handle CP mode switching (dual/single) - Local MQTT
+  // Handle CP mode switching (dual/single) - SAFE with 15s delay
   if (doc.containsKey("cpMode")){
     String cpModeStr = doc["cpMode"].as<String>();
     CpMode newCpMode = (cpModeStr == "dual") ? CP_DUAL_AUTO : CP_SINGLE;
     if (newCpMode != cpMode) {
+      Serial.println("🔄 CP MODE CHANGE START");
+      esp_task_wdt_reset();
+      
+      // Stop any running CP first
+      if (cpOn) {
+        Serial.println("  → Stopping CP1...");
+        cpWrite(false);
+        cpOn = false;
+        esp_task_wdt_reset();
+        delay(100);
+        esp_task_wdt_reset();
+      }
+      if (cp2On) {
+        Serial.println("  → Stopping CP2...");
+        cp2Write(false);
+        cp2On = false;
+        esp_task_wdt_reset();
+        delay(100);
+        esp_task_wdt_reset();
+      }
+      
+      // Ensure both are off
+      cpWrite(false);
+      cp2Write(false);
+      
+      delay(100);
+      esp_task_wdt_reset();
+      
       cpMode = newCpMode;
-      prefs.putInt("cpMode", (int)cpMode);
-      // When switching to dual mode, reset switch timer
       if (cpMode == CP_DUAL_AUTO) {
         cpLastSwitchAt = millis();
       }
-      // Turn off the inactive CP when switching modes
-      if (cpActive == 1 && cpMode == CP_SINGLE) {
-        cp2Write(false);
-        cp2On = false;
-      } else if (cpActive == 2 && cpMode == CP_SINGLE) {
-        cpWrite(false);
-        cpOn = false;
-      }
-      Serial.println("✓ CP mode changed (Local): " + String(cpMode == CP_DUAL_AUTO ? "DUAL (auto-switch every hour)" : "SINGLE (CP" + String(cpActive) + " only)"));
+      
+      cpSwitchStartedAt = millis();
+      cpSwitchInProgress = true;
+      
+      Serial.print("✓ CP mode: ");
+      Serial.println(cpMode == CP_DUAL_AUTO ? "DUAL" : "SINGLE");
+      
       stateChanged = true;
+      esp_task_wdt_reset();
     }
   }
   
-  // Handle CP active selection (1 or 2) - only in single mode - Local MQTT
+  // Handle CP active selection (1 or 2) - SAFE switching with 15s delay
   if (doc.containsKey("cpActive")){
     int newCpActive = doc["cpActive"].as<int>();
-    if (newCpActive == 1 || newCpActive == 2) {
-      if (newCpActive != cpActive) {
-        // Turn off the old active CP
-        if (cpActive == 1) {
-          cpWrite(false);
-          cpOn = false;
-        } else {
-          cp2Write(false);
-          cp2On = false;
-        }
-        cpActive = newCpActive;
-        prefs.putInt("cpActive", cpActive);
-        Serial.println("✓ CP active changed to CP" + String(cpActive) + " (Local)");
-        stateChanged = true;
+    if ((newCpActive == 1 || newCpActive == 2) && newCpActive != cpActive) {
+      Serial.println("🔄 CP SWITCH START");
+      esp_task_wdt_reset();
+      
+      int oldCp = cpActive;
+      
+      // STEP 1: Stop the currently running CP first (if any)
+      if (oldCp == 1 && cpOn) {
+        Serial.println("  → Stopping CP1...");
+        cpWrite(false);
+        cpOn = false;
+        esp_task_wdt_reset();
+        delay(100);  // Let relay fully disengage
+        esp_task_wdt_reset();
+      } else if (oldCp == 2 && cp2On) {
+        Serial.println("  → Stopping CP2...");
+        cp2Write(false);
+        cp2On = false;
+        esp_task_wdt_reset();
+        delay(100);  // Let relay fully disengage
+        esp_task_wdt_reset();
       }
+      
+      // STEP 2: Ensure BOTH relays are off (safety)
+      cpWrite(false);
+      cp2Write(false);
+      cpOn = false;
+      cp2On = false;
+      
+      delay(100);  // Extra settling time
+      esp_task_wdt_reset();
+      
+      // STEP 3: Update state
+      cpActive = newCpActive;
+      cpSwitchStartedAt = millis();
+      cpSwitchInProgress = true;
+      
+      Serial.print("✓ CP switched: CP");
+      Serial.print(oldCp);
+      Serial.print(" → CP");
+      Serial.println(cpActive);
+      
+      stateChanged = true;
+      esp_task_wdt_reset();
     }
   }
   
@@ -2343,34 +2542,44 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     return; // Never reached, but good practice
   }
   
+  // Publish state with watchdog protection (Local MQTT handler)
   if (stateChanged) {
-    Serial.println("📤 Sending updated state...");
-    if (client.connected()) {
-      publishStateAWS();
-      publishTelemetryAWS();
-    }
+    esp_task_wdt_reset();
+    Serial.println("📤 Publishing state...");
+    
+    // Local MQTT first (faster, more reliable)
     if (mqttLocal.connected()) {
+      esp_task_wdt_reset();
       publishStateLocal();
-      publishTelemetryLocal();
+      esp_task_wdt_reset();
     }
+    
+    // AWS MQTT (optional, can be slow)
+    if (onlineMode && client.connected()) {
+      esp_task_wdt_reset();
+      publishStateAWS();
+      esp_task_wdt_reset();
+    }
+    
+    esp_task_wdt_reset();
   }
 }
 
 void ensureMqtt(){
-  // CRITICAL: Local MQTT is PRIMARY - works independently of AWS IoT
-  // Non-blocking reconnection (similar to WiFi) - no resets, system continues normally
+  // CRITICAL: Local MQTT is PRIMARY for dashboard - fast non-blocking reconnect
   if(mqttLocal.connected()) return;
   if (WiFi.status()!=WL_CONNECTED) return;
 
   unsigned long now = millis();
-  // STABILITY: Reduced reconnection frequency from 2s to 15s
-  if(now - lastMqttAttempt < 15000) return;  // Rate limit to every 15 seconds
+  // AGGRESSIVE RECONNECTION: 1 second retry for minimal dashboard lag
+  // This is completely non-blocking - just returns if not time yet
+  if(now - lastMqttAttempt < 1000) return;
   lastMqttAttempt = now;
 
   mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
   mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);
   mqttLocal.setCallback(onMqttMessageLocal);
-  mqttLocal.setSocketTimeout(2);  // 2 second timeout
+  mqttLocal.setSocketTimeout(1);  // 1 second timeout - faster failure
 
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
   esp_task_wdt_reset();
@@ -2379,17 +2588,16 @@ void ensureMqtt(){
                          tStatus().c_str(), 1, true, "offline");
   esp_task_wdt_reset();
   if(ok){
-    publishStatusOnlineLocal();
+    selfHealing.mqttLocalHealthy = true;
+    selfHealing.mqttLocalFailCount = 0;
     mqttLocal.subscribe(tCmd().c_str(), 1);
     mqttLocal.subscribe(tProvWifi().c_str(), 1);
     mqttLocal.subscribe(tProvBroker().c_str(), 1);
     mqttLocal.subscribe(tProvMotorTimings().c_str(), 1);
     Serial.println("✓ Local MQTT connected");
     publishStateLocal();
-  } else {
-    // STABILITY: Quiet failure - just log once, don't spam
-    Serial.println("✗ Local MQTT failed (retry in 15s)");
   }
+  // Silent failure - will retry in 3s
 }
 
 
@@ -2722,6 +2930,68 @@ void setup()
   Serial.println("  → NO RESETS - system heals itself");
   Serial.println("========================================\n");
 
+  // OTA UPDATE VERIFICATION - Send 10 messages to dashboard logs
+  // This helps verify the update was successful
+  bool otaJustCompleted = prefs.getBool("ota_just_completed", false);
+  
+  // Also check if this is a new build version (different from stored)
+  String storedBuildVer = prefs.getString("build_version", "");
+  bool isNewBuild = (storedBuildVer != BUILD_VERSION);
+  
+  if (otaJustCompleted || isNewBuild) {
+    // Save current build version
+    prefs.putString("build_version", BUILD_VERSION);
+    
+    Serial.println("\n🎉 ========================================");
+    Serial.println("   OTA UPDATE VERIFICATION");
+    Serial.println("   Build: " + String(BUILD_VERSION));
+    Serial.println("   Date: " + String(BUILD_DATE));
+    Serial.println("   Features: " + String(BUILD_FEATURES));
+    Serial.println("   Sending 10 verification messages...");
+    Serial.println("==========================================\n");
+    
+    // Wait for WiFi and MQTT to connect first (up to 10 seconds)
+    unsigned long waitStart = millis();
+    while (!mqttLocal.connected() && (millis() - waitStart < 10000)) {
+      esp_task_wdt_reset();
+      if (WiFi.status() == WL_CONNECTED) {
+        ensureMqtt();
+      }
+      delay(500);
+    }
+    
+    // Send 10 verification messages to dashboard
+    for (int i = 1; i <= 10; i++) {
+      esp_task_wdt_reset();
+      String msg = "🎉 OTA VERIFIED [" + String(i) + "/10] " + String(BUILD_VERSION) + " | " + String(BUILD_FEATURES);
+      motorLogMsg(msg);
+      Serial.println(msg);
+      
+      // Also publish directly to log topic
+      if (mqttLocal.connected()) {
+        StaticJsonDocument<384> logDoc;
+        logDoc["type"] = "ota_verify";
+        logDoc["msg"] = msg;
+        logDoc["num"] = i;
+        logDoc["version"] = BUILD_VERSION;
+        logDoc["date"] = BUILD_DATE;
+        logDoc["features"] = BUILD_FEATURES;
+        char buf[384];
+        size_t n = serializeJson(logDoc, buf, sizeof(buf));
+        mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
+        mqttLocal.loop();  // Process immediately
+      }
+      delay(500);  // 500ms between messages
+    }
+    
+    // Clear the OTA flag so we don't send again on next reboot
+    prefs.putBool("ota_just_completed", false);
+    
+    Serial.println("\n✅ OTA verification complete - 10 messages sent");
+    Serial.println("   Build: " + String(BUILD_VERSION));
+    Serial.println("==========================================\n");
+  }
+
   lastLoopTime = millis();
 }
 
@@ -2783,14 +3053,14 @@ void loop()
       // WiFi still down - increment failure counter
       selfHealing.wifiFailCount++;
       
-      // Let self-healing system handle recovery (not here)
-      // Just do basic reconnection attempt every 30s
+      // Fast WiFi reconnection - 10 second retry (non-blocking)
       static unsigned long lastWifiReconnectAttempt = 0;
-      if (now - lastWifiReconnectAttempt > 30000) {
+      if (now - lastWifiReconnectAttempt > 10000) {
         lastWifiReconnectAttempt = now;
         WiFi.disconnect(false, false);
-        delay(50);
+        // No delay - let reconnect happen in background
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        Serial.println("📡 WiFi: Reconnecting in background...");
       }
     }
   }
@@ -2879,6 +3149,9 @@ void loop()
   } else if (useSHT45) {
     readSensorIfDue();  // Only SHT45 available
   }
+  
+  // Log significant environmental changes (±5°C or ±5% humidity)
+  checkAndLogEnvChanges();
   
   // Periodic sensor hot-swap detection (check if NEW sensor type connected)
   // Only reset if a DIFFERENT sensor type is attached (not when same type reconnected)

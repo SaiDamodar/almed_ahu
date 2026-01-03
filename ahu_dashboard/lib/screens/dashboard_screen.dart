@@ -360,7 +360,10 @@ class _AhuCardsList extends StatelessWidget {
               spacing: isSmallScreen ? 10 : 16,
               runSpacing: isSmallScreen ? 10 : 16,
               alignment: WrapAlignment.center,
-              children: ahus.map((ahu) => _ModernAhuCard(ahu: ahu, isSmallScreen: isSmallScreen)).toList(),
+              // RPi Performance: Wrap each card in RepaintBoundary
+              children: ahus.map((ahu) => RepaintBoundary(
+                child: _ModernAhuCard(ahu: ahu, isSmallScreen: isSmallScreen),
+              )).toList(),
             ),
           ),
         );

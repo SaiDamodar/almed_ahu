@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
 import 'dart:io';
 import 'package:provider/provider.dart';
 import 'providers/app_provider.dart';
@@ -8,8 +9,25 @@ import 'providers/theme_provider.dart';
 import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
 
+/// Detect if running on Raspberry Pi for performance optimizations
+bool get isRaspberryPi {
+  if (!Platform.isLinux) return false;
+  try {
+    final result = File('/proc/cpuinfo').readAsStringSync();
+    return result.contains('Raspberry') || result.contains('BCM');
+  } catch (e) {
+    return false;
+  }
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // RPi Performance: Disable debug painting and checkerboards
+  debugPaintSizeEnabled = false;
+  debugPaintBaselinesEnabled = false;
+  debugPaintLayerBordersEnabled = false;
+  debugRepaintRainbowEnabled = false;
   
   // Enable fullscreen mode on launch
   SystemChrome.setEnabledSystemUIMode(

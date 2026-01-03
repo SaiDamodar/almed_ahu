@@ -1,21 +1,30 @@
 import 'package:flutter/material.dart';
 import '../models/ahu_log.dart';
 
-/// Widget to display system logs
+/// Widget to display system logs - optimized for RPi
 class LogViewer extends StatelessWidget {
   final List<AhuLog> logs;
+  
+  // Display all stored logs (max 70 in memory)
+  static const int _maxDisplayedLogs = 70;
 
   const LogViewer({super.key, required this.logs});
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // RPi Performance: Only show last 50 logs
+    final displayLogs = logs.length > _maxDisplayedLogs 
+        ? logs.sublist(logs.length - _maxDisplayedLogs) 
+        : logs;
+    
     return Card(
-      elevation: 4,
+      elevation: 2, // RPi: Reduced elevation for performance
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16.0), // Reduced padding
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -25,27 +34,27 @@ class LogViewer extends StatelessWidget {
                 const Text(
                   'System Logs',
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 Text(
-                  '${logs.length} entries',
+                  '${displayLogs.length}/${logs.length}',
                   style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey.shade600,
+                    fontSize: 12,
+                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Container(
-              height: 300,
+              height: 250, // RPi: Reduced height
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
+                color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: logs.isEmpty
+              child: displayLogs.isEmpty
                   ? const Center(
                       child: Text(
                         'No logs available',
@@ -55,10 +64,15 @@ class LogViewer extends StatelessWidget {
                   : ListView.builder(
                       reverse: true, // Show newest first
                       padding: const EdgeInsets.all(8),
-                      itemCount: logs.length,
+                      itemCount: displayLogs.length,
+                      // RPi Performance: Limit cache extent
+                      cacheExtent: 100,
+                      // RPi Performance: Add key for efficient rebuilds
                       itemBuilder: (context, index) {
-                        final log = logs[logs.length - 1 - index];
-                        return _buildLogEntry(log);
+                        final log = displayLogs[displayLogs.length - 1 - index];
+                        return RepaintBoundary(
+                          child: _LogEntry(log: log, isDark: isDark),
+                        );
                       },
                     ),
             ),
@@ -67,57 +81,67 @@ class LogViewer extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildLogEntry(AhuLog log) {
-    Color levelColor;
-    IconData levelIcon;
+/// Separate widget for log entry - optimized for RPi
+class _LogEntry extends StatelessWidget {
+  final AhuLog log;
+  final bool isDark;
+  
+  const _LogEntry({required this.log, required this.isDark});
 
-    switch (log.lvl.toUpperCase()) {
-      case 'ERROR':
-        levelColor = Colors.red;
-        levelIcon = Icons.error;
-        break;
-      case 'WARN':
-        levelColor = Colors.orange;
-        levelIcon = Icons.warning;
-        break;
-      default:
-        levelColor = Colors.blue;
-        levelIcon = Icons.info;
-    }
+  @override
+  Widget build(BuildContext context) {
+    final levelColor = _getLevelColor(log.lvl);
+    final levelIcon = _getLevelIcon(log.lvl);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            levelIcon,
-            size: 16,
-            color: levelColor,
-          ),
-          const SizedBox(width: 8),
+          Icon(levelIcon, size: 14, color: levelColor),
+          const SizedBox(width: 6),
           Text(
             log.formattedTime,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 11,
               fontFamily: 'monospace',
-              color: Colors.grey.shade700,
+              color: isDark ? Colors.grey.shade500 : Colors.grey.shade700,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Expanded(
             child: Text(
               log.msg,
-              style: const TextStyle(
-                fontSize: 12,
+              style: TextStyle(
+                fontSize: 11,
                 fontFamily: 'monospace',
+                color: isDark ? Colors.white70 : Colors.black87,
               ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
       ),
     );
+  }
+  
+  static Color _getLevelColor(String level) {
+    switch (level.toUpperCase()) {
+      case 'ERROR': return Colors.red;
+      case 'WARN': return Colors.orange;
+      default: return Colors.blue;
+    }
+  }
+  
+  static IconData _getLevelIcon(String level) {
+    switch (level.toUpperCase()) {
+      case 'ERROR': return Icons.error;
+      case 'WARN': return Icons.warning;
+      default: return Icons.info;
+    }
   }
 }
 
