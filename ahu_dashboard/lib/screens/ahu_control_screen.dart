@@ -163,15 +163,17 @@ class _AhuInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    return Selector<AppProvider, ({String name, bool isOnline, bool isRunning})>(
+    return Selector<AppProvider, ({String name, bool isOnline, bool isRunning, bool isCloudConnected})>(
       selector: (_, provider) {
         final ahu = provider.ahuUnits.firstWhere((a) => a.id == ahuId);
         final status = provider.getStatus(ahuId);
         final state = provider.getState(ahuId);
+        final awsConnected = provider.isAwsConnected(ahuId);
         return (
           name: ahu.name,
           isOnline: status == 'online',
           isRunning: state?.run ?? false,
+          isCloudConnected: awsConnected,
         );
       },
       builder: (context, data, _) {
@@ -198,9 +200,12 @@ class _AhuInfo extends StatelessWidget {
                   data.isOnline ? 'Online' : 'Offline',
                   style: theme.textTheme.bodyMedium,
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 // System Running Status
                 _RunningBadge(isRunning: data.isRunning),
+                const SizedBox(width: 8),
+                // Cloud Connection Status
+                _CloudBadge(isConnected: data.isCloudConnected),
               ],
             ),
           ],
@@ -244,6 +249,49 @@ class _RunningBadge extends StatelessWidget {
               fontSize: 11,
               fontWeight: FontWeight.bold,
               color: isRunning ? color : Colors.grey.shade600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CloudBadge extends StatelessWidget {
+  final bool isConnected;
+  
+  const _CloudBadge({required this.isConnected});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isConnected ? const Color(0xFF3B82F6) : Colors.grey;  // Blue when connected
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isConnected ? color : Colors.grey.shade400,
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isConnected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+            size: 14,
+            color: isConnected ? color : Colors.grey.shade600,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            isConnected ? 'CLOUD' : 'OFFLINE',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: isConnected ? color : Colors.grey.shade600,
               letterSpacing: 0.5,
             ),
           ),

@@ -23,6 +23,7 @@ class MqttService {
   final _logController = StreamController<MapEntry<String, AhuLog>>.broadcast();
   final _statusController = StreamController<MapEntry<String, String>>.broadcast();
   final _connectionController = StreamController<bool>.broadcast();
+  final _awsStatusController = StreamController<MapEntry<String, bool>>.broadcast();
 
   // Public streams
   Stream<MapEntry<String, AhuTelemetry>> get telemetryStream => _telemetryController.stream;
@@ -30,6 +31,7 @@ class MqttService {
   Stream<MapEntry<String, AhuLog>> get logStream => _logController.stream;
   Stream<MapEntry<String, String>> get statusStream => _statusController.stream;
   Stream<bool> get connectionStream => _connectionController.stream;
+  Stream<MapEntry<String, bool>> get awsStatusStream => _awsStatusController.stream;
 
   bool _isConnected = false;
   bool get isConnected => _isConnected;
@@ -308,6 +310,20 @@ class MqttService {
         _statusController.add(MapEntry(topicData, payloadString));
         // Log status updates
         _addLogEntry(topicData, now, 'INFO', '[Status] $payloadString');
+      } else if (topic.endsWith('/aws_status')) {
+        // Handle AWS IoT connection status from ESP32
+        try {
+          final data = jsonDecode(payloadString) as Map<String, dynamic>;
+          final connected = data['connected'] as bool? ?? false;
+          _awsStatusController.add(MapEntry(topicData, connected));
+          debugPrint('MQTT: AWS status received from $ahuId: ${connected ? "CONNECTED" : "DISCONNECTED"}');
+          
+          // Log to dashboard
+          final statusMsg = connected ? '☁️ Cloud connected (AWS IoT)' : '⚠️ Cloud disconnected';
+          _addLogEntry(topicData, now, connected ? 'INFO' : 'WARN', statusMsg);
+        } catch (e) {
+          debugPrint('MQTT: Error parsing aws_status: $e');
+        }
       } else {
         // Capture any other messages from AHU topics as logs
         _addLogEntry(topicData, now, 'INFO', '[MQTT] $topic: ${payloadString.length > 100 ? payloadString.substring(0, 100) + "..." : payloadString}');
@@ -366,5 +382,6 @@ class MqttService {
     _logController.close();
     _statusController.close();
     _connectionController.close();
+    _awsStatusController.close();
   }
 }

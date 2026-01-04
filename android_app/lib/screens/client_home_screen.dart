@@ -15,8 +15,13 @@ class ClientHomeScreen extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: () async {
         final appProvider = context.read<AppProvider>();
+        
+        // First, refresh user data (catches new AHU assignments, access level changes)
+        await appProvider.refreshUserData();
+        
+        // Then refresh device statuses
         final user = appProvider.currentUser;
-        if (user != null) {
+        if (user != null && user.assignedAhuIds.isNotEmpty) {
           await Future.wait(
             user.assignedAhuIds.map((id) => appProvider.loadDeviceStatus(id)),
           );

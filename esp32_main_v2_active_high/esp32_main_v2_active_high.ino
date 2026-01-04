@@ -285,7 +285,8 @@ const unsigned long CP_CYCLE_DELAY_MS = 60UL * 1000UL;  // 1 minute delay betwee
 unsigned long cpLastOnAt  = 0, cpLastOffAt = 0;
 
 // CP Switch Safety Delay - prevents both CPs from running during switch
-const unsigned long CP_SWITCH_DELAY_MS = 15000;  // 15 seconds delay when switching CPs
+// HOSPITAL SAFETY: 90 seconds (1.5 min) for compressor pressure equalization
+const unsigned long CP_SWITCH_DELAY_MS = 90000;  // 90 seconds delay when switching CPs
 unsigned long cpSwitchStartedAt = 0;  // When CP switch was initiated
 bool cpSwitchInProgress = false;  // True = waiting for switch delay
 
@@ -829,12 +830,20 @@ void motorLogMsg(const String& s){
   pushMotorHTML(s);
   
   // Also publish to dashboard via Local MQTT (non-blocking, watchdog protected)
-  if (mqttLocal.connected()) {
+  // SAFETY: Only publish if MQTT is healthy and not during critical operations
+  static unsigned long lastMqttLogAttempt = 0;
+  unsigned long now = millis();
+  
+  // Rate limit MQTT log publishing to max once per 100ms to prevent flooding
+  if (mqttLocal.connected() && (now - lastMqttLogAttempt > 100)) {
+    lastMqttLogAttempt = now;
     esp_task_wdt_reset();
+    
     StaticJsonDocument<256> logDoc;
     logDoc["type"] = "log";
     logDoc["msg"] = s;
-    logDoc["ts"] = millis();
+    logDoc["ts"] = now / 1000;  // Seconds since boot
+    
     // Add log level based on message content
     if (s.indexOf("ERROR") >= 0 || s.indexOf("FAILED") >= 0) {
       logDoc["lvl"] = "ERROR";
@@ -843,10 +852,18 @@ void motorLogMsg(const String& s){
     } else {
       logDoc["lvl"] = "INFO";
     }
+    
     char buf[256];
     size_t n = serializeJson(logDoc, buf, sizeof(buf));
-    mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
+    
+    // Publish with watchdog protection
     esp_task_wdt_reset();
+    bool published = mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
+    esp_task_wdt_reset();
+    
+    if (!published) {
+      Serial.println("⚠️ MQTT log publish failed (non-critical)");
+    }
   }
 }
 
@@ -1060,29 +1077,95 @@ void controlCP(float t){
 
   unsigned long now = millis();
   
-  // CP SWITCH DELAY: Wait 5 seconds after switching before allowing new CP to turn on
+  // CP SWITCH DELAY: Wait 90 seconds (1.5 min) after switching before allowing new CP to turn on
+  // This allows compressor pressure to equalize for safe restart
   if (cpSwitchInProgress) {
-    if (now - cpSwitchStartedAt >= CP_SWITCH_DELAY_MS) {
+    esp_task_wdt_reset();  // CRITICAL: Feed watchdog during delay
+    
+    unsigned long elapsed = now - cpSwitchStartedAt;
+    
+    if (elapsed >= CP_SWITCH_DELAY_MS) {
       cpSwitchInProgress = false;
-      motorLogMsg("✓ CP switch delay complete - CP" + String(cpActive) + " ready");
+      // Clear the flag in preferences (important for crash recovery)
+      prefs.putBool("cpSwitchInProgress", false);
+      
+      // Send completion message to dashboard
+      String completeMsg = "✅ CP SWITCH COMPLETE → CP" + String(cpActive) + " now active";
+      Serial.println(completeMsg);
+      motorLogMsg(completeMsg);
+      
     } else {
-      // Still in delay period - don't turn on any CP
+      // Still in delay period - don't turn on any CP, but keep watchdog fed
+      // Send countdown to dashboard every 5 seconds
+      static unsigned long lastSwitchLog = 0;
+      if (now - lastSwitchLog >= 5000) {
+        lastSwitchLog = now;
+        unsigned long remaining = (CP_SWITCH_DELAY_MS - elapsed) / 1000;
+        unsigned long mins = remaining / 60;
+        unsigned long secs = remaining % 60;
+        
+        String countdownMsg;
+        if (mins > 0) {
+          countdownMsg = "⏳ CP" + String(cpActive) + " starting in " + String(mins) + "m " + String(secs) + "s...";
+        } else {
+          countdownMsg = "⏳ CP" + String(cpActive) + " starting in " + String(secs) + "s...";
+        }
+        
+        Serial.println(countdownMsg);
+        motorLogMsg(countdownMsg);  // Send to dashboard system logs
+      }
       return;
     }
   }
   
-  // Dual CP auto-switch logic: switch every hour when both CPs are OFF
-  if (cpMode == CP_DUAL_AUTO && !cpOn && !cp2On && !cpSwitchInProgress) {
+  // Dual CP auto-switch logic: switch every hour
+  // FIXED: Now properly turns OFF current CP before switching
+  if (cpMode == CP_DUAL_AUTO && !cpSwitchInProgress) {
     if (cpLastSwitchAt == 0) {
       cpLastSwitchAt = now;
       cpActive = 1;
+      // Save initial state
+      prefs.putInt("cpActive", cpActive);
+      prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
     } else if (now - cpLastSwitchAt >= CP_SWITCH_INTERVAL_MS) {
+      esp_task_wdt_reset();
+      
       int oldCp = cpActive;
+      
+      // STEP 1: Force OFF any running CP first
+      if (cpOn) {
+        cpWrite(false);
+        cpOn = false;
+        cpLastOffAt = now;
+        Serial.println("CP1 forced OFF for auto-switch");
+      }
+      if (cp2On) {
+        cp2Write(false);
+        cp2On = false;
+        cpLastOffAt = now;
+        Serial.println("CP2 forced OFF for auto-switch");
+      }
+      
+      esp_task_wdt_reset();
+      
+      // STEP 2: Switch active CP
       cpActive = (cpActive == 1) ? 2 : 1;
       cpLastSwitchAt = now;
       cpSwitchStartedAt = now;
       cpSwitchInProgress = true;
-      motorLogMsg("⏳ CP auto-switching: CP" + String(oldCp) + " → CP" + String(cpActive) + " (15s delay)");
+      
+      // STEP 3: IMMEDIATELY save to preferences (critical for crash recovery)
+      prefs.putInt("cpActive", cpActive);
+      prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
+      prefs.putBool("cpSwitchInProgress", true);
+      
+      esp_task_wdt_reset();
+      
+      // Send switch start message to dashboard
+      String switchMsg = "🔄 CP AUTO-SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (90s pressure equalization)";
+      Serial.println(switchMsg);
+      motorLogMsg(switchMsg);  // Send to dashboard system logs
+      
       return;  // Don't turn on new CP yet
     }
   }
@@ -2337,6 +2420,29 @@ void publishStatusOnlineLocal(){
   }
 }
 
+// Publish AWS connection status to Local MQTT (for dashboard cloud indicator)
+void publishAwsConnectionStatus(bool connected){
+  if(!mqttLocal.connected()) return;
+  
+  StaticJsonDocument<256> doc;
+  doc["type"] = "aws_status";
+  doc["connected"] = connected;
+  doc["thing"] = THINGNAME;
+  doc["site"] = SITE;
+  doc["room"] = ROOM;
+  doc["ahu"] = AHU;
+  doc["ts"] = millis() / 1000;
+  
+  char buf[256];
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  
+  // Publish to a dedicated AWS status topic
+  String awsStatusTopic = baseTopic() + "/aws_status";
+  mqttLocal.publish(awsStatusTopic.c_str(), (uint8_t*)buf, n, true);  // Retained message
+  
+  Serial.printf("☁️ AWS status published: %s\n", connected ? "CONNECTED" : "DISCONNECTED");
+}
+
 void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   Serial.println("\n========================================");
   Serial.print("📩 Local MQTT Message from: ");
@@ -2597,7 +2703,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   if (doc.containsKey("cpActive")){
     int newCpActive = doc["cpActive"].as<int>();
     if ((newCpActive == 1 || newCpActive == 2) && newCpActive != cpActive) {
-      Serial.println("🔄 CP SWITCH START");
+      Serial.println("🔄 CP SWITCH START (manual)");
       esp_task_wdt_reset();
       
       int oldCp = cpActive;
@@ -2624,6 +2730,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       cp2Write(false);
       cpOn = false;
       cp2On = false;
+      cpLastOffAt = millis();
       
       delay(100);  // Extra settling time
       esp_task_wdt_reset();
@@ -2633,10 +2740,14 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
       
-      Serial.print("✓ CP switched: CP");
-      Serial.print(oldCp);
-      Serial.print(" → CP");
-      Serial.println(cpActive);
+      // STEP 4: IMMEDIATELY save to preferences (critical for crash recovery)
+      prefs.putInt("cpActive", cpActive);
+      prefs.putBool("cpSwitchInProgress", true);
+      
+      // Send switch start message to dashboard
+      String switchMsg = "🔄 CP MANUAL SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (90s pressure equalization)";
+      Serial.println(switchMsg);
+      motorLogMsg(switchMsg);  // Send to dashboard system logs
       
       stateChanged = true;
       esp_task_wdt_reset();
@@ -2890,6 +3001,25 @@ void setup()
   cpMode = (CpMode)prefs.getInt("cpMode", CP_DUAL_AUTO);
   cpActive = prefs.getInt("cpActive", 1);
   cpLastSwitchAt = prefs.getULong("cpLastSwitchAt", 0);
+  
+  // CRASH RECOVERY: Check if we were in the middle of a CP switch
+  bool wasSwitchInProgress = prefs.getBool("cpSwitchInProgress", false);
+  if (wasSwitchInProgress) {
+    Serial.println("⚠️ RECOVERY: CP switch was in progress - completing it");
+    // Clear the switch flag and let the system start fresh with new cpActive
+    cpSwitchInProgress = false;
+    prefs.putBool("cpSwitchInProgress", false);
+    // Make sure both CPs are OFF
+    cpOn = false;
+    cp2On = false;
+    cpWrite(false);
+    cp2Write(false);
+    // Reset the switch timer so we don't immediately switch again
+    cpLastSwitchAt = millis();
+    prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
+    Serial.printf("  ✓ CP switch recovery complete - Active CP: CP%d\n", cpActive);
+  }
+  
   Serial.print("  CP mode: ");
   Serial.print(cpMode == CP_DUAL_AUTO ? "DUAL (auto-switch every hour)" : "SINGLE");
   Serial.print(" | Active CP: CP");
@@ -3203,36 +3333,63 @@ void loop()
   }
 
   // ========== SELF-HEALING: AWS IoT MQTT (Cloud) ==========
+  // Track AWS connection state changes
+  static bool wasAwsConnected = false;
+  
   if (onlineMode) {
-    if (client.connected()) {
+    bool isAwsConnected = client.connected();
+    
+    if (isAwsConnected) {
       client.loop();
       selfHealing.mqttAwsHealthy = true;
+      
+      // Just connected - notify dashboard
+      if (!wasAwsConnected) {
+        wasAwsConnected = true;
+        publishAwsConnectionStatus(true);
+      }
     } else {
       selfHealing.mqttAwsHealthy = false;
+      
+      // Just disconnected - notify dashboard
+      if (wasAwsConnected) {
+        wasAwsConnected = false;
+        publishAwsConnectionStatus(false);
+        Serial.println("⚠️ AWS IoT disconnected");
+      }
     }
     
-    // AWS reconnection with exponential backoff (self-healing)
+    // AWS reconnection - FAST reconnect for hospital reliability
     if (WiFi.status() == WL_CONNECTED && !client.connected()) {
-      // Longer retry intervals (2-5 minutes)
-      unsigned long retryInterval = (selfHealing.mqttAwsFailCount < 3) ? 120000 : 300000;
+      // Fast retry: 5 seconds for first 5 attempts, then 15 seconds
+      unsigned long retryInterval = (selfHealing.mqttAwsFailCount < 5) ? 5000 : 15000;
       
       if (now - selfHealing.lastMqttAwsRecovery > retryInterval) {
         selfHealing.lastMqttAwsRecovery = now;
         
         esp_task_wdt_reset();
+        Serial.println("📡 Connecting to AWS IoT...");
         
         if (client.connect(THINGNAME)) {
           esp_task_wdt_reset();
-          Serial.println("✓ [SELF-HEAL] AWS IoT reconnected");
+          Serial.println("✓ AWS IoT CONNECTED!");
           selfHealing.mqttAwsFailCount = 0;
           selfHealing.mqttAwsHealthy = true;
           selfHealing.totalRecoveries++;
           
           client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
           publishStatusOnline();
+          
+          // Notify dashboard of AWS connection status
+          publishAwsConnectionStatus(true);
+          motorLogMsg("☁️ Cloud connected (AWS IoT)");
         } else {
           esp_task_wdt_reset();
           selfHealing.mqttAwsFailCount++;
+          if (selfHealing.mqttAwsFailCount <= 3) {
+            Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n", 
+                          selfHealing.mqttAwsFailCount, retryInterval/1000);
+          }
         }
       }
     }
@@ -3336,8 +3493,11 @@ void loop()
     lastLocalStatus = 0;
   }
 
+  esp_task_wdt_reset();  // Feed watchdog before control functions
   controlCP(filtTempC);
+  esp_task_wdt_reset();  // Feed watchdog between control functions
   controlHeater(filtHum);
+  esp_task_wdt_reset();  // Feed watchdog after control functions
 
   // =================== SHUTDOWN SEQUENCE ===================
   if (shuttingDown){

@@ -18,6 +18,7 @@ class AppProvider extends ChangeNotifier {
   final Map<String, AhuState> _stateData = {};
   final Map<String, List<AhuLog>> _logData = {};
   final Map<String, String> _statusData = {};
+  final Map<String, bool> _awsStatusData = {};  // AWS cloud connection status per AHU
   bool _isConnected = false;
   
   // Cache for frequently accessed data
@@ -32,6 +33,9 @@ class AppProvider extends ChangeNotifier {
   UserRole? get currentRole => _currentRole;
   bool get isConnected => _isConnected;
   MqttService? get mqttService => _mqttService;
+  
+  /// Get AWS cloud connection status for specific AHU
+  bool isAwsConnected(String ahuId) => _awsStatusData[ahuId] ?? false;
   
   /// Get AHU units list with caching
   List<AhuUnit> get ahuUnits {
@@ -121,6 +125,14 @@ class AppProvider extends ChangeNotifier {
       final ahuId = _extractAhuId(entry.key);
       _ensureAhuRegistered(entry.key);
       _statusData[ahuId] = entry.value;
+      _debouncedStateNotify();  // Debounced for RPi
+    });
+
+    // Listen to AWS connection status updates
+    _mqttService!.awsStatusStream.listen((entry) {
+      final ahuId = _extractAhuId(entry.key);
+      _awsStatusData[ahuId] = entry.value;
+      debugPrint('AppProvider: AWS status for $ahuId: ${entry.value ? "CONNECTED" : "DISCONNECTED"}');
       _debouncedStateNotify();  // Debounced for RPi
     });
 

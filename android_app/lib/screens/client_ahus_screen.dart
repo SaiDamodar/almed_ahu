@@ -15,8 +15,13 @@ class ClientAhusScreen extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: () async {
         final appProvider = context.read<AppProvider>();
+        
+        // First, refresh user data (catches new AHU assignments, access level changes)
+        await appProvider.refreshUserData();
+        
+        // Then refresh device statuses for all assigned AHUs
         final user = appProvider.currentUser;
-        if (user != null) {
+        if (user != null && user.assignedAhuIds.isNotEmpty) {
           await Future.wait(
             user.assignedAhuIds.map((id) => appProvider.loadDeviceStatus(id)),
           );
@@ -34,25 +39,40 @@ class ClientAhusScreen extends StatelessWidget {
         },
         builder: (context, ahus, child) {
           if (ahus.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.air_rounded,
-                    size: ScreenUtils.getIconSize(context, 64),
-                    color: Colors.grey.shade400,
+            // Wrap in SingleChildScrollView for pull-to-refresh to work
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.air_rounded,
+                        size: ScreenUtils.getIconSize(context, 64),
+                        color: Colors.grey.shade400,
+                      ),
+                      SizedBox(height: ScreenUtils.getSpacing(context, 16)),
+                      Text(
+                        'No AHUs assigned',
+                        style: TextStyle(
+                          fontSize: ScreenUtils.getFontSize(context, 18),
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      SizedBox(height: ScreenUtils.getSpacing(context, 8)),
+                      Text(
+                        'Pull down to refresh',
+                        style: TextStyle(
+                          fontSize: ScreenUtils.getFontSize(context, 14),
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: ScreenUtils.getSpacing(context, 16)),
-                  Text(
-                    'No AHUs assigned',
-                    style: TextStyle(
-                      fontSize: ScreenUtils.getFontSize(context, 18),
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ],
+                ),
               ),
             );
           }

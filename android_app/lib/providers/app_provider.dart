@@ -785,17 +785,76 @@ class AppProvider extends ChangeNotifier {
   /// Start polling for user's assigned AHUs
   void _startUserPolling() {
     _stopPolling();
+    int pollCount = 0;
     _statusPollTimer = Timer.periodic(
       const Duration(seconds: 2), // Faster polling for better UX
-      (timer) {
+      (timer) async {
+        pollCount++;
         final user = _currentUser;
         if (user != null) {
+          // Load device statuses for assigned AHUs
           for (final ahuId in user.assignedAhuIds) {
             loadDeviceStatus(ahuId);
+          }
+          
+          // Every 15 polls (30 seconds), refresh user data to catch:
+          // - New AHU assignments from admin
+          // - Access level changes (operator/viewer)
+          if (pollCount % 15 == 0) {
+            await _refreshUserData();
           }
         }
       },
     );
+  }
+  
+  /// Refresh user data from server (catches admin changes)
+  Future<void> _refreshUserData() async {
+    if (_isAdmin || _currentUser == null) return;
+    
+    try {
+      final updatedUser = await _apiService.checkUserStatus();
+      if (updatedUser != null) {
+        final oldAhuIds = _currentUser!.assignedAhuIds.toSet();
+        final newAhuIds = updatedUser.assignedAhuIds.toSet();
+        final oldAccessLevel = _currentUser!.accessLevel;
+        final newAccessLevel = updatedUser.accessLevel;
+        
+        // Check if anything changed
+        bool hasChanges = oldAccessLevel != newAccessLevel ||
+            !oldAhuIds.containsAll(newAhuIds) ||
+            !newAhuIds.containsAll(oldAhuIds);
+        
+        if (hasChanges) {
+          debugPrint('User data changed! Updating...');
+          debugPrint('  Access Level: $oldAccessLevel → $newAccessLevel');
+          debugPrint('  AHUs: $oldAhuIds → $newAhuIds');
+          
+          _currentUser = updatedUser;
+          
+          // Load status for any newly assigned AHUs
+          final addedAhus = newAhuIds.difference(oldAhuIds);
+          for (final ahuId in addedAhus) {
+            await loadDeviceStatus(ahuId);
+          }
+          
+          // Remove status for unassigned AHUs
+          final removedAhus = oldAhuIds.difference(newAhuIds);
+          for (final ahuId in removedAhus) {
+            _deviceStatuses.remove(ahuId);
+          }
+          
+          notifyListeners(); // Immediate update for user changes
+        }
+      }
+    } catch (e) {
+      debugPrint('Error refreshing user data: $e');
+    }
+  }
+  
+  /// Force refresh user data (can be called manually)
+  Future<void> refreshUserData() async {
+    await _refreshUserData();
   }
   
   /// Force refresh all device statuses
