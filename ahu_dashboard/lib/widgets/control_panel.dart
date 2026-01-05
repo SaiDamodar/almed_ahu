@@ -7,18 +7,17 @@ import '../providers/app_provider.dart';
 class ControlPanel extends StatelessWidget {
   final String ahuId;
   final AhuState? state;
-  final bool isOnline;
 
   const ControlPanel({
     super.key,
     required this.ahuId,
     this.state,
-    required this.isOnline,
   });
 
   @override
   Widget build(BuildContext context) {
     final isRunning = state?.run ?? false;
+    final canSendCommands = context.watch<AppProvider>().canSendCommands;
 
     return Card(
       elevation: 2, // RPi: Reduced elevation
@@ -35,19 +34,19 @@ class ControlPanel extends StatelessWidget {
             const SizedBox(height: 16),
             // RPi: Wrap each section in RepaintBoundary
             RepaintBoundary(
-              child: _StartStopButton(ahuId: ahuId, isRunning: isRunning, isOnline: isOnline),
+              child: _StartStopButton(ahuId: ahuId, isRunning: isRunning, canSendCommands: canSendCommands),
             ),
             const SizedBox(height: 20),
             RepaintBoundary(
-              child: _SetpointControls(ahuId: ahuId, state: state, isOnline: isOnline),
+              child: _SetpointControls(ahuId: ahuId, state: state, canSendCommands: canSendCommands),
             ),
             const SizedBox(height: 20),
             RepaintBoundary(
-              child: _FanControl(ahuId: ahuId, state: state, isOnline: isOnline),
+              child: _FanControl(ahuId: ahuId, state: state, canSendCommands: canSendCommands),
             ),
             const SizedBox(height: 20),
             RepaintBoundary(
-              child: _CpModeControl(ahuId: ahuId, state: state, isOnline: isOnline),
+              child: _CpModeControl(ahuId: ahuId, state: state, canSendCommands: canSendCommands),
             ),
           ],
         ),
@@ -59,12 +58,12 @@ class ControlPanel extends StatelessWidget {
 class _StartStopButton extends StatelessWidget {
   final String ahuId;
   final bool isRunning;
-  final bool isOnline;
+  final bool canSendCommands;
   
   const _StartStopButton({
     required this.ahuId,
     required this.isRunning,
-    required this.isOnline,
+    required this.canSendCommands,
   });
 
   @override
@@ -73,7 +72,7 @@ class _StartStopButton extends StatelessWidget {
       width: double.infinity,
       height: 80,
       child: ElevatedButton.icon(
-        onPressed: isOnline
+        onPressed: canSendCommands
             ? () => context.read<AppProvider>().toggleAhu(ahuId)
             : null,
         icon: Icon(isRunning ? Icons.stop : Icons.play_arrow, size: 32),
@@ -94,12 +93,12 @@ class _StartStopButton extends StatelessWidget {
 class _SetpointControls extends StatelessWidget {
   final String ahuId;
   final AhuState? state;
-  final bool isOnline;
+  final bool canSendCommands;
   
   const _SetpointControls({
     required this.ahuId,
     required this.state,
-    required this.isOnline,
+    required this.canSendCommands,
   });
 
   @override
@@ -115,7 +114,7 @@ class _SetpointControls extends StatelessWidget {
             min: 15.0,
             max: 30.0,
             color: Colors.orange,
-            onChanged: isOnline
+            onChanged: canSendCommands
                 ? (value) => context.read<AppProvider>().setTemperature(ahuId, value)
                 : null,
           ),
@@ -130,7 +129,7 @@ class _SetpointControls extends StatelessWidget {
             min: 30.0,
             max: 80.0,
             color: Colors.blue,
-            onChanged: isOnline
+            onChanged: canSendCommands
                 ? (value) => context.read<AppProvider>().setHumidity(ahuId, value)
                 : null,
           ),
@@ -214,12 +213,12 @@ class _SetpointControl extends StatelessWidget {
 class _FanControl extends StatelessWidget {
   final String ahuId;
   final AhuState? state;
-  final bool isOnline;
+  final bool canSendCommands;
   
   const _FanControl({
     required this.ahuId,
     required this.state,
-    required this.isOnline,
+    required this.canSendCommands,
   });
 
   String _getFanSpeedLabel(int speed) {
@@ -269,7 +268,7 @@ class _FanControl extends StatelessWidget {
                 speed: 0,
                 isSelected: currentSpeed == 0,
                 color: Colors.grey,
-                isOnline: isOnline,
+                canSendCommands: canSendCommands,
               ),
               const SizedBox(width: 8),
               _FanSpeedButton(
@@ -278,7 +277,7 @@ class _FanControl extends StatelessWidget {
                 speed: 1,
                 isSelected: currentSpeed == 1,
                 color: Colors.green.shade300,
-                isOnline: isOnline,
+                canSendCommands: canSendCommands,
               ),
               const SizedBox(width: 8),
               _FanSpeedButton(
@@ -287,7 +286,7 @@ class _FanControl extends StatelessWidget {
                 speed: 2,
                 isSelected: currentSpeed == 2,
                 color: Colors.green.shade600,
-                isOnline: isOnline,
+                canSendCommands: canSendCommands,
               ),
               const SizedBox(width: 8),
               _FanSpeedButton(
@@ -296,7 +295,7 @@ class _FanControl extends StatelessWidget {
                 speed: 3,
                 isSelected: currentSpeed == 3,
                 color: Colors.green.shade900,
-                isOnline: isOnline,
+                canSendCommands: canSendCommands,
               ),
             ].map((child) => Expanded(child: child)).toList(),
           ),
@@ -312,7 +311,7 @@ class _FanSpeedButton extends StatelessWidget {
   final int speed;
   final bool isSelected;
   final Color color;
-  final bool isOnline;
+  final bool canSendCommands;
   
   const _FanSpeedButton({
     required this.ahuId,
@@ -320,13 +319,13 @@ class _FanSpeedButton extends StatelessWidget {
     required this.speed,
     required this.isSelected,
     required this.color,
-    required this.isOnline,
+    required this.canSendCommands,
   });
 
   @override
   Widget build(BuildContext context) {
     return ElevatedButton(
-      onPressed: isOnline && !isSelected
+      onPressed: canSendCommands && !isSelected
           ? () => context.read<AppProvider>().setFanSpeed(ahuId, speed)
           : null,
       style: ElevatedButton.styleFrom(
@@ -346,12 +345,12 @@ class _FanSpeedButton extends StatelessWidget {
 class _CpModeControl extends StatelessWidget {
   final String ahuId;
   final AhuState? state;
-  final bool isOnline;
+  final bool canSendCommands;
   
   const _CpModeControl({
     required this.ahuId,
     required this.state,
-    required this.isOnline,
+    required this.canSendCommands,
   });
 
   @override
@@ -391,7 +390,7 @@ class _CpModeControl extends StatelessWidget {
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: isOnline && !isDualMode
+                  onPressed: canSendCommands && !isDualMode
                       ? () => context.read<AppProvider>().setCpMode(ahuId, "dual")
                       : null,
                   style: ElevatedButton.styleFrom(
@@ -409,7 +408,7 @@ class _CpModeControl extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: isOnline && isDualMode
+                  onPressed: canSendCommands && isDualMode
                       ? () => context.read<AppProvider>().setCpMode(ahuId, "single")
                       : null,
                   style: ElevatedButton.styleFrom(
@@ -432,7 +431,7 @@ class _CpModeControl extends StatelessWidget {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: isOnline && cpActive != 1
+                    onPressed: canSendCommands && cpActive != 1
                         ? () => context.read<AppProvider>().setCpActive(ahuId, 1)
                         : null,
                     style: ElevatedButton.styleFrom(
@@ -450,7 +449,7 @@ class _CpModeControl extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: isOnline && cpActive != 2
+                    onPressed: canSendCommands && cpActive != 2
                         ? () => context.read<AppProvider>().setCpActive(ahuId, 2)
                         : null,
                     style: ElevatedButton.styleFrom(

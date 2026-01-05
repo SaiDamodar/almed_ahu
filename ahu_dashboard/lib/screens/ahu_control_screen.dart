@@ -308,9 +308,14 @@ class _StartStopButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, bool>(
-      selector: (_, provider) => provider.getState(ahuId)?.run ?? false,
-      builder: (context, isRunning, _) {
+    return Selector<AppProvider, ({bool isRunning, bool canSendCommands})>(
+      selector: (_, provider) => (
+        isRunning: provider.getState(ahuId)?.run ?? false,
+        canSendCommands: provider.canSendCommands,
+      ),
+      builder: (context, data, _) {
+        final isRunning = data.isRunning;
+        final canSend = data.canSendCommands;
         return Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -323,9 +328,9 @@ class _StartStopButton extends StatelessWidget {
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: () {
+              onTap: canSend ? () {
                 context.read<AppProvider>().toggleAhu(ahuId);
-              },
+              } : null,
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -410,17 +415,17 @@ class _CpModeToggleButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    return Selector<AppProvider, ({String cpMode, int cpActive, bool isOnline})>(
+    return Selector<AppProvider, ({String cpMode, int cpActive, bool canSendCommands})>(
       selector: (_, provider) {
         final state = provider.getState(ahuId);
         final cpMode = state?.cpMode ?? "dual";
         final cpActive = state?.cpActive ?? 1;
-        final isOnline = provider.getStatus(ahuId) == 'online';
-        return (cpMode: cpMode, cpActive: cpActive, isOnline: isOnline);
+        final canSendCommands = provider.canSendCommands;
+        return (cpMode: cpMode, cpActive: cpActive, canSendCommands: canSendCommands);
       },
       builder: (context, data, _) {
         final isDualMode = data.cpMode == "dual";
-        final isEnabled = data.isOnline;
+        final isEnabled = data.canSendCommands;
 
         return Row(
           mainAxisSize: MainAxisSize.min,
@@ -805,12 +810,17 @@ class _SensorControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, _SensorData>(
-      selector: (_, provider) => _SensorData(
-        telemetry: provider.getTelemetry(ahuId),
-        state: provider.getState(ahuId),
+    return Selector<AppProvider, ({_SensorData data, bool canSendCommands})>(
+      selector: (_, provider) => (
+        data: _SensorData(
+          telemetry: provider.getTelemetry(ahuId),
+          state: provider.getState(ahuId),
+        ),
+        canSendCommands: provider.canSendCommands,
       ),
-      builder: (context, data, _) {
+      builder: (context, result, _) {
+        final data = result.data;
+        final canSend = result.canSendCommands;
         return Row(
           children: [
             // Temperature
@@ -824,9 +834,9 @@ class _SensorControls extends StatelessWidget {
                 color: AppTheme.temperature,
                 min: 15,
                 max: 30,
-                onChanged: (value) {
+                onChanged: canSend ? (value) {
                   context.read<AppProvider>().setTemperature(ahuId, value);
-                },
+                } : null,
               ),
             ),
             const SizedBox(width: 16),
@@ -841,9 +851,9 @@ class _SensorControls extends StatelessWidget {
                 color: AppTheme.humidity,
                 min: 30,
                 max: 80,
-                onChanged: (value) {
+                onChanged: canSend ? (value) {
                   context.read<AppProvider>().setHumidity(ahuId, value);
-                },
+                } : null,
               ),
             ),
           ],
@@ -862,7 +872,7 @@ class _SensorControl extends StatelessWidget {
   final Color color;
   final double min;
   final double max;
-  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChanged;
 
   const _SensorControl({
     required this.icon,
@@ -873,7 +883,7 @@ class _SensorControl extends StatelessWidget {
     required this.color,
     required this.min,
     required this.max,
-    required this.onChanged,
+    this.onChanged,
   });
 
   @override
@@ -1049,7 +1059,7 @@ class _SetpointControls extends StatelessWidget {
   final Color color;
   final double min;
   final double max;
-  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChanged;
   
   const _SetpointControls({
     required this.setpoint,
@@ -1057,7 +1067,7 @@ class _SetpointControls extends StatelessWidget {
     required this.color,
     required this.min,
     required this.max,
-    required this.onChanged,
+    this.onChanged,
   });
 
   @override
@@ -1091,7 +1101,7 @@ class _SetpointControls extends StatelessWidget {
               _GlossyButton(
                 icon: Icons.remove,
                 color: color,
-                onPressed: setpoint > min ? () => onChanged(setpoint - 0.5) : null,
+                onPressed: onChanged != null && setpoint > min ? () => onChanged!(setpoint - 0.5) : null,
               ),
               const SizedBox(width: 16),
               Container(
@@ -1116,7 +1126,7 @@ class _SetpointControls extends StatelessWidget {
               _GlossyButton(
                 icon: Icons.add,
                 color: color,
-                onPressed: setpoint < max ? () => onChanged(setpoint + 0.5) : null,
+                onPressed: onChanged != null && setpoint < max ? () => onChanged!(setpoint + 0.5) : null,
               ),
             ],
           ),
@@ -1432,13 +1442,13 @@ class _FanIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, ({bool isOnline, bool isRunning})>(
+    return Selector<AppProvider, ({bool canSendCommands, bool isRunning})>(
       selector: (_, provider) => (
-        isOnline: provider.getStatus(ahuId) == 'online',
+        canSendCommands: provider.canSendCommands,
         isRunning: data.state?.run ?? false,
       ),
       builder: (context, info, _) {
-        final canToggle = info.isOnline && info.isRunning;
+        final canToggle = info.canSendCommands && info.isRunning;
         return GestureDetector(
           onTap: canToggle ? () => context.read<AppProvider>().toggleFanSpeed(ahuId) : null,
           child: _StatusIndicator(

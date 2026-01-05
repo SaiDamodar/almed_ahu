@@ -219,12 +219,12 @@ class AppProvider extends ChangeNotifier {
     clearAllData();
     
     // Register the default AHU - matches the current ESP32 device
-    // ESP32 topic: almed/ahu/kaveriHospital/burnsWard/ahu-01
+    // ESP32 topic: almed/ahu/KauveryHospital/Burns_OT/ahu-01
     final defaultAhu = AhuUnit(
       id: 'ahu-01',
-      name: 'Burns Ward AHU',
-      site: 'kaveriHospital',
-      room: 'burnsWard',
+      name: 'Burns OT AHU',
+      site: 'KauveryHospital',
+      room: 'Burns_OT',
       org: 'almed',
     );
     addAhuUnit(defaultAhu);
@@ -265,14 +265,14 @@ class AppProvider extends ChangeNotifier {
     
     // Only auto-register if it matches our expected device
     // This prevents old retained messages from creating ghost devices
-    if (discoveredSite != 'kaveriHospital' || discoveredRoom != 'burnsWard') {
+    if (discoveredSite != 'KauveryHospital' || discoveredRoom != 'Burns_OT') {
       debugPrint('AppProvider: Ignoring message from unknown device $ahuId at $discoveredSite/$discoveredRoom');
       return;
     }
     
     final newAhu = AhuUnit(
       id: ahuId,
-      name: 'Burns Ward AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
+      name: 'Burns OT AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
       site: discoveredSite,
       room: discoveredRoom,
       org: 'almed',
