@@ -29,7 +29,7 @@ MQTT_BROKER=10.42.0.1
 MQTT_PORT=1883
 MQTT_USERNAME=ahu_user
 MQTT_PASSWORD=ahu_pass_2024
-DASHBOARD_DIR=/home/pi/ahu_dashboard
+DASHBOARD_DIR=/home/almed/Documents/almed_ahu
 FLUTTER_PI_SERVICE=ahu-dashboard
 GIT_BRANCH=main
 EOF
@@ -43,7 +43,7 @@ After=network.target mosquitto.service
 
 [Service]
 Type=simple
-User=pi
+User=almed
 EnvironmentFile=/etc/default/ahu-ota-updater
 ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/rpi_ota_updater.py
 WorkingDirectory=${SCRIPT_DIR}
@@ -57,17 +57,17 @@ EOF
 echo ""
 echo "4. Setting up sudoers for service control..."
 cat > /etc/sudoers.d/ahu-ota-updater << 'EOF'
-# Allow pi user to restart dashboard service without password
-pi ALL=(ALL) NOPASSWD: /bin/systemctl restart ahu-dashboard
-pi ALL=(ALL) NOPASSWD: /bin/systemctl start ahu-dashboard
-pi ALL=(ALL) NOPASSWD: /bin/systemctl stop ahu-dashboard
+# Allow almed user to restart dashboard service without password
+almed ALL=(ALL) NOPASSWD: /bin/systemctl restart ahu-dashboard
+almed ALL=(ALL) NOPASSWD: /bin/systemctl start ahu-dashboard
+almed ALL=(ALL) NOPASSWD: /bin/systemctl stop ahu-dashboard
 EOF
 chmod 440 /etc/sudoers.d/ahu-ota-updater
 
 echo ""
 echo "5. Creating log file..."
 touch /var/log/ahu_ota_updater.log
-chown pi:pi /var/log/ahu_ota_updater.log
+chown almed:almed /var/log/ahu_ota_updater.log
 
 echo ""
 echo "6. Reloading systemd..."

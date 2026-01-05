@@ -27,7 +27,7 @@ MQTT_TOPIC_COMMAND = 'almed/rpi/ota/command'   # Subscribe: receive OTA commands
 MQTT_TOPIC_STATUS = 'almed/rpi/ota/status'      # Publish: report OTA status
 
 # Dashboard Configuration
-DASHBOARD_DIR = os.getenv('DASHBOARD_DIR', '/home/pi/ahu_dashboard')
+DASHBOARD_DIR = os.getenv('DASHBOARD_DIR', '/home/almed/Documents/almed_ahu')
 FLUTTER_PI_SERVICE = os.getenv('FLUTTER_PI_SERVICE', 'ahu-dashboard')
 GIT_BRANCH = os.getenv('GIT_BRANCH', 'main')
 
