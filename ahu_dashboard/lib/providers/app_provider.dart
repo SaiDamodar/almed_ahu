@@ -91,24 +91,24 @@ class AppProvider extends ChangeNotifier {
 
     // Listen to telemetry updates (debounced for RPi performance)
     _mqttService!.telemetryStream.listen((entry) {
+      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
       final ahuId = _extractAhuId(entry.key);
-      _ensureAhuRegistered(entry.key);
       _telemetryData[ahuId] = entry.value;
       _debouncedNotify();  // 250ms debounce for RPi
     });
 
     // Listen to state updates (also debounced for RPi)
     _mqttService!.stateStream.listen((entry) {
+      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
       final ahuId = _extractAhuId(entry.key);
-      _ensureAhuRegistered(entry.key);
       _stateData[ahuId] = entry.value;
       _debouncedStateNotify();  // Debounced for RPi performance
     });
 
     // Listen to log updates (heavily throttled for RPi)
     _mqttService!.logStream.listen((entry) {
+      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
       final ahuId = _extractAhuId(entry.key);
-      _ensureAhuRegistered(entry.key);
       
       final logs = _logData.putIfAbsent(ahuId, () => []);
       logs.add(entry.value);
@@ -122,14 +122,15 @@ class AppProvider extends ChangeNotifier {
 
     // Listen to status updates (debounced for RPi)
     _mqttService!.statusStream.listen((entry) {
+      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
       final ahuId = _extractAhuId(entry.key);
-      _ensureAhuRegistered(entry.key);
       _statusData[ahuId] = entry.value;
       _debouncedStateNotify();  // Debounced for RPi
     });
 
     // Listen to AWS connection status updates
     _mqttService!.awsStatusStream.listen((entry) {
+      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
       final ahuId = _extractAhuId(entry.key);
       _awsStatusData[ahuId] = entry.value;
       debugPrint('AppProvider: AWS status for $ahuId: ${entry.value ? "CONNECTED" : "DISCONNECTED"}');
@@ -208,6 +209,7 @@ class AppProvider extends ChangeNotifier {
     _stateData.clear();
     _logData.clear();
     _statusData.clear();
+    _awsStatusData.clear();  // Also clear AWS status
     _cachedAhuUnits = null;
     _ahuUnitsChanged = true;
     notifyListeners();
@@ -219,12 +221,12 @@ class AppProvider extends ChangeNotifier {
     clearAllData();
     
     // Register the default AHU - matches the current ESP32 device
-    // ESP32 topic: almed/ahu/KauveryHospital/Burns_OT/ahu-01
+    // ESP32 topic: almed/ahu/kaveriHospital/burnsWard/ahu-01
     final defaultAhu = AhuUnit(
       id: 'ahu-01',
-      name: 'Burns OT AHU',
-      site: 'KauveryHospital',
-      room: 'Burns_OT',
+      name: 'Burns Ward AHU',
+      site: 'kaveriHospital',
+      room: 'burnsWard',
       org: 'almed',
     );
     addAhuUnit(defaultAhu);
@@ -265,14 +267,14 @@ class AppProvider extends ChangeNotifier {
     
     // Only auto-register if it matches our expected device
     // This prevents old retained messages from creating ghost devices
-    if (discoveredSite != 'KauveryHospital' || discoveredRoom != 'Burns_OT') {
+    if (discoveredSite != 'kaveriHospital' || discoveredRoom != 'burnsWard') {
       debugPrint('AppProvider: Ignoring message from unknown device $ahuId at $discoveredSite/$discoveredRoom');
       return;
     }
     
     final newAhu = AhuUnit(
       id: ahuId,
-      name: 'Burns OT AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
+      name: 'Burns Ward AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
       site: discoveredSite,
       room: discoveredRoom,
       org: 'almed',
