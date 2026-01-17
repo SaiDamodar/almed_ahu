@@ -37,13 +37,11 @@
 // GitHub token - set this if you want to use private repos
 #define GITHUB_TOKEN "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"  // Your GitHub token for private repo access
 
-const char WIFI_SSID[] = "ez"; // Your WiFi SSID
-const char WIFI_PASSWORD[] = "12345678"; // Your WiFi password
-const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint, change this
-
-// ============ DEFAULT WiFi ============
-#define DEFAULT_W1_SSID "PiSpot"
-#define DEFAULT_W1_PASS "12345678"
+// ============ WiFi Configuration ============
+// Both ESP32 and Raspberry Pi connect to this same network
+const char WIFI_SSID[] = "AlMed";
+const char WIFI_PASSWORD[] = "AlMed123456";
+const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
 unsigned long M1_START_RUN = 6UL * 1000UL;              // Motor 1 runs 6 seconds at start
@@ -190,13 +188,15 @@ WiFiClientSecure net = WiFiClientSecure();
 PubSubClient client(net);
 
 // ========== Local MQTT Broker (Raspberry Pi) ==========
+// RPi connects to same WiFi (AlMed) and runs MQTT broker
+// Configure RPi with static IP: 192.168.1.100 (see RPI_NETWORK_SETUP.md)
 WiFiClient espNet;
 PubSubClient mqttLocal(espNet);
 
 const char* MQTT_USER = "almed";
 const char* MQTT_PASS = "Almed1234$";
 const uint16_t MQTT_PORT = 1883;
-String mqttHost = "10.42.0.1";
+String mqttHost = "192.168.1.100";  // RPi static IP on AlMed network
 unsigned long lastMqttAttempt = 0;
 
 // MQTT buffer size for large messages (increased for combo sensor data)
@@ -3180,14 +3180,14 @@ void setup()
     Serial.println("✓ Corrected: M2_RUN_TIME=" + String(M2_RUN_TIME/1000) + "s, M2_DELAY=" + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
   }
   
-  // Load WiFi credentials
-  w1_ssid = prefs.getString("w1_ssid", DEFAULT_W1_SSID);
-  w1_pass = prefs.getString("w1_pass", DEFAULT_W1_PASS);
+  // Load WiFi credentials (for provisioning - defaults to main WiFi)
+  w1_ssid = prefs.getString("w1_ssid", String(WIFI_SSID));
+  w1_pass = prefs.getString("w1_pass", String(WIFI_PASSWORD));
   w2_ssid = prefs.getString("w2_ssid", String(""));
   w2_pass = prefs.getString("w2_pass", String(""));
   
-  // Load Local MQTT broker host
-  mqttHost = prefs.getString("mqtt_host", String("10.42.0.1"));
+  // Load Local MQTT broker host (RPi static IP on AlMed network)
+  mqttHost = prefs.getString("mqtt_host", String("192.168.1.100"));
   
   esp_task_wdt_reset();
   
@@ -3207,7 +3207,8 @@ void setup()
   WiFi.setAutoReconnect(true);  // Auto-reconnect on disconnect
   WiFi.persistent(true);         // Save WiFi credentials to flash
   
-  Serial.println("\n📡 WiFi: Starting connection (non-blocking)");
+  Serial.println("\n📡 WiFi: Connecting to '" + String(WIFI_SSID) + "' (non-blocking)");
+  Serial.println("  📶 ESP32 and RPi both connect to same network");
   Serial.println("  ⚠️  System will work standalone even without WiFi");
   Serial.println("  ⚠️  WiFi will reconnect automatically in background");
 
