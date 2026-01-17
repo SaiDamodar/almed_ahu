@@ -527,29 +527,37 @@ class _CpModeToggleButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    return Selector<AppProvider, ({String cpMode, int cpActive, bool canSendCommands})>(
+    return Selector<AppProvider, ({String cpMode, int cpActive, bool canSendCommands, bool isLocked})>(
       selector: (_, provider) {
         final state = provider.getState(ahuId);
         final cpMode = state?.cpMode ?? "dual";
         final cpActive = state?.cpActive ?? 1;
         final canSendCommands = provider.canSendCommands;
-        return (cpMode: cpMode, cpActive: cpActive, canSendCommands: canSendCommands);
+        final isLocked = provider.isScreenLocked;
+        return (cpMode: cpMode, cpActive: cpActive, canSendCommands: canSendCommands, isLocked: isLocked);
       },
       builder: (context, data, _) {
         final isDualMode = data.cpMode == "dual";
-        final isEnabled = data.canSendCommands;
+        // CP mode is LOCKED when screen is locked
+        final isEnabled = data.canSendCommands && !data.isLocked;
 
+        final isLocked = data.isLocked;
+        
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // CP Mode Toggle Button
+            // CP Mode Toggle Button - LOCKED when screen is locked
             Container(
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: isDualMode
-                      ? [Colors.cyan.shade600, Colors.cyan.shade700]
-                      : [Colors.teal.shade600, Colors.teal.shade700],
-                ),
+                gradient: isLocked 
+                    ? LinearGradient(
+                        colors: [Colors.grey.shade500, Colors.grey.shade600],
+                      )
+                    : LinearGradient(
+                        colors: isDualMode
+                            ? [Colors.cyan.shade600, Colors.cyan.shade700]
+                            : [Colors.teal.shade600, Colors.teal.shade700],
+                      ),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Material(
@@ -568,7 +576,7 @@ class _CpModeToggleButton extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          Icons.ac_unit_rounded,
+                          isLocked ? Icons.lock_rounded : Icons.ac_unit_rounded,
                           color: Colors.white,
                           size: 18,
                         ),
@@ -936,12 +944,12 @@ class _SensorControls extends StatelessWidget {
         final canSend = result.canSendCommands;
         final isLocked = result.isLocked;
         
-        // When locked, temp/humidity controls are disabled
-        final canModifySetpoints = canSend && !isLocked;
+        // When locked: humidity is disabled, temperature remains controllable
+        final canModifyHumidity = canSend && !isLocked;
         
         return Row(
           children: [
-            // Temperature
+            // Temperature - ALWAYS controllable (even when locked)
             Expanded(
               child: _SensorControl(
                 icon: Icons.thermostat_rounded,
@@ -952,14 +960,14 @@ class _SensorControls extends StatelessWidget {
                 color: AppTheme.temperature,
                 min: 15,
                 max: 30,
-                isLocked: isLocked,
-                onChanged: canModifySetpoints ? (value) {
+                isLocked: false,  // Temperature never locked
+                onChanged: canSend ? (value) {
                   context.read<AppProvider>().setTemperature(ahuId, value);
                 } : null,
               ),
             ),
             const SizedBox(width: 16),
-            // Humidity
+            // Humidity - LOCKED when screen is locked
             Expanded(
               child: _SensorControl(
                 icon: Icons.water_drop_rounded,
@@ -971,7 +979,7 @@ class _SensorControls extends StatelessWidget {
                 min: 30,
                 max: 80,
                 isLocked: isLocked,
-                onChanged: canModifySetpoints ? (value) {
+                onChanged: canModifyHumidity ? (value) {
                   context.read<AppProvider>().setHumidity(ahuId, value);
                 } : null,
               ),
