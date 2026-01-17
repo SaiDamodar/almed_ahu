@@ -77,7 +77,11 @@ class AhuDashboardApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AppProvider()),
+        ChangeNotifierProvider(create: (_) {
+          final provider = AppProvider();
+          provider.loadScreenLockPasscode(); // Load saved passcode on startup
+          return provider;
+        }),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: Consumer<ThemeProvider>(

@@ -11,6 +11,7 @@ import '../models/ahu_state.dart';
 import '../models/ahu_log.dart';
 import '../widgets/motor_timing_dialog.dart';
 import '../widgets/wifi_control_widget.dart';
+import '../widgets/screen_lock_dialog.dart';
 
 /// Modern AHU control screen
 class AhuControlScreen extends StatefulWidget {
@@ -141,6 +142,9 @@ class _TopBar extends StatelessWidget {
           // Mode toggle (Admin only)
           _ModeToggleButton(ahuId: ahuId),
           const SizedBox(width: 12),
+          // Screen Lock button
+          _ScreenLockButton(),
+          const SizedBox(width: 12),
           // WiFi control (Admin only)
           _WiFiButton(),
           const SizedBox(width: 12),
@@ -148,6 +152,85 @@ class _TopBar extends StatelessWidget {
           _ResetButton(ahuId: ahuId),
         ],
       ),
+    );
+  }
+}
+
+class _ScreenLockButton extends StatelessWidget {
+  const _ScreenLockButton();
+
+  void _showUnlockDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ScreenUnlockDialog(
+        onVerify: (passcode) {
+          return context.read<AppProvider>().unlockScreen(passcode);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, bool>(
+      selector: (_, provider) => provider.isScreenLocked,
+      builder: (context, isLocked, _) {
+        return Container(
+          decoration: BoxDecoration(
+            gradient: isLocked
+                ? const LinearGradient(
+                    colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                  )
+                : null,
+            color: isLocked ? null : Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: isLocked
+                ? null
+                : Border.all(
+                    color: Theme.of(context).dividerColor.withOpacity(0.1),
+                  ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                if (isLocked) {
+                  _showUnlockDialog(context);
+                } else {
+                  context.read<AppProvider>().lockScreen();
+                }
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                      color: isLocked ? Colors.white : Colors.grey.shade600,
+                      size: 20,
+                    ),
+                    if (isLocked) ...[
+                      const SizedBox(width: 6),
+                      const Text(
+                        'LOCKED',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -839,17 +922,23 @@ class _SensorControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, ({_SensorData data, bool canSendCommands})>(
+    return Selector<AppProvider, ({_SensorData data, bool canSendCommands, bool isLocked})>(
       selector: (_, provider) => (
         data: _SensorData(
           telemetry: provider.getTelemetry(ahuId),
           state: provider.getState(ahuId),
         ),
         canSendCommands: provider.canSendCommands,
+        isLocked: provider.isScreenLocked,
       ),
       builder: (context, result, _) {
         final data = result.data;
         final canSend = result.canSendCommands;
+        final isLocked = result.isLocked;
+        
+        // When locked, temp/humidity controls are disabled
+        final canModifySetpoints = canSend && !isLocked;
+        
         return Row(
           children: [
             // Temperature
@@ -863,7 +952,8 @@ class _SensorControls extends StatelessWidget {
                 color: AppTheme.temperature,
                 min: 15,
                 max: 30,
-                onChanged: canSend ? (value) {
+                isLocked: isLocked,
+                onChanged: canModifySetpoints ? (value) {
                   context.read<AppProvider>().setTemperature(ahuId, value);
                 } : null,
               ),
@@ -880,7 +970,8 @@ class _SensorControls extends StatelessWidget {
                 color: AppTheme.humidity,
                 min: 30,
                 max: 80,
-                onChanged: canSend ? (value) {
+                isLocked: isLocked,
+                onChanged: canModifySetpoints ? (value) {
                   context.read<AppProvider>().setHumidity(ahuId, value);
                 } : null,
               ),
@@ -902,6 +993,7 @@ class _SensorControl extends StatelessWidget {
   final double min;
   final double max;
   final ValueChanged<double>? onChanged;
+  final bool isLocked;
 
   const _SensorControl({
     required this.icon,
@@ -913,6 +1005,7 @@ class _SensorControl extends StatelessWidget {
     required this.min,
     required this.max,
     this.onChanged,
+    this.isLocked = false,
   });
 
   @override
@@ -972,6 +1065,7 @@ class _SensorControl extends StatelessWidget {
                   min: min,
                   max: max,
                   onChanged: onChanged,
+                  isLocked: isLocked,
                 ),
               ],
             ),
@@ -1089,6 +1183,7 @@ class _SetpointControls extends StatelessWidget {
   final double min;
   final double max;
   final ValueChanged<double>? onChanged;
+  final bool isLocked;
   
   const _SetpointControls({
     required this.setpoint,
@@ -1097,6 +1192,7 @@ class _SetpointControls extends StatelessWidget {
     required this.min,
     required this.max,
     this.onChanged,
+    this.isLocked = false,
   });
 
   @override
@@ -1107,21 +1203,32 @@ class _SetpointControls extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [color.withOpacity(0.2), color.withOpacity(0.1)],
+          colors: isLocked 
+              ? [Colors.grey.withOpacity(0.2), Colors.grey.withOpacity(0.1)]
+              : [color.withOpacity(0.2), color.withOpacity(0.1)],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: isLocked ? Colors.grey.withOpacity(0.3) : color.withOpacity(0.3)),
       ),
       child: Column(
         children: [
-          Text(
-            'SETPOINT',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: color.withOpacity(0.8),
-              letterSpacing: 1.2,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (isLocked) ...[
+                Icon(Icons.lock_rounded, size: 12, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                'SETPOINT',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: isLocked ? Colors.grey.shade500 : color.withOpacity(0.8),
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Row(
@@ -1129,7 +1236,7 @@ class _SetpointControls extends StatelessWidget {
             children: [
               _GlossyButton(
                 icon: Icons.remove,
-                color: color,
+                color: isLocked ? Colors.grey : color,
                 onPressed: onChanged != null && setpoint > min ? () => onChanged!(setpoint - 0.5) : null,
               ),
               const SizedBox(width: 16),
@@ -1139,7 +1246,7 @@ class _SetpointControls extends StatelessWidget {
                   color: Colors.white.withOpacity(0.9),
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
-                    BoxShadow(color: color.withOpacity(0.2), blurRadius: 8),
+                    BoxShadow(color: (isLocked ? Colors.grey : color).withOpacity(0.2), blurRadius: 8),
                   ],
                 ),
                 child: Text(
@@ -1147,14 +1254,14 @@ class _SetpointControls extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: color,
+                    color: isLocked ? Colors.grey : color,
                   ),
                 ),
               ),
               const SizedBox(width: 16),
               _GlossyButton(
                 icon: Icons.add,
-                color: color,
+                color: isLocked ? Colors.grey : color,
                 onPressed: onChanged != null && setpoint < max ? () => onChanged!(setpoint + 0.5) : null,
               ),
             ],

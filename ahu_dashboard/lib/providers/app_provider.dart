@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/ahu_unit.dart';
 import '../models/ahu_telemetry.dart';
 import '../models/ahu_state.dart';
@@ -28,11 +29,81 @@ class AppProvider extends ChangeNotifier {
   // RPi Performance: Track if updates are pending to batch notifications
   bool _hasPendingUpdates = false;
   DateTime _lastNotify = DateTime.now();
+  
+  // Screen Lock feature - blocks temp/humidity changes when locked
+  bool _isScreenLocked = false;
+  String _screenLockPasscode = '123123';  // Default passcode
+  static const String _passcodeKey = 'screen_lock_passcode';
 
   // Getters
   UserRole? get currentRole => _currentRole;
   bool get isConnected => _isConnected;
   MqttService? get mqttService => _mqttService;
+  bool get isScreenLocked => _isScreenLocked;
+  
+  /// Initialize and load saved passcode
+  Future<void> loadScreenLockPasscode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _screenLockPasscode = prefs.getString(_passcodeKey) ?? '123123';
+      debugPrint('AppProvider: Loaded screen lock passcode');
+    } catch (e) {
+      debugPrint('AppProvider: Error loading passcode: $e');
+    }
+  }
+  
+  /// Toggle screen lock state
+  void toggleScreenLock() {
+    _isScreenLocked = !_isScreenLocked;
+    debugPrint('AppProvider: Screen ${_isScreenLocked ? "LOCKED" : "UNLOCKED"}');
+    notifyListeners();
+  }
+  
+  /// Lock the screen
+  void lockScreen() {
+    _isScreenLocked = true;
+    debugPrint('AppProvider: Screen LOCKED');
+    notifyListeners();
+  }
+  
+  /// Unlock screen with passcode verification
+  bool unlockScreen(String passcode) {
+    if (passcode == _screenLockPasscode) {
+      _isScreenLocked = false;
+      debugPrint('AppProvider: Screen UNLOCKED');
+      notifyListeners();
+      return true;
+    }
+    debugPrint('AppProvider: Unlock failed - wrong passcode');
+    return false;
+  }
+  
+  /// Change the screen lock passcode
+  Future<bool> changeScreenLockPasscode(String currentPasscode, String newPasscode) async {
+    if (currentPasscode != _screenLockPasscode) {
+      debugPrint('AppProvider: Passcode change failed - wrong current passcode');
+      return false;
+    }
+    
+    if (newPasscode.length != 6) {
+      debugPrint('AppProvider: Passcode change failed - must be 6 digits');
+      return false;
+    }
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_passcodeKey, newPasscode);
+      _screenLockPasscode = newPasscode;
+      debugPrint('AppProvider: Screen lock passcode changed successfully');
+      return true;
+    } catch (e) {
+      debugPrint('AppProvider: Error saving passcode: $e');
+      return false;
+    }
+  }
+  
+  /// Get current passcode (for admin settings display)
+  String get currentPasscode => _screenLockPasscode;
   
   /// Get AWS cloud connection status for specific AHU
   bool isAwsConnected(String ahuId) => _awsStatusData[ahuId] ?? false;
