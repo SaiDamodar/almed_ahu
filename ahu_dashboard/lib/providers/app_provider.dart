@@ -131,8 +131,8 @@ class AppProvider extends ChangeNotifier {
       
       if (status == 'online') {
         // Device is online - register it (clears any previous device)
-        _ensureAhuRegistered(entry.key);
-        _statusData[ahuId] = entry.value;
+      _ensureAhuRegistered(entry.key);
+      _statusData[ahuId] = entry.value;
         _debouncedStateNotify();
       } else if (status == 'offline') {
         // Device went offline - just update status if registered, don't register new

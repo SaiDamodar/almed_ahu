@@ -184,10 +184,10 @@ class _AhuInfo extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.baseline,
               textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  data.name,
-                  style: theme.textTheme.displayMedium?.copyWith(fontSize: 22),
+          children: [
+            Text(
+              data.name,
+              style: theme.textTheme.displayMedium?.copyWith(fontSize: 22),
                 ),
                 if (data.version != null) ...[
                   const SizedBox(width: 8),
