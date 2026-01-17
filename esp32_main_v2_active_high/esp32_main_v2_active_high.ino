@@ -19,7 +19,7 @@
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "KAVERI_BURNS_AHU1" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP2" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
 #define BUILD_VERSION "v2.5.0-STABLE"
@@ -323,8 +323,8 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "KauveryHospital";    // Kaveri Hospital
-const char* ROOM = "Burns_OT";         // Burns Ward
+const char* SITE = "Aumnatic_test";    // Kaveri Hospital
+const char* ROOM = "test";         // Burns Ward
 const char* AHU  = "ahu-01";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
