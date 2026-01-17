@@ -89,25 +89,25 @@ class AppProvider extends ChangeNotifier {
       notifyListeners();
     });
 
-    // Listen to telemetry updates (debounced for RPi performance)
+    // Listen to telemetry updates - only process if device is registered
     _mqttService!.telemetryStream.listen((entry) {
-      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
+      if (!_isMatchingAhu(entry.key)) return; // Ignore unregistered devices
       final ahuId = _extractAhuId(entry.key);
       _telemetryData[ahuId] = entry.value;
       _debouncedNotify();  // 250ms debounce for RPi
     });
 
-    // Listen to state updates (also debounced for RPi)
+    // Listen to state updates - only process if device is registered
     _mqttService!.stateStream.listen((entry) {
-      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
+      if (!_isMatchingAhu(entry.key)) return; // Ignore unregistered devices
       final ahuId = _extractAhuId(entry.key);
       _stateData[ahuId] = entry.value;
       _debouncedStateNotify();  // Debounced for RPi performance
     });
 
-    // Listen to log updates (heavily throttled for RPi)
+    // Listen to log updates - only process if device is registered
     _mqttService!.logStream.listen((entry) {
-      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
+      if (!_isMatchingAhu(entry.key)) return; // Ignore unregistered devices
       final ahuId = _extractAhuId(entry.key);
       
       final logs = _logData.putIfAbsent(ahuId, () => []);
@@ -120,17 +120,28 @@ class AppProvider extends ChangeNotifier {
       _debouncedNotify();  // Debounced for RPi
     });
 
-    // Listen to status updates (debounced for RPi)
+    // Listen to status updates - only register ONLINE devices (dynamic discovery)
     _mqttService!.statusStream.listen((entry) {
-      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
       final ahuId = _extractAhuId(entry.key);
-      _statusData[ahuId] = entry.value;
-      _debouncedStateNotify();  // Debounced for RPi
+      final status = entry.value.trim().toLowerCase();
+      
+      if (status == 'online') {
+        // Device is online - register it (clears any previous device)
+        _ensureAhuRegistered(entry.key);
+        _statusData[ahuId] = entry.value;
+        _debouncedStateNotify();
+      } else if (status == 'offline') {
+        // Device went offline - just update status if registered, don't register new
+        if (_isMatchingAhu(entry.key)) {
+          _statusData[ahuId] = entry.value;
+          _debouncedStateNotify();
+        }
+      }
     });
 
     // Listen to AWS connection status updates
     _mqttService!.awsStatusStream.listen((entry) {
-      if (!_isAhuRegistered(entry.key)) return;  // Only process registered devices
+      if (!_isMatchingAhu(entry.key)) return;  // Only process registered devices
       final ahuId = _extractAhuId(entry.key);
       _awsStatusData[ahuId] = entry.value;
       debugPrint('AppProvider: AWS status for $ahuId: ${entry.value ? "CONNECTED" : "DISCONNECTED"}');
@@ -215,33 +226,27 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Load default AHU units
+  /// Load default AHU units - just clears data and waits for auto-discovery
   void loadDefaultAhus() {
     // Clear any previous data first to start fresh
     clearAllData();
     
-    // Register the default AHU - matches the current ESP32 device
-    // ESP32 topic: almed/ahu/kaveriHospital/burnsWard/ahu-01
-    final defaultAhu = AhuUnit(
-      id: 'ahu-01',
-      name: 'Burns Ward AHU',
-      site: 'kaveriHospital',
-      room: 'burnsWard',
-      org: 'almed',
-    );
-    addAhuUnit(defaultAhu);
-    debugPrint('AppProvider: Loaded default AHU - ${defaultAhu.baseTopic}');
+    // Don't pre-register any AHU - let it be auto-discovered from MQTT
+    // Whichever ESP sends messages will be shown
+    debugPrint('AppProvider: Ready for AHU auto-discovery on almed/ahu/#');
   }
 
-  /// Check if AHU is registered - only process data from known AHUs
-  /// (Disabled auto-discovery to prevent old retained messages from creating ghost devices)
-  bool _isAhuRegistered(String topicData) {
+  /// Check if message is from currently registered AHU
+  /// Returns true only if the message matches our active device
+  bool _isMatchingAhu(String topicData) {
+    if (_ahuUnits.isEmpty) return false; // No device registered yet
+    
     final parts = topicData.split('|');
     final ahuId = parts.isNotEmpty ? parts[0] : topicData;
     final site = parts.length > 1 ? parts[1] : '';
     final room = parts.length > 2 ? parts[2] : '';
     
-    // Check if this matches any of our registered AHUs
+    // Check if this matches our currently registered AHU
     for (final ahu in _ahuUnits.values) {
       if (ahu.id == ahuId && ahu.site == site && ahu.room == room) {
         return true;
@@ -250,38 +255,55 @@ class AppProvider extends ChangeNotifier {
     return false;
   }
   
-  /// Auto-discover and register AHU when data arrives from unknown ID
-  /// Only registers if the device is actively publishing (not just retained messages)
+  /// Auto-discover and register AHU when data arrives
+  /// Only keeps ONE AHU at a time - whichever is actively sending messages
   void _ensureAhuRegistered(String topicData, {String? site, String? room}) {
     final parts = topicData.split('|');
     final ahuId = parts.isNotEmpty ? parts[0] : topicData;
-    final discoveredSite = parts.length > 1 ? parts[1] : (site ?? 'kaveriHospital');
-    final discoveredRoom = parts.length > 2 ? parts[2] : (room ?? 'burnsWard');
+    final discoveredSite = parts.length > 1 ? parts[1] : (site ?? 'unknown');
+    final discoveredRoom = parts.length > 2 ? parts[2] : (room ?? 'unknown');
     
-    // Check if already registered with same id, site, and room
+    // Create unique key for this specific AHU (id + site + room combo)
+    final uniqueKey = '$ahuId@$discoveredSite/$discoveredRoom';
+    
+    // Check if this exact AHU is already registered
     for (final ahu in _ahuUnits.values) {
       if (ahu.id == ahuId && ahu.site == discoveredSite && ahu.room == discoveredRoom) {
-        return; // Already registered
+        return; // Already registered, nothing to do
       }
     }
     
-    // Only auto-register if it matches our expected device
-    // This prevents old retained messages from creating ghost devices
-    if (discoveredSite != 'kaveriHospital' || discoveredRoom != 'burnsWard') {
-      debugPrint('AppProvider: Ignoring message from unknown device $ahuId at $discoveredSite/$discoveredRoom');
-      return;
+    // Clear ALL existing AHUs - we only want ONE at a time
+    // This ensures only the currently active ESP is shown
+    if (_ahuUnits.isNotEmpty) {
+      debugPrint('AppProvider: Switching to new AHU - clearing old data');
+      _ahuUnits.clear();
+      _telemetryData.clear();
+      _stateData.clear();
+      _logData.clear();
+      _statusData.clear();
+      _cachedAhuUnits = null;
+      _ahuUnitsChanged = true;
+    }
+    
+    // Create friendly display name from site and room
+    String friendlyName = discoveredRoom.replaceAll('_', ' ');
+    if (discoveredSite.isNotEmpty && discoveredSite != 'unknown') {
+      final siteName = discoveredSite.replaceAll('_', ' ');
+      final roomName = discoveredRoom.replaceAll('_', ' ');
+      friendlyName = '$siteName - $roomName';
     }
     
     final newAhu = AhuUnit(
       id: ahuId,
-      name: 'Burns Ward AHU ${ahuId.replaceAll('ahu-', '').toUpperCase()}',
+      name: friendlyName,
       site: discoveredSite,
       room: discoveredRoom,
       org: 'almed',
     );
     
     addAhuUnit(newAhu);
-    debugPrint('AppProvider: Auto-discovered new AHU - $ahuId at $discoveredSite/$discoveredRoom');
+    debugPrint('AppProvider: Auto-discovered AHU - $ahuId at $discoveredSite/$discoveredRoom');
   }
 
   /// Check if MQTT is ready for commands
