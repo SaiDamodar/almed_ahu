@@ -171,6 +171,14 @@ class _ScreenLockButton extends StatelessWidget {
     );
   }
 
+  void _showChangePasscodeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const _ChangePasscodeDialog(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Selector<AppProvider, bool>(
@@ -201,6 +209,8 @@ class _ScreenLockButton extends StatelessWidget {
                   context.read<AppProvider>().lockScreen();
                 }
               },
+              // Long press to change passcode (only when unlocked)
+              onLongPress: isLocked ? null : () => _showChangePasscodeDialog(context),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -231,6 +241,308 @@ class _ScreenLockButton extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Dialog to change the screen lock passcode
+class _ChangePasscodeDialog extends StatefulWidget {
+  const _ChangePasscodeDialog();
+
+  @override
+  State<_ChangePasscodeDialog> createState() => _ChangePasscodeDialogState();
+}
+
+class _ChangePasscodeDialogState extends State<_ChangePasscodeDialog> {
+  String _currentPasscode = '';
+  String _newPasscode = '';
+  String _confirmPasscode = '';
+  int _step = 0; // 0: current, 1: new, 2: confirm
+  String? _error;
+  bool _isProcessing = false;
+
+  String get _title {
+    switch (_step) {
+      case 0: return 'Enter Current Passcode';
+      case 1: return 'Enter New Passcode';
+      case 2: return 'Confirm New Passcode';
+      default: return '';
+    }
+  }
+
+  String get _currentInput {
+    switch (_step) {
+      case 0: return _currentPasscode;
+      case 1: return _newPasscode;
+      case 2: return _confirmPasscode;
+      default: return '';
+    }
+  }
+
+  void _onDigitPressed(String digit) {
+    if (_isProcessing) return;
+    
+    setState(() {
+      _error = null;
+      switch (_step) {
+        case 0:
+          if (_currentPasscode.length < 6) _currentPasscode += digit;
+          break;
+        case 1:
+          if (_newPasscode.length < 6) _newPasscode += digit;
+          break;
+        case 2:
+          if (_confirmPasscode.length < 6) _confirmPasscode += digit;
+          break;
+      }
+    });
+
+    // Auto-advance when 6 digits entered
+    if (_currentInput.length == 6) {
+      _handleStepComplete();
+    }
+  }
+
+  void _onBackspace() {
+    if (_isProcessing) return;
+    
+    setState(() {
+      _error = null;
+      switch (_step) {
+        case 0:
+          if (_currentPasscode.isNotEmpty) {
+            _currentPasscode = _currentPasscode.substring(0, _currentPasscode.length - 1);
+          }
+          break;
+        case 1:
+          if (_newPasscode.isNotEmpty) {
+            _newPasscode = _newPasscode.substring(0, _newPasscode.length - 1);
+          }
+          break;
+        case 2:
+          if (_confirmPasscode.isNotEmpty) {
+            _confirmPasscode = _confirmPasscode.substring(0, _confirmPasscode.length - 1);
+          }
+          break;
+      }
+    });
+  }
+
+  Future<void> _handleStepComplete() async {
+    if (_step == 0) {
+      // Move to new passcode step
+      setState(() => _step = 1);
+    } else if (_step == 1) {
+      // Move to confirm step
+      setState(() => _step = 2);
+    } else if (_step == 2) {
+      // Check if new and confirm match
+      if (_newPasscode != _confirmPasscode) {
+        setState(() {
+          _error = 'Passcodes do not match';
+          _confirmPasscode = '';
+        });
+        return;
+      }
+
+      // Try to change passcode
+      setState(() => _isProcessing = true);
+      final success = await context.read<AppProvider>().changeScreenLockPasscode(
+        _currentPasscode,
+        _newPasscode,
+      );
+      
+      if (success) {
+        if (mounted) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text('Passcode changed successfully'),
+                ],
+              ),
+              backgroundColor: Colors.green.shade600,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        setState(() {
+          _error = 'Wrong current passcode';
+          _currentPasscode = '';
+          _newPasscode = '';
+          _confirmPasscode = '';
+          _step = 0;
+          _isProcessing = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1E293B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Container(
+        width: 340,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade600.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.key_rounded, color: Colors.blue.shade400, size: 24),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Change Passcode',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  iconSize: 20,
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            
+            // Step indicator
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(3, (index) {
+                final isActive = index == _step;
+                final isComplete = index < _step;
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: isActive ? 24 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: isComplete 
+                        ? Colors.green.shade400 
+                        : isActive 
+                            ? Colors.blue.shade400 
+                            : Colors.grey.shade600,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            
+            // Title
+            Text(
+              _title,
+              style: TextStyle(
+                color: Colors.grey.shade300,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            // Passcode dots
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(6, (index) {
+                final filled = index < _currentInput.length;
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: filled ? Colors.blue.shade400 : Colors.transparent,
+                    border: Border.all(
+                      color: filled ? Colors.blue.shade400 : Colors.grey.shade500,
+                      width: 2,
+                    ),
+                  ),
+                );
+              }),
+            ),
+            
+            // Error message
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                style: TextStyle(
+                  color: Colors.red.shade400,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
+            
+            // Numpad
+            _buildNumpad(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNumpad() {
+    return Column(
+      children: [
+        for (var row in [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['', '0', '⌫']])
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: row.map((digit) {
+                if (digit.isEmpty) {
+                  return const SizedBox(width: 70);
+                }
+                final isBackspace = digit == '⌫';
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Material(
+                    color: isBackspace ? Colors.grey.shade700 : Colors.grey.shade800,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      onTap: isBackspace ? _onBackspace : () => _onDigitPressed(digit),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: 58,
+                        height: 50,
+                        alignment: Alignment.center,
+                        child: isBackspace
+                            ? const Icon(Icons.backspace_rounded, color: Colors.white, size: 22)
+                            : Text(
+                                digit,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+      ],
     );
   }
 }
