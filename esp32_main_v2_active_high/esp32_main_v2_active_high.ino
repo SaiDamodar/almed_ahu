@@ -1607,6 +1607,7 @@ void publishStateLocal(){
   doc["m2_delay"] = M2_DELAY_AFTER_M1_STOP / 1000UL;
   doc["ip"]=WiFi.localIP().toString();
   doc["onlineMode"] = onlineMode;
+  doc["version"] = BUILD_VERSION;  // Firmware version for dashboard display
   char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   

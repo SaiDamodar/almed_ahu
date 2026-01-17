@@ -163,7 +163,7 @@ class _AhuInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    return Selector<AppProvider, ({String name, bool isOnline, bool isRunning, bool isCloudConnected})>(
+    return Selector<AppProvider, ({String name, bool isOnline, bool isRunning, bool isCloudConnected, String? version})>(
       selector: (_, provider) {
         final ahu = provider.ahuUnits.firstWhere((a) => a.id == ahuId);
         final status = provider.getStatus(ahuId);
@@ -174,15 +174,44 @@ class _AhuInfo extends StatelessWidget {
           isOnline: status == 'online',
           isRunning: state?.run ?? false,
           isCloudConnected: awsConnected,
+          version: state?.version,
         );
       },
       builder: (context, data, _) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              data.name,
-              style: theme.textTheme.displayMedium?.copyWith(fontSize: 22),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  data.name,
+                  style: theme.textTheme.displayMedium?.copyWith(fontSize: 22),
+                ),
+                if (data.version != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: const Color(0xFF6366F1).withOpacity(0.4),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      data.version!,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF6366F1),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             Row(
               children: [

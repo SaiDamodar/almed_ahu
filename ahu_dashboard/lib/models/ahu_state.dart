@@ -20,6 +20,9 @@ class AhuState {
   final String ip;           // ESP32 IP address
   @JsonKey(name: 'onlineMode') final bool? onlineMode;  // Operation mode: true=online/cloud, false=offline/local
   
+  // Firmware version from ESP32
+  final String? version;
+  
   // Motor timings (in seconds)
   @JsonKey(name: 'm1_start') final int? m1Start;
   @JsonKey(name: 'm1_post') final int? m1Post;
@@ -42,6 +45,7 @@ class AhuState {
     required this.humSet,
     required this.ip,
     this.onlineMode,
+    this.version,
     this.m1Start,
     this.m1Post,
     this.m2Interval,
