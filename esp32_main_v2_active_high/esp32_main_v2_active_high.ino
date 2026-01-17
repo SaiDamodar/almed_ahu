@@ -277,6 +277,11 @@ CpMode cpMode = CP_DUAL_AUTO;  // Default: dual CP with auto-switching
 int    cpActive = 1;  // Which CP is active (1 or 2) in single mode, or current CP in dual mode
 unsigned long cpLastSwitchAt = 0;  // When CP was last switched (for dual auto mode)
 const unsigned long CP_SWITCH_INTERVAL_MS = 60UL * 60UL * 1000UL;  // 1 hour switch interval
+
+// Dual CP mode: Both CPs on when temp >= setTemp + DUAL_CP_BOTH_THRESH
+const float DUAL_CP_BOTH_THRESH = 2.0;  // Both CPs turn on when temp >= setTemp + 2°C
+bool dualCpBothOn = false;  // True = both CPs are running (rapid cooling phase)
+
 float  tempSet = 22.0;
 const float TEMP_DEADBAND = 1.0;
 const unsigned long CP_MIN_OFF_MS = 5000;
@@ -561,6 +566,8 @@ void saveSystemState(){
   unsigned long now = millis();
   prefs.putBool("runState", runState);
   prefs.putBool("cpOn", cpOn);
+  prefs.putBool("cp2On", cp2On);
+  prefs.putBool("dualCpBothOn", dualCpBothOn);
   prefs.putBool("heatOn", heatOn);
   prefs.putBool("shuttingDown", shuttingDown);
   prefs.putInt("fanSpeed", (int)fanSpeed);
@@ -652,9 +659,10 @@ void restoreSystemState(){
       
       cpOn = wasCpOn;
       cp2On = wasCp2On;
+      dualCpBothOn = prefs.getBool("dualCpBothOn", false);
       heatOn = wasHeatOn;
       
-      // Restore CP timing state (for 1-minute cycle delay)
+      // Restore CP timing state
       unsigned long savedCpLastOffElapsed = prefs.getULong("cpLastOffElapsed", 0);
       if (savedCpLastOffElapsed > 0) {
         // Calculate when CP last turned off based on saved elapsed time
@@ -663,21 +671,24 @@ void restoreSystemState(){
         if (saveTime > 0 && now > saveTime) {
           elapsedSinceSave = now - saveTime;
         }
-        // Restore cpLastOffAt to maintain the 1-minute cycle delay
-        if (savedCpLastOffElapsed + elapsedSinceSave < CP_CYCLE_DELAY_MS) {
-          // Still within the delay period - restore timing
-          cpLastOffAt = now - (savedCpLastOffElapsed + elapsedSinceSave);
-        } else {
-          // Delay period has passed - can turn on immediately if needed
-          cpLastOffAt = now - CP_CYCLE_DELAY_MS;
+        // Restore cpLastOffAt
+        cpLastOffAt = now - (savedCpLastOffElapsed + elapsedSinceSave);
+        // Ensure minimum off time is respected
+        if (now - cpLastOffAt < CP_MIN_OFF_MS) {
+          cpLastOffAt = now - CP_MIN_OFF_MS;
         }
       } else {
         // No saved timing - allow immediate operation
-        cpLastOffAt = now - CP_CYCLE_DELAY_MS;
+        cpLastOffAt = now - CP_MIN_OFF_MS;
       }
       
-      // Restore CP states based on active CP
-      if (cpActive == 1) {
+      // Restore CP states based on dual mode (both on) or single active CP
+      if (dualCpBothOn && cpMode == CP_DUAL_AUTO) {
+        // Both CPs were running in rapid cooling mode
+        cpWrite(cpOn);
+        cp2Write(cp2On);
+        Serial.println("✓ Restored dual CP mode (both CPs)");
+      } else if (cpActive == 1) {
         cpWrite(cpOn);
         cp2Write(false);
         cp2On = false;
@@ -1061,13 +1072,12 @@ void emergencyStopMotors(){
 // ---------- Controllers ----------
 void controlCP(float t){
   if (!runState){
-    if (cpOn){ 
+    if (cpOn || cp2On){ 
       cpWrite(false); 
       cpOn=false; 
-      if (cpMode == CP_DUAL_AUTO) {
-        cp2Write(false);
-        cp2On = false;
-      }
+      cp2Write(false);
+      cp2On = false;
+      dualCpBothOn = false;
       cpLastOffAt=millis(); 
       motorLogMsg("CP forced OFF (system STOPPED)"); 
     }
@@ -1077,54 +1087,134 @@ void controlCP(float t){
 
   unsigned long now = millis();
   
-  // CP SWITCH DELAY: Wait 90 seconds (1.5 min) after switching before allowing new CP to turn on
-  // This allows compressor pressure to equalize for safe restart
-  if (cpSwitchInProgress) {
-    esp_task_wdt_reset();  // CRITICAL: Feed watchdog during delay
+  // Temperature thresholds
+  float bothOnThresh = tempSet + DUAL_CP_BOTH_THRESH;  // Both CPs on when temp >= this (e.g., 24°C)
+  float offThresh = tempSet;                           // All CPs off when temp <= this (e.g., 22°C)
+  
+  // Minimum timing checks
+  bool canTurnOn = (now - cpLastOffAt) >= CP_MIN_OFF_MS;
+  bool canTurnOff = (now - cpLastOnAt) >= CP_MIN_ON_MS;
+  
+  // ===== DUAL CP AUTO MODE =====
+  if (cpMode == CP_DUAL_AUTO) {
     
-    unsigned long elapsed = now - cpSwitchStartedAt;
-    
-    if (elapsed >= CP_SWITCH_DELAY_MS) {
-      cpSwitchInProgress = false;
-      // Clear the flag in preferences (important for crash recovery)
-      prefs.putBool("cpSwitchInProgress", false);
-      
-      // Send completion message to dashboard
-      String completeMsg = "✅ CP SWITCH COMPLETE → CP" + String(cpActive) + " now active";
-      Serial.println(completeMsg);
-      motorLogMsg(completeMsg);
-      
-    } else {
-      // Still in delay period - don't turn on any CP, but keep watchdog fed
-      // Send countdown to dashboard every 5 seconds
-      static unsigned long lastSwitchLog = 0;
-      if (now - lastSwitchLog >= 5000) {
-        lastSwitchLog = now;
-        unsigned long remaining = (CP_SWITCH_DELAY_MS - elapsed) / 1000;
-        unsigned long mins = remaining / 60;
-        unsigned long secs = remaining % 60;
+    // ----- PHASE 1: RAPID COOLING (Both CPs ON) -----
+    // When temp >= setTemp + 2°C, both compressors run for maximum cooling
+    if (t >= bothOnThresh) {
+      if (!dualCpBothOn && canTurnOn) {
+        // Transition to both-on mode
+        dualCpBothOn = true;
+        cpSwitchInProgress = false;  // Cancel any pending switch delay
         
-        String countdownMsg;
-        if (mins > 0) {
-          countdownMsg = "⏳ CP" + String(cpActive) + " starting in " + String(mins) + "m " + String(secs) + "s...";
-        } else {
-          countdownMsg = "⏳ CP" + String(cpActive) + " starting in " + String(secs) + "s...";
+        // Turn on both CPs
+        if (!cpOn) {
+          cpWrite(true);
+          cpOn = true;
+          cpLastOnAt = now;
+        }
+        if (!cp2On) {
+          cp2Write(true);
+          cp2On = true;
         }
         
-        Serial.println(countdownMsg);
-        motorLogMsg(countdownMsg);  // Send to dashboard system logs
+        motorLogMsg("🔥 RAPID COOLING: Both CP1+CP2 ON (temp=" + String(t,1) + "°C)");
+        prefs.putBool("dualCpBothOn", true);
+        
+      } else if (dualCpBothOn) {
+        // Already in both-on mode, ensure both are running
+        if (!cpOn) { cpWrite(true); cpOn = true; }
+        if (!cp2On) { cp2Write(true); cp2On = true; }
+      }
+      return;  // Stay in rapid cooling mode
+    }
+    
+    // ----- PHASE 3: COOLING COMPLETE (All CPs OFF) -----
+    // When temp <= setTemp, turn off all CPs and reset to CP1
+    if (t <= offThresh && canTurnOff) {
+      bool wasOn = cpOn || cp2On;
+      
+      if (cpOn) {
+        cpWrite(false);
+        cpOn = false;
+      }
+      if (cp2On) {
+        cp2Write(false);
+        cp2On = false;
+      }
+      
+      if (wasOn || dualCpBothOn) {
+        cpLastOffAt = now;
+        dualCpBothOn = false;
+        cpSwitchInProgress = false;  // Clear any switch delay - instant reset
+        
+        // Reset to CP1 for next cooling cycle
+        cpActive = 1;
+        cpLastSwitchAt = now;  // Reset the 1-hour timer
+        
+        // Save state immediately
+        prefs.putInt("cpActive", cpActive);
+        prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
+        prefs.putBool("dualCpBothOn", false);
+        prefs.putBool("cpSwitchInProgress", false);
+        
+        motorLogMsg("✅ COOLING COMPLETE: All CPs OFF, reset to CP1 (temp=" + String(t,1) + "°C)");
       }
       return;
     }
-  }
-  
-  // Dual CP auto-switch logic: switch every hour
-  // FIXED: Now properly turns OFF current CP before switching
-  if (cpMode == CP_DUAL_AUTO && !cpSwitchInProgress) {
+    
+    // ----- PHASE 2: ALTERNATING MODE (Single CP, 1 hour each) -----
+    // When setTemp < temp < setTemp + 2°C, one CP runs at a time
+    
+    // Transition from both-on to single mode
+    if (dualCpBothOn) {
+      dualCpBothOn = false;
+      prefs.putBool("dualCpBothOn", false);
+      
+      // Keep cpActive CP on, turn off the other
+      if (cpActive == 1) {
+        if (cp2On) {
+          cp2Write(false);
+          cp2On = false;
+        }
+        motorLogMsg("📉 SINGLE CP MODE: CP2 OFF, CP1 continues (temp=" + String(t,1) + "°C)");
+      } else {
+        if (cpOn) {
+          cpWrite(false);
+          cpOn = false;
+        }
+        motorLogMsg("📉 SINGLE CP MODE: CP1 OFF, CP2 continues (temp=" + String(t,1) + "°C)");
+      }
+      
+      // Reset the 1-hour switch timer
+      cpLastSwitchAt = now;
+      prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
+    }
+    
+    // CP SWITCH DELAY: Wait after switching before allowing new CP to turn on
+    if (cpSwitchInProgress) {
+      esp_task_wdt_reset();
+      unsigned long elapsed = now - cpSwitchStartedAt;
+      
+      if (elapsed >= CP_SWITCH_DELAY_MS) {
+        cpSwitchInProgress = false;
+        prefs.putBool("cpSwitchInProgress", false);
+        motorLogMsg("✅ CP SWITCH COMPLETE → CP" + String(cpActive) + " now active");
+      } else {
+        // Still waiting - log countdown every 15 seconds
+        static unsigned long lastSwitchLog = 0;
+        if (now - lastSwitchLog >= 15000) {
+          lastSwitchLog = now;
+          unsigned long remaining = (CP_SWITCH_DELAY_MS - elapsed) / 1000;
+          motorLogMsg("⏳ CP" + String(cpActive) + " starting in " + String(remaining) + "s...");
+        }
+        return;  // Don't turn on new CP yet
+      }
+    }
+    
+    // Check for 1-hour auto-switch
     if (cpLastSwitchAt == 0) {
       cpLastSwitchAt = now;
       cpActive = 1;
-      // Save initial state
       prefs.putInt("cpActive", cpActive);
       prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
     } else if (now - cpLastSwitchAt >= CP_SWITCH_INTERVAL_MS) {
@@ -1132,71 +1222,67 @@ void controlCP(float t){
       
       int oldCp = cpActive;
       
-      // STEP 1: Force OFF any running CP first
-      if (cpOn) {
+      // Turn off current CP
+      if (cpActive == 1 && cpOn) {
         cpWrite(false);
         cpOn = false;
         cpLastOffAt = now;
-        Serial.println("CP1 forced OFF for auto-switch");
-      }
-      if (cp2On) {
+      } else if (cpActive == 2 && cp2On) {
         cp2Write(false);
         cp2On = false;
         cpLastOffAt = now;
-        Serial.println("CP2 forced OFF for auto-switch");
       }
       
-      esp_task_wdt_reset();
-      
-      // STEP 2: Switch active CP
+      // Switch to other CP
       cpActive = (cpActive == 1) ? 2 : 1;
       cpLastSwitchAt = now;
       cpSwitchStartedAt = now;
       cpSwitchInProgress = true;
       
-      // STEP 3: IMMEDIATELY save to preferences (critical for crash recovery)
+      // Save immediately
       prefs.putInt("cpActive", cpActive);
       prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
       prefs.putBool("cpSwitchInProgress", true);
       
-      esp_task_wdt_reset();
+      motorLogMsg("🔄 CP AUTO-SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (" + String(CP_SWITCH_DELAY_MS/1000) + "s delay)");
       
-      // Send switch start message to dashboard
-      String switchMsg = "🔄 CP AUTO-SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (90s pressure equalization)";
-      Serial.println(switchMsg);
-      motorLogMsg(switchMsg);  // Send to dashboard system logs
-      
-      return;  // Don't turn on new CP yet
+      return;  // Wait for switch delay
     }
-  }
-  
-  float onThresh  = tempSet + TEMP_DEADBAND;
-  float offThresh = tempSet;
-  
-  bool shouldBeOn = (t >= onThresh && (now - cpLastOffAt) >= CP_MIN_OFF_MS && (now - cpLastOffAt) >= CP_CYCLE_DELAY_MS);
-  bool shouldBeOff = (t <= offThresh && (now - cpLastOnAt) >= CP_MIN_ON_MS);
-
-  if (cpMode == CP_DUAL_AUTO) {
-    // Dual mode: use active CP (cpActive)
+    
+    // Normal operation: turn on/off active CP based on temperature
     if (cpActive == 1) {
-      if (!cpOn && shouldBeOn){
-        cpWrite(true); cpOn = true; cpLastOnAt = now;
-        motorLogMsg("CP1 ON (cooling)");
-      } else if (cpOn && shouldBeOff){
-        cpWrite(false); cpOn = false; cpLastOffAt = now;
-        motorLogMsg("CP1 OFF (temp OK)");
+      if (!cpOn && t > offThresh && canTurnOn) {
+        cpWrite(true);
+        cpOn = true;
+        cpLastOnAt = now;
+        motorLogMsg("CP1 ON (cooling, temp=" + String(t,1) + "°C)");
+      }
+      // Ensure CP2 is off in single mode
+      if (cp2On) {
+        cp2Write(false);
+        cp2On = false;
       }
     } else {
-      if (!cp2On && shouldBeOn){
-        cp2Write(true); cp2On = true; cpLastOnAt = now;
-        motorLogMsg("CP2 ON (cooling)");
-      } else if (cp2On && shouldBeOff){
-        cp2Write(false); cp2On = false; cpLastOffAt = now;
-        motorLogMsg("CP2 OFF (temp OK)");
+      if (!cp2On && t > offThresh && canTurnOn) {
+        cp2Write(true);
+        cp2On = true;
+        cpLastOnAt = now;
+        motorLogMsg("CP2 ON (cooling, temp=" + String(t,1) + "°C)");
+      }
+      // Ensure CP1 is off in single mode
+      if (cpOn) {
+        cpWrite(false);
+        cpOn = false;
       }
     }
+    
   } else {
-    // Single mode: use selected CP (cpActive)
+    // ===== SINGLE CP MODE =====
+    float onThresh = tempSet + TEMP_DEADBAND;
+    
+    bool shouldBeOn = (t >= onThresh && canTurnOn);
+    bool shouldBeOff = (t <= offThresh && canTurnOff);
+    
     if (cpActive == 1) {
       if (!cpOn && shouldBeOn){
         cpWrite(true); cpOn = true; cpLastOnAt = now;
@@ -1205,6 +1291,8 @@ void controlCP(float t){
         cpWrite(false); cpOn = false; cpLastOffAt = now;
         motorLogMsg("CP1 OFF (temp OK)");
       }
+      // Ensure CP2 is off
+      if (cp2On) { cp2Write(false); cp2On = false; }
     } else {
       if (!cp2On && shouldBeOn){
         cp2Write(true); cp2On = true; cpLastOnAt = now;
@@ -1213,6 +1301,8 @@ void controlCP(float t){
         cp2Write(false); cp2On = false; cpLastOffAt = now;
         motorLogMsg("CP2 OFF (temp OK)");
       }
+      // Ensure CP1 is off
+      if (cpOn) { cpWrite(false); cpOn = false; }
     }
   }
 }
@@ -1313,6 +1403,9 @@ void publishTelemetryAWS(){
   doc["run"] = runState;
   doc["cp"]  = cpOn;
   doc["cp2"] = cp2On;
+  doc["cpMode"] = (cpMode == CP_DUAL_AUTO ? "dual" : "single");
+  doc["cpActive"] = cpActive;
+  doc["dualCpBothOn"] = dualCpBothOn;
   doc["heater"] = heatOn;
   doc["fan"] = (fanSpeed != FAN_OFF);
   doc["fanSpeed"] = (int)fanSpeed;
@@ -1392,6 +1485,9 @@ void publishTelemetryLocal(){
   doc["run"] = runState;
   doc["cp"]  = cpOn;
   doc["cp2"] = cp2On;
+  doc["cpMode"] = (cpMode == CP_DUAL_AUTO ? "dual" : "single");
+  doc["cpActive"] = cpActive;
+  doc["dualCpBothOn"] = dualCpBothOn;
   doc["heater"] = heatOn;
   doc["fan"] = (fanSpeed != FAN_OFF);
   doc["fanSpeed"] = (int)fanSpeed;
@@ -1499,7 +1595,7 @@ void publishStateLocal(){
   StaticJsonDocument<512> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["cp2"]=cp2On; doc["cpMode"]=(cpMode == CP_DUAL_AUTO ? "dual" : "single");
-  doc["cpActive"]=cpActive; doc["heater"]=heatOn;
+  doc["cpActive"]=cpActive; doc["dualCpBothOn"]=dualCpBothOn; doc["heater"]=heatOn;
   doc["fan"]=(fanSpeed != FAN_OFF);
   doc["fanSpeed"]=(int)fanSpeed;
   doc["tempSet"]=tempSet; doc["humSet"]=humSet;
@@ -2684,12 +2780,20 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       esp_task_wdt_reset();
       
       cpMode = newCpMode;
+      dualCpBothOn = false;  // Reset dual both-on state
+      cpLastOffAt = millis();
+      
       if (cpMode == CP_DUAL_AUTO) {
         cpLastSwitchAt = millis();
+        cpActive = 1;  // Start with CP1 in dual mode
       }
       
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
+      
+      // Save state
+      prefs.putBool("dualCpBothOn", false);
+      prefs.putInt("cpActive", cpActive);
       
       Serial.print("✓ CP mode: ");
       Serial.println(cpMode == CP_DUAL_AUTO ? "DUAL" : "SINGLE");
@@ -2737,15 +2841,17 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       
       // STEP 3: Update state
       cpActive = newCpActive;
+      dualCpBothOn = false;  // Exit both-on mode if active
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
       
       // STEP 4: IMMEDIATELY save to preferences (critical for crash recovery)
       prefs.putInt("cpActive", cpActive);
       prefs.putBool("cpSwitchInProgress", true);
+      prefs.putBool("dualCpBothOn", false);
       
       // Send switch start message to dashboard
-      String switchMsg = "🔄 CP MANUAL SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (90s pressure equalization)";
+      String switchMsg = "🔄 CP MANUAL SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (" + String(CP_SWITCH_DELAY_MS/1000) + "s delay)";
       Serial.println(switchMsg);
       motorLogMsg(switchMsg);  // Send to dashboard system logs
       
