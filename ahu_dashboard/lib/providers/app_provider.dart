@@ -31,9 +31,11 @@ class AppProvider extends ChangeNotifier {
   DateTime _lastNotify = DateTime.now();
   
   // Screen Lock feature - blocks temp/humidity changes when locked
-  bool _isScreenLocked = false;
+  // Lock state persists across restarts - can only unlock with passcode
+  bool _isScreenLocked = true;  // Default to locked on startup
   String _screenLockPasscode = '123123';  // Default passcode
   static const String _passcodeKey = 'screen_lock_passcode';
+  static const String _lockStateKey = 'screen_lock_state';
 
   // Getters
   UserRole? get currentRole => _currentRole;
@@ -41,20 +43,25 @@ class AppProvider extends ChangeNotifier {
   MqttService? get mqttService => _mqttService;
   bool get isScreenLocked => _isScreenLocked;
   
-  /// Initialize and load saved passcode
+  /// Initialize and load saved passcode and lock state
   Future<void> loadScreenLockPasscode() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       _screenLockPasscode = prefs.getString(_passcodeKey) ?? '123123';
-      debugPrint('AppProvider: Loaded screen lock passcode');
+      // Load lock state - defaults to true (locked) if not saved
+      _isScreenLocked = prefs.getBool(_lockStateKey) ?? true;
+      debugPrint('AppProvider: Loaded screen lock - locked: $_isScreenLocked');
+      notifyListeners();
     } catch (e) {
       debugPrint('AppProvider: Error loading passcode: $e');
+      _isScreenLocked = true; // Default to locked on error
     }
   }
   
   /// Toggle screen lock state
   void toggleScreenLock() {
     _isScreenLocked = !_isScreenLocked;
+    _saveLockState();
     debugPrint('AppProvider: Screen ${_isScreenLocked ? "LOCKED" : "UNLOCKED"}');
     notifyListeners();
   }
@@ -62,6 +69,7 @@ class AppProvider extends ChangeNotifier {
   /// Lock the screen
   void lockScreen() {
     _isScreenLocked = true;
+    _saveLockState();
     debugPrint('AppProvider: Screen LOCKED');
     notifyListeners();
   }
@@ -70,12 +78,24 @@ class AppProvider extends ChangeNotifier {
   bool unlockScreen(String passcode) {
     if (passcode == _screenLockPasscode) {
       _isScreenLocked = false;
+      _saveLockState();
       debugPrint('AppProvider: Screen UNLOCKED');
       notifyListeners();
       return true;
     }
     debugPrint('AppProvider: Unlock failed - wrong passcode');
     return false;
+  }
+  
+  /// Save lock state to SharedPreferences
+  Future<void> _saveLockState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_lockStateKey, _isScreenLocked);
+      debugPrint('AppProvider: Lock state saved: $_isScreenLocked');
+    } catch (e) {
+      debugPrint('AppProvider: Error saving lock state: $e');
+    }
   }
   
   /// Change the screen lock passcode
