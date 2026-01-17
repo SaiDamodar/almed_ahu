@@ -16,7 +16,7 @@ from datetime import datetime
 # ==================== Configuration ====================
 
 # MQTT Configuration - local broker (ESP32 hotspot network)
-MQTT_BROKER = os.getenv('MQTT_BROKER', '10.42.0.1')
+MQTT_BROKER = os.getenv('MQTT_BROKER', 'localhost')
 MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
 MQTT_USERNAME = os.getenv('MQTT_USERNAME', 'ahu_user')
 MQTT_PASSWORD = os.getenv('MQTT_PASSWORD', 'ahu_pass_2024')

@@ -14,8 +14,8 @@ This guide configures the Raspberry Pi to connect directly to the main WiFi netw
 
 | Device | Network | IP Address |
 |--------|---------|------------|
-| WiFi Router | AlMed | Gateway (e.g., 192.168.1.1) |
-| Raspberry Pi | AlMed | **192.168.1.100** (static) |
+| WiFi Router | AlMed | Gateway (e.g., 192.168.0.1) |
+| Raspberry Pi | AlMed | **192.168.0.100** (static) |
 | ESP32 | AlMed | DHCP (dynamic) |
 
 ## Prerequisites
@@ -59,12 +59,12 @@ Add or modify these lines at the end of the file:
 ```
 # Static IP for wlan0 on AlMed network
 interface wlan0
-static ip_address=192.168.1.100/24
-static routers=192.168.1.1
-static domain_name_servers=192.168.1.1 8.8.8.8
+static ip_address=192.168.0.100/24
+static routers=192.168.0.1
+static domain_name_servers=192.168.0.1 8.8.8.8
 ```
 
-**Note:** Adjust `static routers` and `domain_name_servers` to match your router's IP if it's not `192.168.1.1`.
+**Note:** Adjust `static routers` and `domain_name_servers` to match your router's IP if it's not `192.168.0.1`.
 
 ---
 
@@ -185,7 +185,7 @@ mosquitto_pub -h localhost -u almed -P 'Almed1234$' -t 'test' -m 'hello'
 Once the RPi is configured, the ESP32 should automatically connect:
 
 1. ESP32 connects to `AlMed` WiFi
-2. ESP32 connects to MQTT broker at `192.168.1.100:1883`
+2. ESP32 connects to MQTT broker at `192.168.0.100:1883`
 3. ESP32 connects to AWS IoT cloud (independent of RPi)
 
 Check the ESP32 Serial Monitor for:
@@ -201,7 +201,7 @@ Check the ESP32 Serial Monitor for:
 
 ### ESP32 can't connect to MQTT broker
 
-1. Verify RPi has IP `192.168.1.100`:
+1. Verify RPi has IP `192.168.0.100`:
    ```bash
    ip addr show wlan0
    ```
@@ -231,9 +231,9 @@ Check the ESP32 Serial Monitor for:
 
 ### IP address conflict
 
-If another device has `192.168.1.100`, choose a different static IP:
-- Update `/etc/dhcpcd.conf` on RPi
-- Update ESP32 code: `mqttHost = "192.168.1.NEW_IP"`
+If another device has `192.168.0.100`, choose a different static IP:
+- Update NetworkManager connection on RPi
+- Update ESP32 code: `mqttHost = "192.168.0.NEW_IP"`
 - Or use MQTT provisioning to update broker IP dynamically
 
 ---
@@ -264,8 +264,8 @@ The MQTT topic structure remains the same:
 
 | Component | Before (Hotspot Mode) | After (Single WiFi) |
 |-----------|----------------------|---------------------|
-| RPi Network | Hotspot (10.42.0.1) + Bridge to main WiFi | Direct WiFi (192.168.1.100) |
+| RPi Network | Hotspot (10.42.0.1) + Bridge to main WiFi | Direct WiFi (192.168.0.100) |
 | ESP32 Network | Connect to RPi hotspot | Connect to AlMed WiFi |
-| MQTT Broker | 10.42.0.1:1883 | 192.168.1.100:1883 |
+| MQTT Broker | 10.42.0.1:1883 | 192.168.0.100:1883 |
 | Cloud Access | Via RPi bridge | Direct from ESP32 |
 | Reliability | Dependent on bridge | Independent |

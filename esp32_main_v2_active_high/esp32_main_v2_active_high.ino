@@ -196,7 +196,7 @@ PubSubClient mqttLocal(espNet);
 const char* MQTT_USER = "almed";
 const char* MQTT_PASS = "Almed1234$";
 const uint16_t MQTT_PORT = 1883;
-String mqttHost = "192.168.1.100";  // RPi static IP on AlMed network
+String mqttHost = "192.168.0.100";  // RPi static IP on AlMed network
 unsigned long lastMqttAttempt = 0;
 
 // MQTT buffer size for large messages (increased for combo sensor data)
@@ -3187,7 +3187,7 @@ void setup()
   w2_pass = prefs.getString("w2_pass", String(""));
   
   // Load Local MQTT broker host (RPi static IP on AlMed network)
-  mqttHost = prefs.getString("mqtt_host", String("192.168.1.100"));
+  mqttHost = prefs.getString("mqtt_host", String("192.168.0.100"));
   
   esp_task_wdt_reset();
   

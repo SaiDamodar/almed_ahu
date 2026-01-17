@@ -65,13 +65,17 @@ class AppProvider extends ChangeNotifier {
   }
 
   /// Initialize MQTT connection
+  /// Dashboard runs ON the Raspberry Pi, so connect to localhost
+  /// ESP32 connects to this same broker at 192.168.1.100 (RPi static IP on AlMed network)
   Future<bool> initializeMqtt({
     String? broker,
     int? port,
     String? username,
     String? password,
   }) async {
-    final defaultBroker = broker ?? '10.42.0.1';
+    // Dashboard runs on RPi - connect to local MQTT broker
+    // Single WiFi mode: Both ESP32 and RPi connect to "AlMed" network
+    final defaultBroker = broker ?? 'localhost';
     
     _mqttService = MqttService(
       broker: defaultBroker,
@@ -81,7 +85,7 @@ class AppProvider extends ChangeNotifier {
       useTLS: false,
     );
     
-    debugPrint('AppProvider: Initializing MQTT - Connecting to Raspberry Pi bridge at $defaultBroker:${port ?? 1883}');
+    debugPrint('AppProvider: Initializing MQTT - Connecting to local broker at $defaultBroker:${port ?? 1883}');
 
     // Listen to connection status
     _mqttService!.connectionStream.listen((connected) {

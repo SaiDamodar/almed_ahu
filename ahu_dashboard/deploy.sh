@@ -11,7 +11,7 @@ echo "======================================"
 echo ""
 
 # Configuration
-PI_IP="${PI_IP:-10.42.0.1}"
+PI_IP="${PI_IP:-192.168.1.100}"
 PI_USER="${PI_USER:-pi}"
 APP_DIR="/home/pi/ahu_dashboard"
 

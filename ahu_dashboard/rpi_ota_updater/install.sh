@@ -25,7 +25,7 @@ echo ""
 echo "2. Creating environment config..."
 cat > /etc/default/ahu-ota-updater << 'EOF'
 # RPi OTA Updater Configuration
-MQTT_BROKER=10.42.0.1
+MQTT_BROKER=localhost
 MQTT_PORT=1883
 MQTT_USERNAME=ahu_user
 MQTT_PASSWORD=ahu_pass_2024
