@@ -20,7 +20,7 @@ bool get isRaspberryPi {
   }
 }
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   // RPi Performance: Disable debug painting and checkerboards
@@ -41,7 +41,11 @@ void main() {
     DeviceOrientation.landscapeRight,
   ]);
   
-  runApp(const AhuDashboardApp());
+  // Pre-load screen lock state before app starts
+  final appProvider = AppProvider();
+  await appProvider.loadScreenLockPasscode();
+  
+  runApp(AhuDashboardApp(appProvider: appProvider));
 }
 
 /// Custom scroll behavior that:
@@ -71,17 +75,16 @@ class TouchFriendlyScrollBehavior extends MaterialScrollBehavior {
 }
 
 class AhuDashboardApp extends StatelessWidget {
-  const AhuDashboardApp({super.key});
+  final AppProvider appProvider;
+  
+  const AhuDashboardApp({super.key, required this.appProvider});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) {
-          final provider = AppProvider();
-          provider.loadScreenLockPasscode(); // Load saved passcode on startup
-          return provider;
-        }),
+        // Use pre-loaded provider with lock state already initialized
+        ChangeNotifierProvider.value(value: appProvider),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: Consumer<ThemeProvider>(
