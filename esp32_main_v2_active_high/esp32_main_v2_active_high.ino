@@ -189,7 +189,7 @@ PubSubClient client(net);
 
 // ========== Local MQTT Broker (Raspberry Pi) ==========
 // RPi connects to same WiFi (AlMed) and runs MQTT broker
-// Configure RPi with static IP: 192.168.1.100 (see RPI_NETWORK_SETUP.md)
+// Configure RPi with static IP: 192.168.0.100 (see RPI_NETWORK_SETUP.md)
 WiFiClient espNet;
 PubSubClient mqttLocal(espNet);
 
@@ -3187,7 +3187,16 @@ void setup()
   w2_pass = prefs.getString("w2_pass", String(""));
   
   // Load Local MQTT broker host (RPi static IP on AlMed network)
-  mqttHost = prefs.getString("mqtt_host", String("192.168.0.100"));
+  // SINGLE WIFI MODE: Force update to new network IP (migrating from hotspot mode)
+  String savedMqttHost = prefs.getString("mqtt_host", String("192.168.0.100"));
+  if (savedMqttHost.startsWith("10.42.") || savedMqttHost == "10.42.0.1") {
+    // Old hotspot IP detected - update to new single WiFi network IP
+    mqttHost = "192.168.0.100";
+    prefs.putString("mqtt_host", mqttHost);
+    Serial.println("✓ MQTT broker IP migrated: " + savedMqttHost + " → " + mqttHost);
+  } else {
+    mqttHost = savedMqttHost;
+  }
   
   esp_task_wdt_reset();
   
