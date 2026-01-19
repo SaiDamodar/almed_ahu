@@ -19,11 +19,11 @@
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP2" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "KAVERI_BURNS_AHU1" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
-#define BUILD_VERSION "v2.5.0-STABLE"
-#define BUILD_DATE "2026-01-02"
+#define BUILD_VERSION "v2.5.1-STABLE"
+#define BUILD_DATE "2026-01-19"
 #define BUILD_FEATURES "15s-CP-delay, deferred-writes, self-healing, fast-mqtt"
 
 // ============ GitHub OTA Configuration (Hardcoded) ============
@@ -328,8 +328,8 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "Aumnatic_test";    // Kaveri Hospital
-const char* ROOM = "test";         // Burns Ward
+const char* SITE = "Kauvery";    // Kaveri Hospital
+const char* ROOM = "Burns_OT";         // Burns Ward
 const char* AHU  = "ahu-01";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
@@ -1092,8 +1092,20 @@ void controlCP(float t){
   float offThresh = tempSet;                           // All CPs off when temp <= this (e.g., 22°C)
   
   // Minimum timing checks
-  bool canTurnOn = (now - cpLastOffAt) >= CP_MIN_OFF_MS;
+  // CP must wait 1 minute after turning off before turning on again (compressor protection)
+  bool canTurnOn = (now - cpLastOffAt) >= CP_CYCLE_DELAY_MS;
   bool canTurnOff = (now - cpLastOnAt) >= CP_MIN_ON_MS;
+  
+  // Log countdown when waiting for cycle delay (every 10 seconds)
+  static unsigned long lastCycleDelayLog = 0;
+  if (!canTurnOn && (cpOn == false && cp2On == false) && (now - lastCycleDelayLog >= 10000)) {
+    lastCycleDelayLog = now;
+    unsigned long elapsed = now - cpLastOffAt;
+    unsigned long remaining = (CP_CYCLE_DELAY_MS - elapsed) / 1000;
+    if (remaining > 0 && remaining <= 60) {
+      motorLogMsg("⏳ CP cycle delay: " + String(remaining) + "s remaining");
+    }
+  }
   
   // ===== DUAL CP AUTO MODE =====
   if (cpMode == CP_DUAL_AUTO) {
