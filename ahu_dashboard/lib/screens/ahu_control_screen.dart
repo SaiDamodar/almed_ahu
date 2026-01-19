@@ -11,6 +11,7 @@ import '../models/ahu_state.dart';
 import '../models/ahu_log.dart';
 import '../widgets/motor_timing_dialog.dart';
 import '../widgets/wifi_control_widget.dart';
+import '../widgets/screen_lock_dialog.dart';
 
 /// Modern AHU control screen
 class AhuControlScreen extends StatefulWidget {
@@ -141,6 +142,9 @@ class _TopBar extends StatelessWidget {
           // Mode toggle (Admin only)
           _ModeToggleButton(ahuId: ahuId),
           const SizedBox(width: 12),
+          // Screen Lock button
+          _ScreenLockButton(),
+          const SizedBox(width: 12),
           // WiFi control (Admin only)
           _WiFiButton(),
           const SizedBox(width: 12),
@@ -148,6 +152,397 @@ class _TopBar extends StatelessWidget {
           _ResetButton(ahuId: ahuId),
         ],
       ),
+    );
+  }
+}
+
+class _ScreenLockButton extends StatelessWidget {
+  const _ScreenLockButton();
+
+  void _showUnlockDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ScreenUnlockDialog(
+        onVerify: (passcode) {
+          return context.read<AppProvider>().unlockScreen(passcode);
+        },
+      ),
+    );
+  }
+
+  void _showChangePasscodeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const _ChangePasscodeDialog(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<AppProvider, bool>(
+      selector: (_, provider) => provider.isScreenLocked,
+      builder: (context, isLocked, _) {
+        return Container(
+          decoration: BoxDecoration(
+            gradient: isLocked
+                ? const LinearGradient(
+                    colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                  )
+                : null,
+            color: isLocked ? null : Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: isLocked
+                ? null
+                : Border.all(
+                    color: Theme.of(context).dividerColor.withOpacity(0.1),
+                  ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                if (isLocked) {
+                  _showUnlockDialog(context);
+                } else {
+                  context.read<AppProvider>().lockScreen();
+                }
+              },
+              // Long press to change passcode (only when unlocked)
+              onLongPress: isLocked ? null : () => _showChangePasscodeDialog(context),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                      color: isLocked ? Colors.white : Colors.grey.shade600,
+                      size: 20,
+                    ),
+                    if (isLocked) ...[
+                      const SizedBox(width: 6),
+                      const Text(
+                        'LOCKED',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Dialog to change the screen lock passcode
+class _ChangePasscodeDialog extends StatefulWidget {
+  const _ChangePasscodeDialog();
+
+  @override
+  State<_ChangePasscodeDialog> createState() => _ChangePasscodeDialogState();
+}
+
+class _ChangePasscodeDialogState extends State<_ChangePasscodeDialog> {
+  String _currentPasscode = '';
+  String _newPasscode = '';
+  String _confirmPasscode = '';
+  int _step = 0; // 0: current, 1: new, 2: confirm
+  String? _error;
+  bool _isProcessing = false;
+
+  String get _title {
+    switch (_step) {
+      case 0: return 'Enter Current Passcode';
+      case 1: return 'Enter New Passcode';
+      case 2: return 'Confirm New Passcode';
+      default: return '';
+    }
+  }
+
+  String get _currentInput {
+    switch (_step) {
+      case 0: return _currentPasscode;
+      case 1: return _newPasscode;
+      case 2: return _confirmPasscode;
+      default: return '';
+    }
+  }
+
+  void _onDigitPressed(String digit) {
+    if (_isProcessing) return;
+    
+    setState(() {
+      _error = null;
+      switch (_step) {
+        case 0:
+          if (_currentPasscode.length < 6) _currentPasscode += digit;
+          break;
+        case 1:
+          if (_newPasscode.length < 6) _newPasscode += digit;
+          break;
+        case 2:
+          if (_confirmPasscode.length < 6) _confirmPasscode += digit;
+          break;
+      }
+    });
+
+    // Auto-advance when 6 digits entered
+    if (_currentInput.length == 6) {
+      _handleStepComplete();
+    }
+  }
+
+  void _onBackspace() {
+    if (_isProcessing) return;
+    
+    setState(() {
+      _error = null;
+      switch (_step) {
+        case 0:
+          if (_currentPasscode.isNotEmpty) {
+            _currentPasscode = _currentPasscode.substring(0, _currentPasscode.length - 1);
+          }
+          break;
+        case 1:
+          if (_newPasscode.isNotEmpty) {
+            _newPasscode = _newPasscode.substring(0, _newPasscode.length - 1);
+          }
+          break;
+        case 2:
+          if (_confirmPasscode.isNotEmpty) {
+            _confirmPasscode = _confirmPasscode.substring(0, _confirmPasscode.length - 1);
+          }
+          break;
+      }
+    });
+  }
+
+  Future<void> _handleStepComplete() async {
+    if (_step == 0) {
+      // Move to new passcode step
+      setState(() => _step = 1);
+    } else if (_step == 1) {
+      // Move to confirm step
+      setState(() => _step = 2);
+    } else if (_step == 2) {
+      // Check if new and confirm match
+      if (_newPasscode != _confirmPasscode) {
+        setState(() {
+          _error = 'Passcodes do not match';
+          _confirmPasscode = '';
+        });
+        return;
+      }
+
+      // Try to change passcode
+      setState(() => _isProcessing = true);
+      final success = await context.read<AppProvider>().changeScreenLockPasscode(
+        _currentPasscode,
+        _newPasscode,
+      );
+      
+      if (success) {
+        if (mounted) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text('Passcode changed successfully'),
+                ],
+              ),
+              backgroundColor: Colors.green.shade600,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        setState(() {
+          _error = 'Wrong current passcode';
+          _currentPasscode = '';
+          _newPasscode = '';
+          _confirmPasscode = '';
+          _step = 0;
+          _isProcessing = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1E293B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Container(
+        width: 340,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade600.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.key_rounded, color: Colors.blue.shade400, size: 24),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Change Passcode',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  iconSize: 20,
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            
+            // Step indicator
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(3, (index) {
+                final isActive = index == _step;
+                final isComplete = index < _step;
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: isActive ? 24 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: isComplete 
+                        ? Colors.green.shade400 
+                        : isActive 
+                            ? Colors.blue.shade400 
+                            : Colors.grey.shade600,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            
+            // Title
+            Text(
+              _title,
+              style: TextStyle(
+                color: Colors.grey.shade300,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            // Passcode dots
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(6, (index) {
+                final filled = index < _currentInput.length;
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: filled ? Colors.blue.shade400 : Colors.transparent,
+                    border: Border.all(
+                      color: filled ? Colors.blue.shade400 : Colors.grey.shade500,
+                      width: 2,
+                    ),
+                  ),
+                );
+              }),
+            ),
+            
+            // Error message
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                style: TextStyle(
+                  color: Colors.red.shade400,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
+            
+            // Numpad
+            _buildNumpad(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNumpad() {
+    return Column(
+      children: [
+        for (var row in [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['', '0', '⌫']])
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: row.map((digit) {
+                if (digit.isEmpty) {
+                  return const SizedBox(width: 70);
+                }
+                final isBackspace = digit == '⌫';
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Material(
+                    color: isBackspace ? Colors.grey.shade700 : Colors.grey.shade800,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      onTap: isBackspace ? _onBackspace : () => _onDigitPressed(digit),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: 58,
+                        height: 50,
+                        alignment: Alignment.center,
+                        child: isBackspace
+                            ? const Icon(Icons.backspace_rounded, color: Colors.white, size: 22)
+                            : Text(
+                                digit,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -444,29 +839,37 @@ class _CpModeToggleButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    return Selector<AppProvider, ({String cpMode, int cpActive, bool canSendCommands})>(
+    return Selector<AppProvider, ({String cpMode, int cpActive, bool canSendCommands, bool isLocked})>(
       selector: (_, provider) {
         final state = provider.getState(ahuId);
         final cpMode = state?.cpMode ?? "dual";
         final cpActive = state?.cpActive ?? 1;
         final canSendCommands = provider.canSendCommands;
-        return (cpMode: cpMode, cpActive: cpActive, canSendCommands: canSendCommands);
+        final isLocked = provider.isScreenLocked;
+        return (cpMode: cpMode, cpActive: cpActive, canSendCommands: canSendCommands, isLocked: isLocked);
       },
       builder: (context, data, _) {
         final isDualMode = data.cpMode == "dual";
-        final isEnabled = data.canSendCommands;
+        // CP mode is LOCKED when screen is locked
+        final isEnabled = data.canSendCommands && !data.isLocked;
 
+        final isLocked = data.isLocked;
+        
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // CP Mode Toggle Button
+            // CP Mode Toggle Button - LOCKED when screen is locked
             Container(
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: isDualMode
-                      ? [Colors.cyan.shade600, Colors.cyan.shade700]
-                      : [Colors.teal.shade600, Colors.teal.shade700],
-                ),
+                gradient: isLocked 
+                    ? LinearGradient(
+                        colors: [Colors.grey.shade500, Colors.grey.shade600],
+                      )
+                    : LinearGradient(
+                        colors: isDualMode
+                            ? [Colors.cyan.shade600, Colors.cyan.shade700]
+                            : [Colors.teal.shade600, Colors.teal.shade700],
+                      ),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Material(
@@ -485,7 +888,7 @@ class _CpModeToggleButton extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          Icons.ac_unit_rounded,
+                          isLocked ? Icons.lock_rounded : Icons.ac_unit_rounded,
                           color: Colors.white,
                           size: 18,
                         ),
@@ -839,20 +1242,26 @@ class _SensorControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AppProvider, ({_SensorData data, bool canSendCommands})>(
+    return Selector<AppProvider, ({_SensorData data, bool canSendCommands, bool isLocked})>(
       selector: (_, provider) => (
         data: _SensorData(
           telemetry: provider.getTelemetry(ahuId),
           state: provider.getState(ahuId),
         ),
         canSendCommands: provider.canSendCommands,
+        isLocked: provider.isScreenLocked,
       ),
       builder: (context, result, _) {
         final data = result.data;
         final canSend = result.canSendCommands;
+        final isLocked = result.isLocked;
+        
+        // When locked: humidity is disabled, temperature remains controllable
+        final canModifyHumidity = canSend && !isLocked;
+        
         return Row(
           children: [
-            // Temperature
+            // Temperature - ALWAYS controllable (even when locked)
             Expanded(
               child: _SensorControl(
                 icon: Icons.thermostat_rounded,
@@ -863,13 +1272,14 @@ class _SensorControls extends StatelessWidget {
                 color: AppTheme.temperature,
                 min: 15,
                 max: 30,
+                isLocked: false,  // Temperature never locked
                 onChanged: canSend ? (value) {
                   context.read<AppProvider>().setTemperature(ahuId, value);
                 } : null,
               ),
             ),
             const SizedBox(width: 16),
-            // Humidity
+            // Humidity - LOCKED when screen is locked
             Expanded(
               child: _SensorControl(
                 icon: Icons.water_drop_rounded,
@@ -880,7 +1290,8 @@ class _SensorControls extends StatelessWidget {
                 color: AppTheme.humidity,
                 min: 30,
                 max: 80,
-                onChanged: canSend ? (value) {
+                isLocked: isLocked,
+                onChanged: canModifyHumidity ? (value) {
                   context.read<AppProvider>().setHumidity(ahuId, value);
                 } : null,
               ),
@@ -902,6 +1313,7 @@ class _SensorControl extends StatelessWidget {
   final double min;
   final double max;
   final ValueChanged<double>? onChanged;
+  final bool isLocked;
 
   const _SensorControl({
     required this.icon,
@@ -913,6 +1325,7 @@ class _SensorControl extends StatelessWidget {
     required this.min,
     required this.max,
     this.onChanged,
+    this.isLocked = false,
   });
 
   @override
@@ -972,6 +1385,7 @@ class _SensorControl extends StatelessWidget {
                   min: min,
                   max: max,
                   onChanged: onChanged,
+                  isLocked: isLocked,
                 ),
               ],
             ),
@@ -1089,6 +1503,7 @@ class _SetpointControls extends StatelessWidget {
   final double min;
   final double max;
   final ValueChanged<double>? onChanged;
+  final bool isLocked;
   
   const _SetpointControls({
     required this.setpoint,
@@ -1097,6 +1512,7 @@ class _SetpointControls extends StatelessWidget {
     required this.min,
     required this.max,
     this.onChanged,
+    this.isLocked = false,
   });
 
   @override
@@ -1107,21 +1523,32 @@ class _SetpointControls extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [color.withOpacity(0.2), color.withOpacity(0.1)],
+          colors: isLocked 
+              ? [Colors.grey.withOpacity(0.2), Colors.grey.withOpacity(0.1)]
+              : [color.withOpacity(0.2), color.withOpacity(0.1)],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: isLocked ? Colors.grey.withOpacity(0.3) : color.withOpacity(0.3)),
       ),
       child: Column(
         children: [
-          Text(
-            'SETPOINT',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: color.withOpacity(0.8),
-              letterSpacing: 1.2,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (isLocked) ...[
+                Icon(Icons.lock_rounded, size: 12, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                'SETPOINT',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: isLocked ? Colors.grey.shade500 : color.withOpacity(0.8),
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Row(
@@ -1129,7 +1556,7 @@ class _SetpointControls extends StatelessWidget {
             children: [
               _GlossyButton(
                 icon: Icons.remove,
-                color: color,
+                color: isLocked ? Colors.grey : color,
                 onPressed: onChanged != null && setpoint > min ? () => onChanged!(setpoint - 0.5) : null,
               ),
               const SizedBox(width: 16),
@@ -1139,7 +1566,7 @@ class _SetpointControls extends StatelessWidget {
                   color: Colors.white.withOpacity(0.9),
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
-                    BoxShadow(color: color.withOpacity(0.2), blurRadius: 8),
+                    BoxShadow(color: (isLocked ? Colors.grey : color).withOpacity(0.2), blurRadius: 8),
                   ],
                 ),
                 child: Text(
@@ -1147,14 +1574,14 @@ class _SetpointControls extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: color,
+                    color: isLocked ? Colors.grey : color,
                   ),
                 ),
               ),
               const SizedBox(width: 16),
               _GlossyButton(
                 icon: Icons.add,
-                color: color,
+                color: isLocked ? Colors.grey : color,
                 onPressed: onChanged != null && setpoint < max ? () => onChanged!(setpoint + 0.5) : null,
               ),
             ],
