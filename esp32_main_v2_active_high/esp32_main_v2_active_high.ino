@@ -329,9 +329,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "Kauvery";    // Kaveri Hospital
-const char* ROOM = "Burns_OT";         // Burns Ward
-const char* AHU  = "ahu-01";            // AHU 1
+const char* SITE = "Kauvery Hospital";    // Kaveri Hospital
+const char* ROOM = "BURNS_0T";         // Burns Ward
+const char* AHU  = "AHU-01";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
