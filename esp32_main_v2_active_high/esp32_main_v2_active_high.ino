@@ -92,6 +92,11 @@ struct SelfHealingState {
   unsigned long lastMqttAwsRecovery = 0;
   bool mqttAwsHealthy = false;
   
+  // Internet connectivity (for AWS)
+  bool internetAvailable = false;
+  unsigned long lastInternetCheck = 0;
+  int internetFailCount = 0;
+  
   // Sensor health
   int sensorFailCount = 0;
   unsigned long lastSensorRecovery = 0;
@@ -423,6 +428,58 @@ void recoverWiFi() {
 }
 
 // MQTT Recovery - fast reconnection without reset
+// Quick internet check using DNS - non-blocking with short timeout
+// Returns true if internet is available, false otherwise
+bool checkInternetAvailable() {
+  if (WiFi.status() != WL_CONNECTED) {
+    selfHealing.internetAvailable = false;
+    return false;
+  }
+  
+  // Only check every 10 seconds to avoid overhead
+  unsigned long now = millis();
+  if (now - selfHealing.lastInternetCheck < 10000) {
+    return selfHealing.internetAvailable;
+  }
+  selfHealing.lastInternetCheck = now;
+  
+  esp_task_wdt_reset();
+  
+  // Quick DNS lookup to check internet - use Google's DNS or AWS endpoint
+  IPAddress resolvedIP;
+  
+  // Try to resolve a known host (fast DNS lookup)
+  // WiFi.hostByName has a timeout, usually around 4 seconds
+  // We'll use a simple approach: if last AWS attempt failed many times, assume no internet
+  if (selfHealing.internetFailCount >= 3) {
+    // Too many failures - back off checking
+    if (selfHealing.internetFailCount >= 10) {
+      // Only check every 60 seconds after 10 failures
+      if (now - selfHealing.lastInternetCheck < 60000) {
+        return selfHealing.internetAvailable;
+      }
+    }
+  }
+  
+  // Use WiFi.hostByName with short timeout
+  // This is a quick check - if it fails, we know internet is not available
+  int result = WiFi.hostByName("iot.ap-south-1.amazonaws.com", resolvedIP);
+  esp_task_wdt_reset();
+  
+  if (result == 1 && resolvedIP != IPAddress(0,0,0,0)) {
+    selfHealing.internetAvailable = true;
+    selfHealing.internetFailCount = 0;
+    return true;
+  } else {
+    selfHealing.internetAvailable = false;
+    selfHealing.internetFailCount++;
+    if (selfHealing.internetFailCount <= 3) {
+      Serial.println("⚠️ [INTERNET] DNS check failed - no internet?");
+    }
+    return false;
+  }
+}
+
 void recoverMqttLocal() {
   Serial.println("🔧 [SELF-HEAL] Recovering Local MQTT...");
   
@@ -3281,21 +3338,33 @@ void setup()
   Serial.println("========================================\n");
 
   // Try initial AWS IoT connection if online mode and WiFi connected
+  // CRITICAL: Check internet first to avoid blocking TLS handshake
   if (onlineMode && WiFi.status() == WL_CONNECTED) {
-    Serial.println("📡 Attempting AWS IoT connection...");
-    esp_task_wdt_reset(); // Feed watchdog before connection
-    if (client.connect(THINGNAME)) {
-      esp_task_wdt_reset(); // Feed watchdog after connection
-      Serial.println("✓ AWS IoT connected on startup (cloud service active)");
-      esp_task_wdt_reset(); // Feed watchdog before subscribe
-      bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-      esp_task_wdt_reset(); // Feed watchdog after subscribe
-      Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-      Serial.println(subResult ? " ✓" : " ✗ FAILED");
-      publishStatusOnline();
+    Serial.println("📡 Checking internet connectivity...");
+    esp_task_wdt_reset();
+    
+    // Quick internet check before AWS attempt
+    if (checkInternetAvailable()) {
+      Serial.println("✓ Internet available - attempting AWS IoT connection...");
+      esp_task_wdt_reset(); // Feed watchdog before connection
+      if (client.connect(THINGNAME)) {
+        esp_task_wdt_reset(); // Feed watchdog after connection
+        Serial.println("✓ AWS IoT connected on startup (cloud service active)");
+        esp_task_wdt_reset(); // Feed watchdog before subscribe
+        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+        esp_task_wdt_reset(); // Feed watchdog after subscribe
+        Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+        Serial.println(subResult ? " ✓" : " ✗ FAILED");
+        publishStatusOnline();
+      } else {
+        esp_task_wdt_reset(); // Feed watchdog after failed connection
+        Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
+        Serial.println("  → Local MQTT continues working normally");
+      }
     } else {
-      esp_task_wdt_reset(); // Feed watchdog after failed connection
-      Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
+      esp_task_wdt_reset();
+      Serial.println("⚠️ No internet - skipping AWS IoT on startup");
+      Serial.println("  → Will retry when internet is available");
       Serial.println("  → Local MQTT continues working normally");
     }
   } else if (!onlineMode) {
@@ -3503,35 +3572,55 @@ void loop()
     }
     
     // AWS reconnection - FAST reconnect for hospital reliability
+    // CRITICAL: Check internet availability BEFORE attempting AWS connection
+    // This prevents TLS handshake blocking for 20+ seconds when no internet
     if (WiFi.status() == WL_CONNECTED && !client.connected()) {
-      // Fast retry: 5 seconds for first 5 attempts, then 15 seconds
-      unsigned long retryInterval = (selfHealing.mqttAwsFailCount < 5) ? 5000 : 15000;
+      // Fast retry: 5 seconds for first 5 attempts, then 15 seconds, then 30 seconds
+      unsigned long retryInterval;
+      if (selfHealing.mqttAwsFailCount < 5) {
+        retryInterval = 5000;
+      } else if (selfHealing.mqttAwsFailCount < 10) {
+        retryInterval = 15000;
+      } else {
+        retryInterval = 30000;  // Back off to 30s after 10 failures
+      }
       
       if (now - selfHealing.lastMqttAwsRecovery > retryInterval) {
         selfHealing.lastMqttAwsRecovery = now;
         
-        esp_task_wdt_reset();
-        Serial.println("📡 Connecting to AWS IoT...");
-        
-        if (client.connect(THINGNAME)) {
-          esp_task_wdt_reset();
-          Serial.println("✓ AWS IoT CONNECTED!");
-          selfHealing.mqttAwsFailCount = 0;
-          selfHealing.mqttAwsHealthy = true;
-          selfHealing.totalRecoveries++;
-          
-          client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-          publishStatusOnline();
-          
-          // Notify dashboard of AWS connection status
-          publishAwsConnectionStatus(true);
-          motorLogMsg("☁️ Cloud connected (AWS IoT)");
-        } else {
-          esp_task_wdt_reset();
+        // CHECK INTERNET FIRST - avoids blocking TLS handshake
+        if (!checkInternetAvailable()) {
+          // No internet - skip AWS connection attempt
           selfHealing.mqttAwsFailCount++;
-          if (selfHealing.mqttAwsFailCount <= 3) {
-            Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n", 
-                          selfHealing.mqttAwsFailCount, retryInterval/1000);
+          if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
+            Serial.printf("⚠️ No internet - skipping AWS (attempt %d)\n", selfHealing.mqttAwsFailCount);
+          }
+          // Continue to local MQTT - don't try AWS
+        } else {
+          // Internet available - try AWS connection
+          esp_task_wdt_reset();
+          Serial.println("📡 Connecting to AWS IoT...");
+          
+          if (client.connect(THINGNAME)) {
+            esp_task_wdt_reset();
+            Serial.println("✓ AWS IoT CONNECTED!");
+            selfHealing.mqttAwsFailCount = 0;
+            selfHealing.mqttAwsHealthy = true;
+            selfHealing.totalRecoveries++;
+            
+            client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+            publishStatusOnline();
+            
+            // Notify dashboard of AWS connection status
+            publishAwsConnectionStatus(true);
+            motorLogMsg("☁️ Cloud connected (AWS IoT)");
+          } else {
+            esp_task_wdt_reset();
+            selfHealing.mqttAwsFailCount++;
+            if (selfHealing.mqttAwsFailCount <= 3) {
+              Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n", 
+                            selfHealing.mqttAwsFailCount, retryInterval/1000);
+            }
           }
         }
       }
