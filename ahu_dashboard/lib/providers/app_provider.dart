@@ -192,9 +192,14 @@ class AppProvider extends ChangeNotifier {
       _debouncedNotify();  // 250ms debounce for RPi
     });
 
-    // Listen to state updates - only process if device is registered
+    // Listen to state updates - auto-register devices that send state (dynamic discovery)
     _mqttService!.stateStream.listen((entry) {
-      if (!_isMatchingAhu(entry.key)) return; // Ignore unregistered devices
+      // Auto-register AHU if we receive state data (fallback for status topic issues)
+      if (!_isMatchingAhu(entry.key)) {
+        debugPrint('AppProvider: Auto-registering AHU from state message');
+        _ensureAhuRegistered(entry.key);
+        _statusData[_extractAhuId(entry.key)] = 'online';  // Mark as online since we got data
+      }
       final ahuId = _extractAhuId(entry.key);
       _stateData[ahuId] = entry.value;
       _debouncedStateNotify();  // Debounced for RPi performance
