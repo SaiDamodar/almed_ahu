@@ -23,9 +23,9 @@
 #define THINGNAME "KAVERI_BURNS_AHU1" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
-#define BUILD_VERSION "v2.6.0-MDNS"
+#define BUILD_VERSION "v2.6.1-MDNS"
 #define BUILD_DATE "2026-01-20"
-#define BUILD_FEATURES "mDNS-discovery, no-hardcoded-IP, 15s-CP-delay, self-healing"
+#define BUILD_FEATURES "mDNS-discovery, dual-CP-deadband-fix, no-short-cycling"
 
 // ============ GitHub OTA Configuration (Hardcoded) ============
 #define GITHUB_REPO_OWNER "ESPUpdaterzaid"
@@ -1262,26 +1262,33 @@ void controlCP(float t){
       return;  // Wait for switch delay
     }
     
-    // Normal operation: turn on/off active CP based on temperature
+    // Normal operation: turn on/off active CP based on temperature WITH DEADBAND
+    // Uses same deadband as single mode to prevent short-cycling
+    float onThreshDual = tempSet + TEMP_DEADBAND;  // e.g., 20°C (setTemp + 1°C)
+    
     if (cpActive == 1) {
-      if (!cpOn && t > offThresh && canTurnOn) {
+      // Turn ON only when temp >= setTemp + deadband (prevents short-cycling)
+      if (!cpOn && t >= onThreshDual && canTurnOn) {
         cpWrite(true);
         cpOn = true;
         cpLastOnAt = now;
-        motorLogMsg("CP1 ON (cooling, temp=" + String(t,1) + "°C)");
+        motorLogMsg("CP1 ON (cooling, temp=" + String(t,1) + "°C >= " + String(onThreshDual,1) + "°C)");
       }
+      // Turn OFF when temp <= setTemp (already handled in PHASE 3 above)
       // Ensure CP2 is off in single mode
       if (cp2On) {
         cp2Write(false);
         cp2On = false;
       }
     } else {
-      if (!cp2On && t > offThresh && canTurnOn) {
+      // Turn ON only when temp >= setTemp + deadband (prevents short-cycling)
+      if (!cp2On && t >= onThreshDual && canTurnOn) {
         cp2Write(true);
         cp2On = true;
         cpLastOnAt = now;
-        motorLogMsg("CP2 ON (cooling, temp=" + String(t,1) + "°C)");
+        motorLogMsg("CP2 ON (cooling, temp=" + String(t,1) + "°C >= " + String(onThreshDual,1) + "°C)");
       }
+      // Turn OFF when temp <= setTemp (already handled in PHASE 3 above)
       // Ensure CP1 is off in single mode
       if (cpOn) {
         cpWrite(false);
