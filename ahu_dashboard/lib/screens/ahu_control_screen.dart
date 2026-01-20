@@ -854,7 +854,7 @@ class _CpModeToggleButton extends StatelessWidget {
         final isEnabled = data.canSendCommands && !data.isLocked;
 
         final isLocked = data.isLocked;
-        
+
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -866,10 +866,10 @@ class _CpModeToggleButton extends StatelessWidget {
                         colors: [Colors.grey.shade500, Colors.grey.shade600],
                       )
                     : LinearGradient(
-                        colors: isDualMode
-                            ? [Colors.cyan.shade600, Colors.cyan.shade700]
-                            : [Colors.teal.shade600, Colors.teal.shade700],
-                      ),
+                  colors: isDualMode
+                      ? [Colors.cyan.shade600, Colors.cyan.shade700]
+                      : [Colors.teal.shade600, Colors.teal.shade700],
+                ),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Material(
@@ -1539,14 +1539,14 @@ class _SetpointControls extends StatelessWidget {
                 Icon(Icons.lock_rounded, size: 12, color: Colors.grey.shade500),
                 const SizedBox(width: 4),
               ],
-              Text(
-                'SETPOINT',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
+          Text(
+            'SETPOINT',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
                   color: isLocked ? Colors.grey.shade500 : color.withOpacity(0.8),
-                  letterSpacing: 1.2,
-                ),
+              letterSpacing: 1.2,
+            ),
               ),
             ],
           ),

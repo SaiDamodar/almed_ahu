@@ -15,6 +15,7 @@
 #include "soc/rtc_cntl_reg.h"
 #include <HTTPClient.h>
 #include <Update.h>
+#include <ESPmDNS.h>  // For mDNS hostname resolution
 
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
@@ -22,9 +23,9 @@
 #define THINGNAME "AHU_ESP2" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
-#define BUILD_VERSION "v2.5.0-STABLE"
-#define BUILD_DATE "2026-01-02"
-#define BUILD_FEATURES "15s-CP-delay, deferred-writes, self-healing, fast-mqtt"
+#define BUILD_VERSION "v2.6.0-MDNS"
+#define BUILD_DATE "2026-01-20"
+#define BUILD_FEATURES "mDNS-discovery, no-hardcoded-IP, mass-production-ready"
 
 // ============ GitHub OTA Configuration (Hardcoded) ============
 #define GITHUB_REPO_OWNER "ESPUpdaterzaid"
@@ -196,7 +197,7 @@ PubSubClient mqttLocal(espNet);
 const char* MQTT_USER = "almed";
 const char* MQTT_PASS = "Almed1234$";
 const uint16_t MQTT_PORT = 1883;
-String mqttHost = "192.168.0.100";  // RPi static IP on AlMed network
+String mqttHost = "almed-ahu.local";  // RPi mDNS hostname - works on ANY network!
 unsigned long lastMqttAttempt = 0;
 
 // MQTT buffer size for large messages (increased for combo sensor data)
@@ -3187,14 +3188,14 @@ void setup()
   w2_ssid = prefs.getString("w2_ssid", String(""));
   w2_pass = prefs.getString("w2_pass", String(""));
   
-  // Load Local MQTT broker host (RPi static IP on AlMed network)
-  // SINGLE WIFI MODE: Force update to new network IP (migrating from hotspot mode)
-  String savedMqttHost = prefs.getString("mqtt_host", String("192.168.0.100"));
-  if (savedMqttHost.startsWith("10.42.") || savedMqttHost == "10.42.0.1") {
-    // Old hotspot IP detected - update to new single WiFi network IP
-    mqttHost = "192.168.0.100";
+  // Load Local MQTT broker host (RPi mDNS hostname - works on ANY network!)
+  // MDNS MODE: Migrate old IPs to hostname for mass production compatibility
+  String savedMqttHost = prefs.getString("mqtt_host", String("almed-ahu.local"));
+  if (savedMqttHost.startsWith("10.42.") || savedMqttHost.startsWith("192.168.")) {
+    // Old IP detected - migrate to mDNS hostname (works on any network!)
+    mqttHost = "almed-ahu.local";
     prefs.putString("mqtt_host", mqttHost);
-    Serial.println("✓ MQTT broker IP migrated: " + savedMqttHost + " → " + mqttHost);
+    Serial.println("✓ MQTT broker migrated to mDNS: " + savedMqttHost + " → " + mqttHost);
   } else {
     mqttHost = savedMqttHost;
   }
@@ -3219,6 +3220,7 @@ void setup()
   
   Serial.println("\n📡 WiFi: Connecting to '" + String(WIFI_SSID) + "' (non-blocking)");
   Serial.println("  📶 ESP32 and RPi both connect to same network");
+  Serial.println("  🌐 mDNS: Will connect to '" + mqttHost + "' (works on any network!)");
   Serial.println("  ⚠️  System will work standalone even without WiFi");
   Serial.println("  ⚠️  WiFi will reconnect automatically in background");
 
@@ -3425,6 +3427,11 @@ void loop()
       selfHealing.wifiHealthy = true;
       selfHealing.wifiFailCount = 0;
       selfHealing.wifiDownSince = 0;
+      
+      // Start mDNS for hostname resolution (almed-ahu.local)
+      if (MDNS.begin("ahu-esp32")) {
+        Serial.println("✓ mDNS started - can resolve almed-ahu.local");
+      }
     } 
     else if (!wifiConnected && wifiWasConnected) {
       // WiFi just disconnected - update self-healing state
