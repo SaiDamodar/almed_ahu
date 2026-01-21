@@ -23,9 +23,9 @@
 #define THINGNAME "KAVERI_BURNS_AHU1" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
-#define BUILD_VERSION "v2.6.1-MDNS"
-#define BUILD_DATE "2026-01-20"
-#define BUILD_FEATURES "mDNS-discovery, dual-CP-deadband-fix, no-short-cycling"
+#define BUILD_VERSION "v2.6.2-DCP"
+#define BUILD_DATE "2026-01-21"
+#define BUILD_FEATURES "dual-CP for cloud"
 
 // ============ GitHub OTA Configuration (Hardcoded) ============
 #define GITHUB_REPO_OWNER "ESPUpdaterzaid"
@@ -40,8 +40,8 @@
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "AlMed";
-const char WIFI_PASSWORD[] = "AlMed123456";
+const char WIFI_SSID[] = "HAMSA_BURN";
+const char WIFI_PASSWORD[] = "Kmc@12345";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -2245,6 +2245,73 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
         }
       }
       stateChanged = true;
+    }
+  }
+  
+  // Handle CP mode switching (dual/single) via cloud
+  if (doc.containsKey("cpMode")){
+    String cpModeStr = doc["cpMode"].as<String>();
+    CpMode newCpMode = (cpModeStr == "dual") ? CP_DUAL_AUTO : CP_SINGLE;
+    if (newCpMode != cpMode) {
+      Serial.println("🔄 CP MODE CHANGE (Cloud)");
+      esp_task_wdt_reset();
+      
+      // Stop any running CP first
+      if (cpOn) { cpWrite(false); cpOn = false; }
+      if (cp2On) { cp2Write(false); cp2On = false; }
+      esp_task_wdt_reset();
+      
+      cpMode = newCpMode;
+      dualCpBothOn = false;
+      cpLastOffAt = millis();
+      
+      if (cpMode == CP_DUAL_AUTO) {
+        cpLastSwitchAt = millis();
+        cpActive = 1;
+      }
+      
+      cpSwitchStartedAt = millis();
+      cpSwitchInProgress = true;
+      
+      prefs.putInt("cpMode", (int)cpMode);
+      prefs.putInt("cpActive", cpActive);
+      prefs.putBool("dualCpBothOn", false);
+      
+      Serial.println("✓ CP mode: " + String(cpMode == CP_DUAL_AUTO ? "DUAL" : "SINGLE"));
+      stateChanged = true;
+      esp_task_wdt_reset();
+    }
+  }
+  
+  // Handle CP active selection (1 or 2) via cloud
+  if (doc.containsKey("cpActive")){
+    int newCpActive = doc["cpActive"].as<int>();
+    if ((newCpActive == 1 || newCpActive == 2) && newCpActive != cpActive) {
+      Serial.println("🔄 CP SWITCH (Cloud): CP" + String(cpActive) + " → CP" + String(newCpActive));
+      esp_task_wdt_reset();
+      
+      // Stop currently running CP
+      if (cpActive == 1 && cpOn) { cpWrite(false); cpOn = false; }
+      else if (cpActive == 2 && cp2On) { cp2Write(false); cp2On = false; }
+      
+      cpWrite(false);
+      cp2Write(false);
+      cpOn = false;
+      cp2On = false;
+      cpLastOffAt = millis();
+      
+      cpActive = newCpActive;
+      dualCpBothOn = false;
+      cpSwitchStartedAt = millis();
+      cpSwitchInProgress = true;
+      
+      prefs.putInt("cpActive", cpActive);
+      prefs.putBool("cpSwitchInProgress", true);
+      prefs.putBool("dualCpBothOn", false);
+      
+      Serial.println("✓ CP active: CP" + String(cpActive));
+      stateChanged = true;
+      esp_task_wdt_reset();
     }
   }
   

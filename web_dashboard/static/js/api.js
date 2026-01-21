@@ -95,6 +95,15 @@ class APIClient {
     return this.sendCommand(deviceId, { fanToggle: true });
   }
 
+  // CP Mode Control
+  async setCpMode(deviceId, mode) {
+    return this.sendCommand(deviceId, { cpMode: mode });
+  }
+
+  async setCpActive(deviceId, cpNumber) {
+    return this.sendCommand(deviceId, { cpActive: cpNumber });
+  }
+
   async provisionWifi(deviceId, wifiConfig) {
     return this.sendCommand(deviceId, {
       type: 'provision_wifi',

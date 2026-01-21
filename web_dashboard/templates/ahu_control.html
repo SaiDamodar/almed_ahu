@@ -402,6 +402,54 @@
             border-color: rgba(16, 185, 129, 0.4);
         }
         
+        /* CP1 - Cyan color */
+        #cp1-indicator.active {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(6, 182, 212, 0.15));
+            border-color: rgba(6, 182, 212, 0.5);
+            box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+        }
+        #cp1-indicator.active .component-icon-wrapper {
+            background: rgba(6, 182, 212, 0.2);
+            box-shadow: 0 0 16px rgba(6, 182, 212, 0.5);
+        }
+        #cp1-indicator.active .component-icon,
+        #cp1-indicator.active .component-label {
+            color: #06B6D4;
+        }
+        #cp1-indicator.active .component-status-dot {
+            background: #06B6D4;
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.8);
+        }
+        #cp1-indicator.active .component-status-badge {
+            background: rgba(6, 182, 212, 0.3);
+            color: #06B6D4;
+            border-color: rgba(6, 182, 212, 0.4);
+        }
+        
+        /* CP2 - Teal color */
+        #cp2-indicator.active {
+            background: linear-gradient(135deg, rgba(13, 148, 136, 0.25), rgba(13, 148, 136, 0.15));
+            border-color: rgba(13, 148, 136, 0.5);
+            box-shadow: 0 4px 12px rgba(13, 148, 136, 0.3);
+        }
+        #cp2-indicator.active .component-icon-wrapper {
+            background: rgba(13, 148, 136, 0.2);
+            box-shadow: 0 0 16px rgba(13, 148, 136, 0.5);
+        }
+        #cp2-indicator.active .component-icon,
+        #cp2-indicator.active .component-label {
+            color: #0D9488;
+        }
+        #cp2-indicator.active .component-status-dot {
+            background: #0D9488;
+            box-shadow: 0 0 10px rgba(13, 148, 136, 0.8);
+        }
+        #cp2-indicator.active .component-status-badge {
+            background: rgba(13, 148, 136, 0.3);
+            color: #0D9488;
+            border-color: rgba(13, 148, 136, 0.4);
+        }
+        
         /* Top Bar for Control Screen */
         .control-top-bar {
             padding: 20px;
@@ -671,6 +719,199 @@
         .gas-value-unit {
             font-size: 9px;
             color: var(--text-secondary);
+        }
+
+        /* ===== CP Mode Toggle (Compact - Like Flutter) ===== */
+        .cp-mode-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .cp-mode-btn-compact {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: white;
+        }
+        
+        .cp-mode-btn-compact.dual {
+            background: linear-gradient(135deg, #0891B2, #0E7490);
+        }
+        
+        .cp-mode-btn-compact.single {
+            background: linear-gradient(135deg, #0D9488, #0F766E);
+        }
+        
+        .cp-mode-btn-compact:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+        }
+        
+        .cp-mode-btn-compact svg {
+            width: 16px;
+            height: 16px;
+        }
+        
+        .cp-select-dropdown {
+            display: none;
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--surface);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .cp-select-dropdown.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .cp-select-dropdown:hover {
+            background: var(--surface-variant);
+        }
+        
+        .cp-select-dropdown svg {
+            width: 20px;
+            height: 20px;
+            color: #0D9488;
+        }
+        
+        /* CP Selection Modal */
+        .cp-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .cp-modal-overlay.active {
+            display: flex;
+        }
+        
+        .cp-modal {
+            background: var(--surface);
+            border-radius: 16px;
+            padding: 24px;
+            min-width: 280px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .cp-modal-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .cp-modal-header svg {
+            width: 24px;
+            height: 24px;
+            color: #06B6D4;
+        }
+        
+        .cp-modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--on-surface);
+        }
+        
+        .cp-option {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            border-radius: 12px;
+            border: 2px solid var(--border);
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 12px;
+        }
+        
+        .cp-option:hover {
+            border-color: #06B6D4;
+            background: rgba(6, 182, 212, 0.05);
+        }
+        
+        .cp-option.selected {
+            border-color: #06B6D4;
+            background: rgba(6, 182, 212, 0.1);
+        }
+        
+        .cp-option-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .cp-option.cp1 .cp-option-icon {
+            background: rgba(6, 182, 212, 0.2);
+            color: #06B6D4;
+        }
+        
+        .cp-option.cp2 .cp-option-icon {
+            background: rgba(13, 148, 136, 0.2);
+            color: #0D9488;
+        }
+        
+        .cp-option-label {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--on-surface);
+        }
+        
+        .cp-option-status {
+            margin-left: auto;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: var(--surface-variant);
+            color: var(--text-secondary);
+        }
+        
+        .cp-option-status.on {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10B981;
+        }
+        
+        .cp-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+        
+        .cp-modal-cancel {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        .cp-modal-cancel:hover {
+            background: var(--surface-variant);
         }
 
         /* ===== HEPA Filter Section ===== */
@@ -1106,6 +1347,21 @@
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px;">
+                        <!-- CP Mode Toggle (Like Flutter) -->
+                        <div class="cp-mode-toggle">
+                            <button class="cp-mode-btn-compact dual" id="cp-mode-toggle" onclick="toggleCpMode()" title="Click to toggle CP mode">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="4" y="6" width="16" height="12" rx="2"></rect>
+                                    <path d="M12 8v8"></path>
+                                </svg>
+                                <span id="cp-mode-label">DUAL</span>
+                            </button>
+                            <div class="cp-select-dropdown" id="cp-select-dropdown" onclick="showCpSelectModal()" title="Select compressor">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </div>
+                        </div>
                         <a href="/ahu/{{ device_id }}/graphs" class="icon-btn" title="View Graphs" style="text-decoration: none; display: flex; align-items: center; justify-content: center;">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <line x1="18" y1="20" x2="18" y2="10"></line>
@@ -1213,6 +1469,32 @@
                                 <span class="gas-value-number" id="co2-value">--</span>
                                 <span class="gas-value-unit"> ppm</span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CP Selection Modal -->
+                <div class="cp-modal-overlay" id="cp-modal" onclick="closeCpModal(event)">
+                    <div class="cp-modal" onclick="event.stopPropagation()">
+                        <div class="cp-modal-header">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="4" y="6" width="16" height="12" rx="2"></rect>
+                                <path d="M12 8v8"></path>
+                            </svg>
+                            <span class="cp-modal-title">Select Compressor</span>
+                        </div>
+                        <div class="cp-option cp1" id="cp-option-1" onclick="selectCp(1)">
+                            <div class="cp-option-icon">CP1</div>
+                            <span class="cp-option-label">Compressor 1</span>
+                            <span class="cp-option-status" id="cp1-modal-status">OFF</span>
+                        </div>
+                        <div class="cp-option cp2" id="cp-option-2" onclick="selectCp(2)">
+                            <div class="cp-option-icon">CP2</div>
+                            <span class="cp-option-label">Compressor 2</span>
+                            <span class="cp-option-status" id="cp2-modal-status">OFF</span>
+                        </div>
+                        <div class="cp-modal-actions">
+                            <button class="cp-modal-cancel" onclick="closeCpModal()">Cancel</button>
                         </div>
                     </div>
                 </div>
@@ -1346,7 +1628,8 @@
                             <div class="component-label">Filter</div>
                             <div class="component-status-badge" id="m2-badge">OFF</div>
                         </div>
-                        <div class="component-indicator" id="cp-indicator">
+                        <!-- CP1 Indicator (Dual mode or Single CP1) -->
+                        <div class="component-indicator cp-indicator" id="cp1-indicator">
                             <div class="component-status-dot"></div>
                             <div class="component-icon-wrapper">
                                 <div class="component-icon">
@@ -1359,8 +1642,25 @@
                                     </svg>
                                 </div>
                             </div>
-                            <div class="component-label">Compressor</div>
-                            <div class="component-status-badge" id="cp-badge">OFF</div>
+                            <div class="component-label">CP1</div>
+                            <div class="component-status-badge" id="cp1-badge">OFF</div>
+                        </div>
+                        <!-- CP2 Indicator (Dual mode or Single CP2) -->
+                        <div class="component-indicator cp-indicator" id="cp2-indicator" style="display: none;">
+                            <div class="component-status-dot"></div>
+                            <div class="component-icon-wrapper">
+                                <div class="component-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="4" y="6" width="16" height="12" rx="2"></rect>
+                                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                        <path d="M8 18v2a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2"></path>
+                                        <path d="M12 8v8"></path>
+                                        <path d="M6 10h2M6 14h2M16 10h2M16 14h2"></path>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="component-label">CP2</div>
+                            <div class="component-status-badge" id="cp2-badge">OFF</div>
                         </div>
                         <div class="component-indicator" id="heater-indicator">
                             <div class="component-status-dot"></div>
@@ -1530,11 +1830,80 @@
                 ? optimisticState.fanSpeed
                 : parseInt(state.fanSpeed !== undefined ? state.fanSpeed : telemetry.fanSpeed) || 0;
             
-            updateComponent('cp', toBool(cpVal));
+            // CP1/CP2 are updated in updateCpModeUI
             updateComponent('heater', toBool(heaterVal));
             updateComponent('m1', toBool(m1Val));
             updateComponent('m2', toBool(m2Val));
             updateComponent('fan', toBool(fanVal), fanSpeed);
+            
+            // Update CP Mode Control and Component Status for CP1/CP2
+            updateCpModeUI(telemetry, state);
+        }
+
+        // Store current CP state for modal
+        let currentCpState = { cpMode: 'dual', cpActive: 1, cp1On: false, cp2On: false };
+        
+        function updateCpModeUI(telemetry, state) {
+            const cpMode = state.cpMode || telemetry.cpMode || 'dual';
+            const cpActive = parseInt(state.cpActive || telemetry.cpActive) || 1;
+            const cp1On = toBool(telemetry.cp);
+            const cp2On = toBool(telemetry.cp2);
+            const isDualMode = cpMode === 'dual';
+            
+            // Store for modal
+            currentCpState = { cpMode, cpActive, cp1On, cp2On };
+            
+            // Update compact toggle button
+            const toggleBtn = document.getElementById('cp-mode-toggle');
+            const modeLabel = document.getElementById('cp-mode-label');
+            const dropdown = document.getElementById('cp-select-dropdown');
+            
+            if (isDualMode) {
+                toggleBtn.className = 'cp-mode-btn-compact dual';
+                modeLabel.textContent = 'DUAL';
+                dropdown.classList.remove('active');
+            } else {
+                toggleBtn.className = 'cp-mode-btn-compact single';
+                modeLabel.textContent = `CP${cpActive}`;
+                dropdown.classList.add('active');
+            }
+            
+            // Update modal options
+            const cp1Option = document.getElementById('cp-option-1');
+            const cp2Option = document.getElementById('cp-option-2');
+            const cp1ModalStatus = document.getElementById('cp1-modal-status');
+            const cp2ModalStatus = document.getElementById('cp2-modal-status');
+            
+            cp1Option.classList.toggle('selected', cpActive === 1);
+            cp2Option.classList.toggle('selected', cpActive === 2);
+            
+            cp1ModalStatus.textContent = cp1On ? 'ON' : 'OFF';
+            cp1ModalStatus.classList.toggle('on', cp1On);
+            cp2ModalStatus.textContent = cp2On ? 'ON' : 'OFF';
+            cp2ModalStatus.classList.toggle('on', cp2On);
+            
+            // Update Component Status indicators for CP1/CP2
+            const cp1Indicator = document.getElementById('cp1-indicator');
+            const cp2Indicator = document.getElementById('cp2-indicator');
+            
+            if (isDualMode) {
+                // Dual mode: show both CP1 and CP2
+                cp1Indicator.style.display = '';
+                cp2Indicator.style.display = '';
+            } else {
+                // Single mode: show only the active CP
+                if (cpActive === 1) {
+                    cp1Indicator.style.display = '';
+                    cp2Indicator.style.display = 'none';
+                } else {
+                    cp1Indicator.style.display = 'none';
+                    cp2Indicator.style.display = '';
+                }
+            }
+            
+            // Update CP1/CP2 indicator status
+            updateComponent('cp1', cp1On);
+            updateComponent('cp2', cp2On);
         }
 
         function updatePmValues(telemetry) {
@@ -1782,6 +2151,77 @@
                 alert('Error changing fan speed: ' + error.message);
                 optimisticState.fanSpeed = null;
                 await loadDeviceData(); // Reload to show actual state
+            }
+        }
+
+        async function toggleCpMode() {
+            const status = deviceData.status || 'offline';
+            if (status !== 'online') {
+                alert('Device must be online to change CP mode');
+                return;
+            }
+            
+            const newMode = currentCpState.cpMode === 'dual' ? 'single' : 'dual';
+            
+            try {
+                await api.setCpMode(deviceId, newMode);
+                
+                // Update UI immediately
+                const toggleBtn = document.getElementById('cp-mode-toggle');
+                const modeLabel = document.getElementById('cp-mode-label');
+                const dropdown = document.getElementById('cp-select-dropdown');
+                
+                if (newMode === 'dual') {
+                    toggleBtn.className = 'cp-mode-btn-compact dual';
+                    modeLabel.textContent = 'DUAL';
+                    dropdown.classList.remove('active');
+                } else {
+                    toggleBtn.className = 'cp-mode-btn-compact single';
+                    modeLabel.textContent = 'CP1';
+                    dropdown.classList.add('active');
+                }
+                
+                currentCpState.cpMode = newMode;
+                setTimeout(loadDeviceData, 1000);
+            } catch (error) {
+                alert('Error changing CP mode: ' + error.message);
+                await loadDeviceData();
+            }
+        }
+
+        function showCpSelectModal() {
+            const modal = document.getElementById('cp-modal');
+            modal.classList.add('active');
+        }
+
+        function closeCpModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('cp-modal').classList.remove('active');
+        }
+
+        async function selectCp(cpNumber) {
+            const status = deviceData.status || 'offline';
+            if (status !== 'online') {
+                alert('Device must be online to change active CP');
+                closeCpModal();
+                return;
+            }
+            
+            try {
+                await api.setCpActive(deviceId, cpNumber);
+                
+                // Update UI immediately
+                document.getElementById('cp-mode-label').textContent = `CP${cpNumber}`;
+                document.getElementById('cp-option-1').classList.toggle('selected', cpNumber === 1);
+                document.getElementById('cp-option-2').classList.toggle('selected', cpNumber === 2);
+                
+                currentCpState.cpActive = cpNumber;
+                closeCpModal();
+                setTimeout(loadDeviceData, 1000);
+            } catch (error) {
+                alert('Error changing active CP: ' + error.message);
+                closeCpModal();
+                await loadDeviceData();
             }
         }
 
