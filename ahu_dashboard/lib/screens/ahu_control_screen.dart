@@ -2545,24 +2545,26 @@ class _ExpandableHepaBox extends StatelessWidget {
   const _ExpandableHepaBox({required this.telemetry, required this.onTap});
 
   Color _getHepaColor() {
-    final status = telemetry.hepaStatus ?? '';
+    final status = telemetry.calculatedHepaStatus;
     if (status.contains('Normal')) return const Color(0xFF4CAF50);
     if (status.contains('Clogging')) return const Color(0xFFFF9800);
     if (status.contains('Replace')) return const Color(0xFFF44336);
+    if (status.contains('Fan Off')) return const Color(0xFF9E9E9E);
     return const Color(0xFFF44336);
   }
 
   IconData _getHepaIcon() {
-    final status = telemetry.hepaStatus ?? '';
+    final status = telemetry.calculatedHepaStatus;
     if (status.contains('Normal')) return Icons.check_circle_rounded;
     if (status.contains('Clogging')) return Icons.warning_rounded;
+    if (status.contains('Fan Off')) return Icons.power_off_rounded;
     return Icons.error_rounded;
   }
 
   @override
   Widget build(BuildContext context) {
     final hepaColor = _getHepaColor();
-    final health = telemetry.hepaHealth ?? 0;
+    final health = telemetry.calculatedHepaHealth;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
@@ -2619,7 +2621,7 @@ class _ExpandableHepaBox extends StatelessWidget {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            telemetry.hepaStatus ?? 'Unknown',
+                            telemetry.calculatedHepaStatus,
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
@@ -2773,17 +2775,18 @@ class _HepaDetailsSheet extends StatelessWidget {
   const _HepaDetailsSheet({required this.telemetry});
 
   Color _getHepaColor() {
-    final status = telemetry.hepaStatus ?? '';
+    final status = telemetry.calculatedHepaStatus;
     if (status.contains('Normal')) return const Color(0xFF4CAF50);
     if (status.contains('Clogging')) return const Color(0xFFFF9800);
     if (status.contains('Replace')) return const Color(0xFFF44336);
+    if (status.contains('Fan Off')) return const Color(0xFF9E9E9E);
     return const Color(0xFFF44336);
   }
 
   @override
   Widget build(BuildContext context) {
     final hepaColor = _getHepaColor();
-    final health = telemetry.hepaHealth ?? 0;
+    final health = telemetry.calculatedHepaHealth;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
@@ -2821,7 +2824,7 @@ class _HepaDetailsSheet extends StatelessWidget {
                   child: const Icon(Icons.filter_alt_rounded, color: Colors.white, size: 40),
                 ),
                 const SizedBox(height: 12),
-                Text(telemetry.hepaStatus ?? 'Unknown', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: hepaColor)),
+                Text(telemetry.calculatedHepaStatus, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: hepaColor)),
                 const SizedBox(height: 20),
                 // Health bar
                 Row(

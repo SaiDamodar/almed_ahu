@@ -444,20 +444,22 @@ class HepaStatusDisplay extends StatelessWidget {
   const HepaStatusDisplay({super.key, this.telemetry});
 
   Color _getHepaColor() {
-    final status = telemetry?.hepaStatus ?? '';
+    final status = telemetry?.calculatedHepaStatus ?? '';
     if (status.contains('Normal')) return const Color(0xFF4CAF50);
     if (status.contains('Clogging')) return const Color(0xFFFF9800);
     if (status.contains('Replace')) return const Color(0xFFF44336);
     if (status.contains('Leak') || status.contains('Weak')) return const Color(0xFFF44336);
+    if (status.contains('Fan Off')) return const Color(0xFF9E9E9E);
     return Colors.grey;
   }
   
   IconData _getHepaIcon() {
-    final status = telemetry?.hepaStatus ?? '';
+    final status = telemetry?.calculatedHepaStatus ?? '';
     if (status.contains('Normal')) return Icons.check_circle_rounded;
     if (status.contains('Clogging')) return Icons.warning_rounded;
     if (status.contains('Replace')) return Icons.error_rounded;
     if (status.contains('Leak') || status.contains('Weak')) return Icons.air_rounded;
+    if (status.contains('Fan Off')) return Icons.power_off_rounded;
     return Icons.filter_alt_rounded;
   }
 
@@ -470,7 +472,7 @@ class HepaStatusDisplay extends StatelessWidget {
     }
 
     final hepaColor = _getHepaColor();
-    final health = telemetry!.hepaHealth ?? 0;
+    final health = telemetry!.calculatedHepaHealth;
 
     return Container(
       decoration: BoxDecoration(
@@ -564,7 +566,7 @@ class HepaStatusDisplay extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            telemetry!.hepaStatus ?? 'Unknown',
+                            telemetry!.calculatedHepaStatus,
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,

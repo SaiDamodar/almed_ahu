@@ -79,6 +79,68 @@ class AhuTelemetry {
   /// Check if HEPA data is available
   bool get hasHepaData => diffPressure != null || hepaStatus != null;
 
+  /// HEPA thresholds by fan speed (Pa) - matches ESP32 logic
+  /// Index: 0=OFF, 1=LOW, 2=MED, 3=HIGH
+  static const List<double> _hepaMinNormal = [0.0, 40.0, 60.0, 90.0];
+  static const List<double> _hepaMaxNormal = [0.0, 55.0, 90.0, 110.0];
+  static const List<double> _hepaReplace = [0.0, 75.0, 120.0, 140.0];
+
+  /// Calculate HEPA health percentage based on pressure and fan speed
+  /// Returns 100% when in normal range, decreasing in clogging range
+  int get calculatedHepaHealth {
+    if (diffPressure == null) return hepaHealth ?? 0;
+    
+    final speedIdx = fanSpeed.clamp(0, 3);
+    
+    // When fan is OFF, show 0%
+    if (speedIdx == 0) return 0;
+    
+    final absP = diffPressure!.abs();
+    final minNormal = _hepaMinNormal[speedIdx];
+    final maxNormal = _hepaMaxNormal[speedIdx];
+    final replaceThreshold = _hepaReplace[speedIdx];
+    
+    if (absP < minNormal) {
+      // Weak Airflow/Leak
+      return 0;
+    } else if (absP <= maxNormal) {
+      // Normal - 100% health
+      return 100;
+    } else if (absP <= replaceThreshold) {
+      // Clogging - decreasing health
+      final health = 100.0 * (replaceThreshold - absP) / (replaceThreshold - maxNormal);
+      return health.clamp(0, 100).toInt();
+    } else {
+      // Replace Required
+      return 0;
+    }
+  }
+
+  /// Get HEPA status based on pressure and fan speed
+  String get calculatedHepaStatus {
+    if (diffPressure == null) return hepaStatus ?? 'Unknown';
+    
+    final speedIdx = fanSpeed.clamp(0, 3);
+    
+    // When fan is OFF
+    if (speedIdx == 0) return 'Fan Off';
+    
+    final absP = diffPressure!.abs();
+    final minNormal = _hepaMinNormal[speedIdx];
+    final maxNormal = _hepaMaxNormal[speedIdx];
+    final replaceThreshold = _hepaReplace[speedIdx];
+    
+    if (absP < minNormal) {
+      return 'Weak Airflow/Leak';
+    } else if (absP <= maxNormal) {
+      return 'Normal';
+    } else if (absP <= replaceThreshold) {
+      return 'Clogging';
+    } else {
+      return 'Replace Required';
+    }
+  }
+
   /// Get temperature display string
   String get tempDisplay => temp != null ? '${temp!.toStringAsFixed(1)}°C' : 'N/A';
 
