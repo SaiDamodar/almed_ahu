@@ -2871,13 +2871,19 @@ class _HepaDetailsSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 // Legend
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                // Fan Speed Dependent Ranges
+                Column(
                   children: [
-                    _HepaBadge(label: '<9 Pa', status: 'Leak', color: const Color(0xFFF44336)),
-                    _HepaBadge(label: '9-25', status: 'OK', color: const Color(0xFF4CAF50)),
-                    _HepaBadge(label: '25-40', status: 'Clog', color: const Color(0xFFFF9800)),
-                    _HepaBadge(label: '>40', status: 'Replace', color: const Color(0xFFF44336)),
+                    Text('Normal Ranges by Fan Speed:', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _HepaBadge(label: 'Low', status: '40-55Pa', color: const Color(0xFF4CAF50)),
+                        _HepaBadge(label: 'Mid', status: '60-90Pa', color: const Color(0xFF4CAF50)),
+                        _HepaBadge(label: 'High', status: '90-110Pa', color: const Color(0xFF4CAF50)),
+                      ],
+                    ),
                   ],
                 ),
               ],

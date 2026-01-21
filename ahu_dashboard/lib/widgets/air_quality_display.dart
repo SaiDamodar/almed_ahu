@@ -630,10 +630,9 @@ class HepaStatusDisplay extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _HepaLegend(label: '<9Pa', status: 'Leak', color: const Color(0xFFF44336)),
-                    _HepaLegend(label: '9-25Pa', status: 'OK', color: const Color(0xFF4CAF50)),
-                    _HepaLegend(label: '25-40Pa', status: 'Clog', color: const Color(0xFFFF9800)),
-                    _HepaLegend(label: '>40Pa', status: 'Replace', color: const Color(0xFFF44336)),
+                    _HepaLegend(label: 'Low', status: '40-55Pa', color: const Color(0xFF4CAF50)),
+                    _HepaLegend(label: 'Mid', status: '60-90Pa', color: const Color(0xFF4CAF50)),
+                    _HepaLegend(label: 'High', status: '90-110Pa', color: const Color(0xFF4CAF50)),
                   ],
                 ),
               ],

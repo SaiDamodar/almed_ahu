@@ -254,10 +254,12 @@ float sdp810_temperature = 0.0;
 String hepaStatus = "Unknown";
 int hepaHealthPercent = 0;
 
-// HEPA Filter Thresholds (Pa)
-#define HEPA_MIN_NORMAL     9.0
-#define HEPA_MAX_NORMAL     25.0
-#define HEPA_REPLACE        40.0
+// HEPA Filter Thresholds (Pa) - Fan Speed Dependent
+// Normal ranges: Low=40-55Pa, Mid=60-90Pa, High=90-110Pa
+// Index: 0=OFF, 1=LOW, 2=MED, 3=HIGH
+const float HEPA_MIN_NORMAL[4] = {0.0,  40.0, 60.0,  90.0};
+const float HEPA_MAX_NORMAL[4] = {0.0,  55.0, 90.0, 110.0};
+const float HEPA_REPLACE[4]    = {0.0,  75.0, 120.0, 140.0};  // ~20Pa above max normal
 
 // ---------- 5-Channel Relay Module (Active HIGH: HIGH=ON, LOW=OFF) ----------
 #define PIN_MOTOR1  32   // Relay IN1 - Motor 1 (12V DC)
@@ -1067,19 +1069,32 @@ void checkForNewSensor() {
   }
 }
 
-// ---------- HEPA Filter Status ----------
+// ---------- HEPA Filter Status (Fan Speed Aware) ----------
 void updateHEPAStatus(float pressure) {
   float absP = abs(pressure);
+  int speedIdx = (int)fanSpeed;  // 0=OFF, 1=LOW, 2=MED, 3=HIGH
   
-  if (absP < HEPA_MIN_NORMAL) {
+  // When fan is OFF, show informational status only
+  if (fanSpeed == FAN_OFF) {
+    hepaStatus = "Fan Off";
+    hepaHealthPercent = 0;
+    return;
+  }
+  
+  float minNormal = HEPA_MIN_NORMAL[speedIdx];
+  float maxNormal = HEPA_MAX_NORMAL[speedIdx];
+  float replaceThreshold = HEPA_REPLACE[speedIdx];
+  
+  if (absP < minNormal) {
     hepaStatus = "Weak Airflow/Leak";
     hepaHealthPercent = 0;
-  } else if (absP <= HEPA_MAX_NORMAL) {
+  } else if (absP <= maxNormal) {
     hepaStatus = "Normal";
-    hepaHealthPercent = (int)(100.0 * (HEPA_REPLACE - absP) / (HEPA_REPLACE - HEPA_MIN_NORMAL));
-  } else if (absP <= HEPA_REPLACE) {
+    // Health decreases as pressure increases toward replace threshold
+    hepaHealthPercent = (int)(100.0 * (replaceThreshold - absP) / (replaceThreshold - minNormal));
+  } else if (absP <= replaceThreshold) {
     hepaStatus = "Clogging";
-    hepaHealthPercent = (int)(100.0 * (HEPA_REPLACE - absP) / (HEPA_REPLACE - HEPA_MIN_NORMAL));
+    hepaHealthPercent = (int)(100.0 * (replaceThreshold - absP) / (replaceThreshold - minNormal));
   } else {
     hepaStatus = "Replace Required";
     hepaHealthPercent = 0;

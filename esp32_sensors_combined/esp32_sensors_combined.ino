@@ -296,7 +296,7 @@ void printReadings() {
         
         // Thresholds reference
         Serial.println("  ────────────────────────────────");
-        Serial.println("  ❌ <9Pa=Leak  🟢 9-25Pa=OK  🟡 25-40Pa=Clog  🔴 >40Pa=Replace");
+        Serial.println("  Normal: Low=40-55Pa, Mid=60-90Pa, High=90-110Pa (fan speed dependent)");
     } else {
         Serial.println("  ❌ SDP810 not available");
     }

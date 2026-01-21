@@ -1,14 +1,15 @@
 /*
- * SDP810 Differential Pressure Sensor - HEPA Filter Monitor
+ * SDP810 Differential Pressure Sensor - HEPA Filter Monitor (Test File)
  * 
  * This sensor measures the pressure drop across the HEPA filter
  * to determine the filter's condition and health.
  * 
- * HEPA Filter Status Thresholds:
- *   < 9 Pa    → Weak airflow / Leak detected
- *   9-25 Pa   → Normal HEPA condition
- *   25-40 Pa  → Filter clogging (schedule replacement)
- *   > 40 Pa   → HEPA replacement required immediately
+ * PRODUCTION HEPA Thresholds are FAN SPEED DEPENDENT (see esp32_main.ino):
+ *   Low Speed:  40-55 Pa (normal), >75 Pa (replace)
+ *   Mid Speed:  60-90 Pa (normal), >120 Pa (replace)
+ *   High Speed: 90-110 Pa (normal), >140 Pa (replace)
+ * 
+ * This test file uses simplified static thresholds for basic testing.
  * 
  * Library: Sensirion I2C SDP
  * https://github.com/Sensirion/arduino-i2c-sdp
