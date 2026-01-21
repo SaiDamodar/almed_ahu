@@ -615,22 +615,15 @@ class AppProvider extends ChangeNotifier {
       deviceId: status.deviceId,
       status: status.status,
       telemetry: status.telemetry,
-      state: AhuState(
+      state: status.state!.copyWith(
         run: newRunState,
-        tempSet: status.state!.tempSet,
-        humSet: status.state!.humSet,
         fan: newRunState ? status.state!.fan : false,
         fanSpeed: newRunState ? status.state!.fanSpeed : 0,
         cp: newRunState ? status.state!.cp : false,
+        cp2: newRunState ? status.state!.cp2 : false,
         heater: newRunState ? status.state!.heater : false,
         m1: newRunState ? status.state!.m1 : false,
         m2: newRunState ? status.state!.m2 : false,
-        ip: status.state!.ip,
-        m1Start: status.state!.m1Start,
-        m1Post: status.state!.m1Post,
-        m2Interval: status.state!.m2Interval,
-        m2Run: status.state!.m2Run,
-        m2Delay: status.state!.m2Delay,
       ),
       lastUpdate: status.lastUpdate,
     );
@@ -661,23 +654,7 @@ class AppProvider extends ChangeNotifier {
         deviceId: status!.deviceId,
         status: status.status,
         telemetry: status.telemetry,
-        state: AhuState(
-          run: status.state!.run,
-          tempSet: temp,
-          humSet: status.state!.humSet,
-          fan: status.state!.fan,
-          fanSpeed: status.state!.fanSpeed,
-          cp: status.state!.cp,
-          heater: status.state!.heater,
-          m1: status.state!.m1,
-          m2: status.state!.m2,
-          ip: status.state!.ip,
-          m1Start: status.state!.m1Start,
-          m1Post: status.state!.m1Post,
-          m2Interval: status.state!.m2Interval,
-          m2Run: status.state!.m2Run,
-          m2Delay: status.state!.m2Delay,
-        ),
+        state: status.state!.copyWith(tempSet: temp),
         lastUpdate: status.lastUpdate,
       );
       notifyListeners();
@@ -694,23 +671,7 @@ class AppProvider extends ChangeNotifier {
         deviceId: status!.deviceId,
         status: status.status,
         telemetry: status.telemetry,
-        state: AhuState(
-          run: status.state!.run,
-          tempSet: status.state!.tempSet,
-          humSet: hum,
-          fan: status.state!.fan,
-          fanSpeed: status.state!.fanSpeed,
-          cp: status.state!.cp,
-          heater: status.state!.heater,
-          m1: status.state!.m1,
-          m2: status.state!.m2,
-          ip: status.state!.ip,
-          m1Start: status.state!.m1Start,
-          m1Post: status.state!.m1Post,
-          m2Interval: status.state!.m2Interval,
-          m2Run: status.state!.m2Run,
-          m2Delay: status.state!.m2Delay,
-        ),
+        state: status.state!.copyWith(humSet: hum),
         lastUpdate: status.lastUpdate,
       );
       notifyListeners();
@@ -738,29 +699,79 @@ class AppProvider extends ChangeNotifier {
       deviceId: status!.deviceId,
       status: status.status,
       telemetry: status.telemetry,
-      state: AhuState(
-        run: status.state!.run,
-        tempSet: status.state!.tempSet,
-        humSet: status.state!.humSet,
-        fan: speed > 0,
-        fanSpeed: speed,
-        cp: status.state!.cp,
-        heater: status.state!.heater,
-        m1: status.state!.m1,
-        m2: status.state!.m2,
-        ip: status.state!.ip,
-        m1Start: status.state!.m1Start,
-        m1Post: status.state!.m1Post,
-        m2Interval: status.state!.m2Interval,
-        m2Run: status.state!.m2Run,
-        m2Delay: status.state!.m2Delay,
-      ),
+      state: status.state!.copyWith(fan: speed > 0, fanSpeed: speed),
       lastUpdate: status.lastUpdate,
     );
     notifyListeners();
     
     // Send command (fire and forget)
     sendCommand(deviceId, {'fan': speed}).then((success) {
+      if (!success) {
+        _revertOptimisticUpdate(deviceId, status);
+      }
+    });
+  }
+  
+  /// Set CP mode ('dual' or 'single') with optimistic UI update
+  Future<void> setCpMode(String deviceId, String mode) async {
+    if (mode != 'dual' && mode != 'single') return;
+    
+    final status = _deviceStatuses[deviceId];
+    if (status?.state == null) return;
+    
+    // Store pending command
+    _pendingCommands[deviceId] = _PendingCommand(
+      type: 'cpMode',
+      timestamp: DateTime.now(),
+    );
+    
+    // Optimistic UI update
+    _deviceStatuses[deviceId] = DeviceStatus(
+      deviceId: status!.deviceId,
+      status: status.status,
+      telemetry: status.telemetry,
+      state: status.state!.copyWith(
+        cpMode: mode,
+        cpActive: mode == 'dual' ? status.state!.cpActive : 1,
+        dualCpBothOn: false,
+      ),
+      lastUpdate: status.lastUpdate,
+    );
+    notifyListeners();
+    
+    // Send command (fire and forget)
+    sendCommand(deviceId, {'cpMode': mode}).then((success) {
+      if (!success) {
+        _revertOptimisticUpdate(deviceId, status);
+      }
+    });
+  }
+  
+  /// Set active CP (1 or 2) with optimistic UI update
+  Future<void> setCpActive(String deviceId, int cpNumber) async {
+    if (cpNumber != 1 && cpNumber != 2) return;
+    
+    final status = _deviceStatuses[deviceId];
+    if (status?.state == null) return;
+    
+    // Store pending command
+    _pendingCommands[deviceId] = _PendingCommand(
+      type: 'cpActive',
+      timestamp: DateTime.now(),
+    );
+    
+    // Optimistic UI update
+    _deviceStatuses[deviceId] = DeviceStatus(
+      deviceId: status!.deviceId,
+      status: status.status,
+      telemetry: status.telemetry,
+      state: status.state!.copyWith(cpActive: cpNumber),
+      lastUpdate: status.lastUpdate,
+    );
+    notifyListeners();
+    
+    // Send command (fire and forget)
+    sendCommand(deviceId, {'cpActive': cpNumber}).then((success) {
       if (!success) {
         _revertOptimisticUpdate(deviceId, status);
       }

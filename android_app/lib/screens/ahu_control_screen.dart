@@ -269,6 +269,9 @@ class _ActionRow extends StatelessWidget {
       builder: (context, data, child) {
         return Row(
           children: [
+            // CP Mode Toggle Button
+            _CpModeToggleButton(deviceId: deviceId),
+            SizedBox(width: ScreenUtils.getPadding(context, 10)),
             // Only show Start/Stop button if user can operate
             if (data.canOperate)
               Expanded(child: _StartStopButton(deviceId: deviceId))
@@ -489,6 +492,235 @@ class _SettingsButton extends StatelessWidget {
           child: Icon(
             Icons.settings_rounded,
             size: ScreenUtils.getIconSize(context, 20),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// CP Mode Toggle Button - toggles between DUAL and SINGLE mode
+class _CpModeToggleButton extends StatelessWidget {
+  final String deviceId;
+  
+  const _CpModeToggleButton({required this.deviceId});
+
+  void _showCpSelectionDialog(BuildContext context, String deviceId, int currentCpActive) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.ac_unit_rounded, color: Colors.cyan, size: ScreenUtils.getIconSize(context, 24)),
+            SizedBox(width: ScreenUtils.getPadding(context, 12)),
+            Text('Select Compressor', style: TextStyle(fontSize: ScreenUtils.getFontSize(context, 18))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _CpOptionButton(
+              deviceId: deviceId,
+              cpNumber: 1,
+              isSelected: currentCpActive == 1,
+              label: 'CP1',
+              color: Colors.cyan,
+            ),
+            SizedBox(height: ScreenUtils.getSpacing(context, 12)),
+            _CpOptionButton(
+              deviceId: deviceId,
+              cpNumber: 2,
+              isSelected: currentCpActive == 2,
+              label: 'CP2',
+              color: Colors.teal,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final buttonHeight = ScreenUtils.getButtonHeight(context);
+    
+    return Selector<AppProvider, ({String cpMode, int cpActive, bool canOperate, bool isOnline})>(
+      selector: (_, provider) {
+        final status = provider.getDeviceStatus(deviceId);
+        final state = status?.state;
+        return (
+          cpMode: state?.cpMode ?? 'dual',
+          cpActive: state?.cpActive ?? 1,
+          canOperate: provider.canOperate,
+          isOnline: status?.isOnline ?? false,
+        );
+      },
+      builder: (context, data, _) {
+        final isDualMode = data.cpMode == 'dual';
+        final isEnabled = data.canOperate && data.isOnline;
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // CP Mode Toggle Button
+            Container(
+              height: buttonHeight,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDualMode
+                      ? [Colors.cyan.shade600, Colors.cyan.shade700]
+                      : [Colors.teal.shade600, Colors.teal.shade700],
+                ),
+                borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: isEnabled
+                      ? () {
+                          final newMode = isDualMode ? 'single' : 'dual';
+                          context.read<AppProvider>().setCpMode(deviceId, newMode);
+                        }
+                      : null,
+                  borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: ScreenUtils.getPadding(context, 14)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.ac_unit_rounded,
+                          color: Colors.white,
+                          size: ScreenUtils.getIconSize(context, 18),
+                        ),
+                        SizedBox(width: ScreenUtils.getPadding(context, 6)),
+                        Text(
+                          isDualMode ? 'DUAL' : 'CP${data.cpActive}',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: ScreenUtils.getFontSize(context, 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Arrow button (only show in single mode)
+            if (!isDualMode) ...[
+              SizedBox(width: ScreenUtils.getPadding(context, 8)),
+              Container(
+                height: buttonHeight,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+                  border: Border.all(
+                    color: Theme.of(context).dividerColor.withOpacity(0.2),
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: isEnabled
+                        ? () => _showCpSelectionDialog(context, deviceId, data.cpActive)
+                        : null,
+                    borderRadius: BorderRadius.circular(ScreenUtils.getBorderRadius(context, 12)),
+                    child: Padding(
+                      padding: EdgeInsets.all(ScreenUtils.getPadding(context, 10)),
+                      child: Icon(
+                        Icons.arrow_drop_down_rounded,
+                        color: isEnabled ? Colors.teal : Colors.grey,
+                        size: ScreenUtils.getIconSize(context, 20),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// CP Option Button for the selection dialog
+class _CpOptionButton extends StatelessWidget {
+  final String deviceId;
+  final int cpNumber;
+  final bool isSelected;
+  final String label;
+  final Color color;
+
+  const _CpOptionButton({
+    required this.deviceId,
+    required this.cpNumber,
+    required this.isSelected,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          context.read<AppProvider>().setCpActive(deviceId, cpNumber);
+          Navigator.of(context).pop();
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: EdgeInsets.all(ScreenUtils.getPadding(context, 16)),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? color : Theme.of(context).dividerColor.withOpacity(0.3),
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: ScreenUtils.getFontSize(context, 12),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: ScreenUtils.getPadding(context, 12)),
+              Text(
+                'Compressor $cpNumber',
+                style: TextStyle(
+                  fontSize: ScreenUtils.getFontSize(context, 16),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              if (isSelected)
+                Icon(Icons.check_circle_rounded, color: color, size: ScreenUtils.getIconSize(context, 24)),
+            ],
           ),
         ),
       ),
@@ -954,6 +1186,11 @@ class _ComponentStatus extends StatelessWidget {
         final isOnline = data.status!.isOnline;
         final isRunning = data.status!.isRunning;
         final canOperate = data.canOperate;
+        
+        // CP mode logic
+        final cpMode = state?.cpMode ?? 'dual';
+        final cpActive = state?.cpActive ?? 1;
+        final isDualMode = cpMode == 'dual';
 
         return Container(
           padding: ScreenUtils.getCardPadding(context),
@@ -992,12 +1229,48 @@ class _ComponentStatus extends StatelessWidget {
                       color: AppTheme.info,
                     ),
                     SizedBox(width: ScreenUtils.getPadding(context, 8)),
-                    _StatusIndicator(
-                      icon: Icons.ac_unit_rounded,
-                      label: 'Compressor',
-                      isActive: state?.cp ?? false,
-                      color: AppTheme.info,
-                    ),
+                    // CP1/CP2 based on mode
+                    ...() {
+                      if (isDualMode) {
+                        // DUAL mode: show both CP1 and CP2
+                        return [
+                          _StatusIndicator(
+                            icon: Icons.ac_unit_rounded,
+                            label: 'CP1',
+                            isActive: state?.cp ?? false,
+                            color: Colors.cyan,
+                          ),
+                          SizedBox(width: ScreenUtils.getPadding(context, 8)),
+                          _StatusIndicator(
+                            icon: Icons.ac_unit_rounded,
+                            label: 'CP2',
+                            isActive: state?.cp2 ?? false,
+                            color: Colors.teal,
+                          ),
+                        ];
+                      } else {
+                        // SINGLE mode: show only the active CP
+                        if (cpActive == 1) {
+                          return [
+                            _StatusIndicator(
+                              icon: Icons.ac_unit_rounded,
+                              label: 'CP1',
+                              isActive: state?.cp ?? false,
+                              color: Colors.cyan,
+                            ),
+                          ];
+                        } else {
+                          return [
+                            _StatusIndicator(
+                              icon: Icons.ac_unit_rounded,
+                              label: 'CP2',
+                              isActive: state?.cp2 ?? false,
+                              color: Colors.teal,
+                            ),
+                          ];
+                        }
+                      }
+                    }(),
                     SizedBox(width: ScreenUtils.getPadding(context, 8)),
                     _StatusIndicator(
                       icon: Icons.whatshot_rounded,

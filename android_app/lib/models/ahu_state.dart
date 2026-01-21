@@ -9,6 +9,8 @@ class AhuState {
   final bool m1;
   final bool m2;
   final bool cp;
+  @JsonKey(defaultValue: false)
+  final bool cp2; // CP2 for dual compressor mode
   final bool heater;
   final bool fan;
   @JsonKey(name: 'fanSpeed')
@@ -18,6 +20,14 @@ class AhuState {
   @JsonKey(name: 'humSet')
   final double humSet;
   final String? ip;
+  
+  // Dual CP mode fields
+  @JsonKey(name: 'cpMode', defaultValue: 'dual')
+  final String cpMode; // 'dual' or 'single'
+  @JsonKey(name: 'cpActive', defaultValue: 1)
+  final int cpActive; // 1 or 2 - which CP is active
+  @JsonKey(name: 'dualCpBothOn', defaultValue: false)
+  final bool dualCpBothOn; // Both CPs on in rapid cooling mode
   
   // Motor timings (optional)
   @JsonKey(name: 'm1_start')
@@ -36,12 +46,16 @@ class AhuState {
     required this.m1,
     required this.m2,
     required this.cp,
+    this.cp2 = false,
     required this.heater,
     required this.fan,
     required this.fanSpeed,
     required this.tempSet,
     required this.humSet,
     this.ip,
+    this.cpMode = 'dual',
+    this.cpActive = 1,
+    this.dualCpBothOn = false,
     this.m1Start,
     this.m1Post,
     this.m2Interval,
@@ -51,6 +65,9 @@ class AhuState {
 
   factory AhuState.fromJson(Map<String, dynamic> json) => _$AhuStateFromJson(json);
   Map<String, dynamic> toJson() => _$AhuStateToJson(this);
+  
+  /// Check if in dual CP mode
+  bool get isDualMode => cpMode == 'dual';
   
   String get fanSpeedDisplay {
     switch (fanSpeed) {
@@ -65,6 +82,51 @@ class AhuState {
       default:
         return 'UNKNOWN';
     }
+  }
+  
+  /// Create a copy with updated fields
+  AhuState copyWith({
+    bool? run,
+    bool? m1,
+    bool? m2,
+    bool? cp,
+    bool? cp2,
+    bool? heater,
+    bool? fan,
+    int? fanSpeed,
+    double? tempSet,
+    double? humSet,
+    String? ip,
+    String? cpMode,
+    int? cpActive,
+    bool? dualCpBothOn,
+    int? m1Start,
+    int? m1Post,
+    int? m2Interval,
+    int? m2Run,
+    int? m2Delay,
+  }) {
+    return AhuState(
+      run: run ?? this.run,
+      m1: m1 ?? this.m1,
+      m2: m2 ?? this.m2,
+      cp: cp ?? this.cp,
+      cp2: cp2 ?? this.cp2,
+      heater: heater ?? this.heater,
+      fan: fan ?? this.fan,
+      fanSpeed: fanSpeed ?? this.fanSpeed,
+      tempSet: tempSet ?? this.tempSet,
+      humSet: humSet ?? this.humSet,
+      ip: ip ?? this.ip,
+      cpMode: cpMode ?? this.cpMode,
+      cpActive: cpActive ?? this.cpActive,
+      dualCpBothOn: dualCpBothOn ?? this.dualCpBothOn,
+      m1Start: m1Start ?? this.m1Start,
+      m1Post: m1Post ?? this.m1Post,
+      m2Interval: m2Interval ?? this.m2Interval,
+      m2Run: m2Run ?? this.m2Run,
+      m2Delay: m2Delay ?? this.m2Delay,
+    );
   }
 }
 

@@ -2,7 +2,7 @@ name: almed_ahu_android
 description: "ALMED AHU Android App - Admin dashboard for monitoring and controlling Air Handling Units"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.6.0+16
 
 environment:
   sdk: ^3.0.0
