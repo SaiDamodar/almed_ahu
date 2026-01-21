@@ -1090,11 +1090,12 @@ void updateHEPAStatus(float pressure) {
     hepaHealthPercent = 0;
   } else if (absP <= maxNormal) {
     hepaStatus = "Normal";
-    // Health decreases as pressure increases toward replace threshold
-    hepaHealthPercent = (int)(100.0 * (replaceThreshold - absP) / (replaceThreshold - minNormal));
+    // Full health when in normal range
+    hepaHealthPercent = 100;
   } else if (absP <= replaceThreshold) {
     hepaStatus = "Clogging";
-    hepaHealthPercent = (int)(100.0 * (replaceThreshold - absP) / (replaceThreshold - minNormal));
+    // Health decreases from 100% at maxNormal to 0% at replaceThreshold
+    hepaHealthPercent = (int)(100.0 * (replaceThreshold - absP) / (replaceThreshold - maxNormal));
   } else {
     hepaStatus = "Replace Required";
     hepaHealthPercent = 0;
