@@ -1758,7 +1758,7 @@ void readSensorIfDue(){
     if (acceptT) { filtTempC = newT; }
     else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
 
-    if (acceptH) { filtHum = newH; }
+    if (acceptH) { filtHum = newH - 11.0; }  // Apply -11 offset to humidity
     else if (!isnan(filtHum)) { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "%"); }
 
     String line = "Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + " °C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%";
@@ -1842,7 +1842,7 @@ void readComboSensorsIfDue() {
       if (acceptT) { filtTempC = newT; }
       else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
       
-      if (acceptH) { filtHum = newH; }
+      if (acceptH) { filtHum = newH - 11.0; }  // Apply -11 offset to humidity
       else if (!isnan(filtHum)) { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "%"); }
       
       if (acceptT && acceptH) {
@@ -1876,7 +1876,7 @@ void readComboSensorsIfDue() {
         // Only use SEN66 temp/humidity if SHT45 is not available
         if (!useSHT45) {
           filtTempC = sen66_temperature;
-          filtHum = sen66_humidity;
+          filtHum = sen66_humidity - 11.0;  // Apply -11 offset to humidity
         }
         sen66_aqi = calculateAQI(sen66_pm2p5);
         sen66Success = true;
