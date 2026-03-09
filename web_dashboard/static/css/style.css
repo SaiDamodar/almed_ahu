@@ -46,6 +46,20 @@
   
   /* Transitions */
   --transition: all 0.3s ease;
+
+  /* Aliases for template compatibility */
+  --border: rgba(255, 255, 255, 0.1);
+  --card-bg: #1E2538;
+  --primary: #8B5CF6;
+  --background: #0F1419;
+  --on-surface: #F1F5F9;
+  --temperature: #3B82F6;
+  --humidity: #60A5FA;
+  --text: #F1F5F9;
+  --surface: #1E2538;
+  --surface-variant: #252B3D;
+  --primary-hover: #7C3AED;
+  --bg-hover: rgba(255, 255, 255, 0.05);
 }
 
 * {

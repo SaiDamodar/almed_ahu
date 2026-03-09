@@ -140,9 +140,18 @@
     </div>
 
     <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script>
         async function loadDashboard() {
             try {
+                // Load user count
+                try {
+                    const usersResp = await api.request('/api/admin/users/registered');
+                    if (usersResp.success && Array.isArray(usersResp.users)) {
+                        document.getElementById('total-users').textContent = usersResp.users.length + 1;
+                    }
+                } catch (e) { /* non-fatal */ }
+
                 const response = await api.getDevices();
                 
                 if (response.success && response.hospitals) {
@@ -213,7 +222,6 @@
                     // Update summary cards
                     document.getElementById('total-devices').textContent = totalDevices;
                     document.getElementById('online-devices').textContent = onlineDevices;
-                    document.getElementById('total-users').textContent = '1'; // Admin user
                     
                     // Update system status
                     const systemStatusEl = document.getElementById('system-status');

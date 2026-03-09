@@ -3,9 +3,6 @@ ALMED AHU Web Dashboard - Flask Backend
 Handles AWS IoT Core and MQTT communication (Real-time only, no DynamoDB)
 """
 
-import eventlet
-eventlet.monkey_patch()
-
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -70,7 +67,7 @@ CORS(app, origins=config.CORS_ORIGINS)
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode='eventlet',
+    async_mode='threading',
     ping_interval=25,
     ping_timeout=60
 )

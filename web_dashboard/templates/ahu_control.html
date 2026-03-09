@@ -1711,6 +1711,14 @@
             tempSet: null,
             humSet: null,
             fanSpeed: null,
+            // boolean component states: null = not set, true/false = pending confirmation
+            run: null,
+            heater: null,
+            cp1: null,
+            cp2: null,
+            m1: null,
+            m2: null,
+            fan: null,
             lastUpdate: 0
         };
 
@@ -1722,7 +1730,24 @@
                     
                     const now = Date.now();
                     if (now - optimisticState.lastUpdate > 30000) {
-                        optimisticState = { tempSet: null, humSet: null, fanSpeed: null, lastUpdate: 0 };
+                        optimisticState = {
+                            tempSet: null, humSet: null, fanSpeed: null,
+                            run: null, heater: null, cp1: null, cp2: null,
+                            m1: null, m2: null, fan: null, lastUpdate: 0
+                        };
+                    } else {
+                        const tel = response.data.telemetry || {};
+                        const confirmBool = (key, val) => {
+                            if (optimisticState[key] !== null && val !== undefined && toBool(val) === optimisticState[key])
+                                optimisticState[key] = null;
+                        };
+                        confirmBool('run',    tel.run);
+                        confirmBool('heater', tel.heater);
+                        confirmBool('m1',     tel.m1);
+                        confirmBool('m2',     tel.m2);
+                        confirmBool('fan',    tel.fan);
+                        confirmBool('cp1',    tel.cp);
+                        confirmBool('cp2',    tel.cp2);
                     }
                     
                     updateUI();
@@ -1767,7 +1792,7 @@
             
             // Update running chip
             const runVal = telemetry.run !== undefined ? telemetry.run : state.run;
-            isRunning = toBool(runVal);
+            isRunning = optimisticState.run !== null ? optimisticState.run : toBool(runVal);
             const runningChip = document.getElementById('running-chip');
             runningChip.style.display = isRunning ? 'flex' : 'none';
             
@@ -1820,21 +1845,23 @@
                 hepaSection.classList.remove('active');
             }
 
-            // Update components
-            const cpVal = telemetry.cp !== undefined ? telemetry.cp : state.cp;
-            const heaterVal = telemetry.heater !== undefined ? telemetry.heater : state.heater;
-            const m1Val = telemetry.m1 !== undefined ? telemetry.m1 : state.m1;
-            const m2Val = telemetry.m2 !== undefined ? telemetry.m2 : state.m2;
-            const fanVal = telemetry.fan !== undefined ? telemetry.fan : state.fan;
+            // Update components — prefer optimistic state, fall back to device data
+            const resolveOpt = (key, telVal, stateVal) =>
+                optimisticState[key] !== null ? optimisticState[key] : toBool(telVal !== undefined ? telVal : stateVal);
+
+            const heaterOn = resolveOpt('heater', telemetry.heater, state.heater);
+            const m1On     = resolveOpt('m1',     telemetry.m1,     state.m1);
+            const m2On     = resolveOpt('m2',     telemetry.m2,     state.m2);
+            const fanOn    = resolveOpt('fan',    telemetry.fan,    state.fan);
             const fanSpeed = optimisticState.fanSpeed !== null
                 ? optimisticState.fanSpeed
                 : parseInt(state.fanSpeed !== undefined ? state.fanSpeed : telemetry.fanSpeed) || 0;
             
             // CP1/CP2 are updated in updateCpModeUI
-            updateComponent('heater', toBool(heaterVal));
-            updateComponent('m1', toBool(m1Val));
-            updateComponent('m2', toBool(m2Val));
-            updateComponent('fan', toBool(fanVal), fanSpeed);
+            updateComponent('heater', heaterOn);
+            updateComponent('m1', m1On);
+            updateComponent('m2', m2On);
+            updateComponent('fan', fanOn, fanSpeed);
             
             // Update CP Mode Control and Component Status for CP1/CP2
             updateCpModeUI(telemetry, state);
@@ -1846,8 +1873,8 @@
         function updateCpModeUI(telemetry, state) {
             const cpMode = state.cpMode || telemetry.cpMode || 'dual';
             const cpActive = parseInt(state.cpActive || telemetry.cpActive) || 1;
-            const cp1On = toBool(telemetry.cp);
-            const cp2On = toBool(telemetry.cp2);
+            const cp1On = optimisticState.cp1 !== null ? optimisticState.cp1 : toBool(telemetry.cp);
+            const cp2On = optimisticState.cp2 !== null ? optimisticState.cp2 : toBool(telemetry.cp2);
             const isDualMode = cpMode === 'dual';
             
             // Store for modal
@@ -2083,13 +2110,36 @@
 
         async function toggleSystem() {
             try {
-                if (isRunning) {
-                    await api.stopDevice(deviceId);
+                const newRunning = !isRunning;
+                
+                // Optimistic UI update — flip instantly
+                optimisticState.run = newRunning;
+                optimisticState.lastUpdate = Date.now();
+                isRunning = newRunning;
+                const startStopBtn = document.getElementById('start-stop-btn');
+                const runningChip  = document.getElementById('running-chip');
+                if (newRunning) {
+                    startStopBtn.style.background = '#EF4444';
+                    startStopBtn.style.borderColor = '#EF4444';
+                    startStopBtn.innerHTML = '<span style="font-size:14px;">■</span><span>Stop</span>';
+                    runningChip.style.display = 'flex';
                 } else {
+                    startStopBtn.style.background = '#10B981';
+                    startStopBtn.style.borderColor = '#10B981';
+                    startStopBtn.innerHTML = '<span style="font-size:14px;">▶</span><span>Start</span>';
+                    runningChip.style.display = 'none';
+                }
+
+                if (newRunning) {
                     await api.startDevice(deviceId);
+                } else {
+                    await api.stopDevice(deviceId);
                 }
                 setTimeout(loadDeviceData, 1000);
             } catch (error) {
+                // Revert optimistic state on error
+                optimisticState.run = null;
+                await loadDeviceData();
                 alert('Error: ' + error.message);
             }
         }
@@ -2333,9 +2383,10 @@
                         if (data.type === 'state' || data.type === 'telemetry') {
                             const now = Date.now();
                             if (now - optimisticState.lastUpdate < 30000) {
-                                const tempSet = getNum(data.data.tempSet);
-                                const humSet = getNum(data.data.humSet);
-                                const fanSpeed = parseInt(data.data.fanSpeed) || 0;
+                                const d = data.data;
+                                const tempSet = getNum(d.tempSet);
+                                const humSet = getNum(d.humSet);
+                                const fanSpeed = parseInt(d.fanSpeed) || 0;
                                 
                                 if (optimisticState.tempSet !== null && tempSet !== null) {
                                     if (Math.abs(tempSet - optimisticState.tempSet) < 0.1) {
@@ -2350,6 +2401,19 @@
                                 if (optimisticState.fanSpeed !== null && fanSpeed === optimisticState.fanSpeed) {
                                     optimisticState.fanSpeed = null;
                                 }
+
+                                // Clear boolean optimistic states when device confirms them
+                                const confirmBoolWs = (key, val) => {
+                                    if (optimisticState[key] !== null && val !== undefined && toBool(val) === optimisticState[key])
+                                        optimisticState[key] = null;
+                                };
+                                confirmBoolWs('run',    d.run);
+                                confirmBoolWs('heater', d.heater);
+                                confirmBoolWs('m1',     d.m1);
+                                confirmBoolWs('m2',     d.m2);
+                                confirmBoolWs('fan',    d.fan);
+                                confirmBoolWs('cp1',    d.cp);
+                                confirmBoolWs('cp2',    d.cp2);
                             }
                         }
                         
