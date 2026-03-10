@@ -3,8 +3,15 @@ ALMED AHU Web Dashboard - Flask Backend
 Handles AWS IoT Core and MQTT communication (Real-time only, no DynamoDB)
 """
 
-import eventlet
-eventlet.monkey_patch()
+import os
+
+# Eventlet for production, optional for local dev
+USE_EVENTLET = os.getenv('USE_EVENTLET', 'True').lower() == 'true'
+if USE_EVENTLET:
+    import eventlet
+    eventlet.monkey_patch()
+else:
+    eventlet = None
 
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from flask_cors import CORS
@@ -32,6 +39,14 @@ import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson import ObjectId
 import os
+
+# Eventlet for production, optional for local dev
+USE_EVENTLET = os.getenv('USE_EVENTLET', 'True').lower() == 'true'
+if USE_EVENTLET:
+    import eventlet
+    eventlet.monkey_patch()
+else:
+    eventlet = None
 
 # Firebase Admin SDK for push notifications
 firebase_app = None
@@ -64,13 +79,14 @@ except Exception as e:
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config.SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expires after 24 hours
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size for OTA .bin uploads
 CORS(app, origins=config.CORS_ORIGINS)
 
 # Initialize SocketIO with explicit async mode and heartbeat settings
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode='eventlet',
+    async_mode='eventlet' if USE_EVENTLET else 'threading',
     ping_interval=25,
     ping_timeout=60
 )
@@ -372,7 +388,14 @@ def init_aws_iot_mqtt():
     
     def connect_async():
         """Connect in a separate thread to avoid blocking"""
+        global aws_iot_mqtt_client, aws_iot_connected
         try:
+            # Small delay to ensure thread is fully initialized
+            if USE_EVENTLET and eventlet:
+                eventlet.sleep(1)
+            else:
+                time.sleep(1)
+            
             # Generate SigV4 signed WebSocket URL
             ws_url = sign_url(
                 config.AWS_ACCESS_KEY_ID,
@@ -436,8 +459,21 @@ def init_aws_iot_mqtt():
             aws_iot_mqtt_client = None
     
     # Start connection in background thread
-    thread = Thread(target=connect_async, daemon=True)
-    thread.start()
+    # Use eventlet.spawn if eventlet is enabled, otherwise use Thread
+    try:
+        if USE_EVENTLET and eventlet:
+            # Use eventlet's spawn for async execution
+            eventlet.spawn(connect_async)
+        else:
+            # Use standard Thread for non-eventlet mode
+            thread = Thread(target=connect_async, daemon=True)
+            thread.start()
+    except Exception as e:
+        print(f"⚠️ AWS IoT MQTT: Thread start failed (non-critical): {e}")
+        import traceback
+        traceback.print_exc()
+        aws_iot_connected = False
+        aws_iot_mqtt_client = None
 
 def on_aws_iot_connect(client, userdata, flags, rc):
     """AWS IoT MQTT connection callback"""
@@ -445,11 +481,23 @@ def on_aws_iot_connect(client, userdata, flags, rc):
     if rc == 0:
         aws_iot_connected = True
         # Subscribe to esp32/pub topic (where ESP32 publishes telemetry)
-        client.subscribe(config.AWS_IOT_TOPIC_PUBLISH, qos=1)
-        print(f"AWS IoT MQTT: Connected and subscribed to {config.AWS_IOT_TOPIC_PUBLISH}")
+        result = client.subscribe(config.AWS_IOT_TOPIC_PUBLISH, qos=1)
+        print(f"✓ AWS IoT MQTT: Connected and subscribed to {config.AWS_IOT_TOPIC_PUBLISH}")
+        print(f"  Subscribe result: {result}")
+        print(f"  Device cache size: {len(device_cache)}")
     else:
         aws_iot_connected = False
-        print(f"AWS IoT MQTT: Connection failed with code {rc}")
+        print(f"❌ AWS IoT MQTT: Connection failed with code {rc}")
+        if rc == 1:
+            print("  Error: Unacceptable protocol version")
+        elif rc == 2:
+            print("  Error: Identifier rejected")
+        elif rc == 3:
+            print("  Error: Server unavailable")
+        elif rc == 4:
+            print("  Error: Bad user name or password")
+        elif rc == 5:
+            print("  Error: Not authorized")
 
 def on_aws_iot_message(client, userdata, msg):
     """AWS IoT MQTT message callback - broadcasts via WebSocket"""
@@ -514,6 +562,9 @@ def on_aws_iot_message(client, userdata, msg):
         })
         
         print(f"AWS IoT MQTT: Received {msg_type} from {site}/{room}/{ahu} (device_id: {device_id})")
+        print(f"  [DEBUG] Payload keys: {list(payload.keys())}")
+        print(f"  [DEBUG] Site: '{site}', Room: '{room}', AHU: '{ahu}'")
+        print(f"  [DEBUG] Device cache now has {len(device_cache)} devices")
     except Exception as e:
         print(f"AWS IoT MQTT: Error processing message: {e}")
         import traceback
@@ -695,6 +746,59 @@ def aws_iot_status():
         'status': status
     }), 200
 
+@app.route('/api/debug/cache', methods=['GET'])
+@login_required
+def debug_cache():
+    """Debug endpoint to check device_cache and AWS IoT connection status"""
+    return jsonify({
+        'success': True,
+        'aws_iot_connected': aws_iot_connected,
+        'aws_iot_mqtt_client_exists': aws_iot_mqtt_client is not None,
+        'device_cache_size': len(device_cache),
+        'device_cache_keys': list(device_cache.keys()),
+        'device_cache': {k: {
+            'site': v.get('site', 'unknown'),
+            'room': v.get('room', 'unknown'),
+            'ahu': v.get('ahu', 'unknown'),
+            'last_update': v.get('last_update', None),
+            'has_telemetry': 'telemetry' in v,
+            'has_state': 'state' in v
+        } for k, v in device_cache.items()},
+        'config': {
+            'endpoint': config.AWS_IOT_ENDPOINT,
+            'publish_topic': config.AWS_IOT_TOPIC_PUBLISH,
+            'subscribe_topic': config.AWS_IOT_TOPIC_SUBSCRIBE
+        }
+    }), 200
+
+@app.route('/api/debug/reconnect-aws', methods=['POST'])
+@login_required
+def debug_reconnect_aws():
+    """Manually trigger AWS IoT MQTT reconnection"""
+    global aws_iot_mqtt_client, aws_iot_connected
+    try:
+        # Disconnect existing connection if any
+        if aws_iot_mqtt_client:
+            try:
+                aws_iot_mqtt_client.disconnect()
+            except:
+                pass
+        aws_iot_mqtt_client = None
+        aws_iot_connected = False
+        
+        # Reinitialize
+        init_aws_iot_mqtt()
+        
+        return jsonify({
+            'success': True,
+            'message': 'AWS IoT MQTT reconnection initiated'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/devices', methods=['GET'])
 def get_devices():
     """Get all devices grouped by hospital (from MQTT cache only)"""
@@ -794,18 +898,32 @@ def get_devices():
             elif ahu == 'unknown' and 'ahu' in state:
                 ahu = state['ahu']
             
-            # Fallback defaults
+            # Fallback: Try to extract from device_id format (site_room_ahu)
+            # Handle device_id with spaces in site name (e.g., "Kauvery Hospital_BURNS_0T_AHU-01")
+            if site == 'unknown' or room == 'unknown' or ahu == 'unknown':
+                # Split by '_' but handle spaces in site name
+                # For "Kauvery Hospital_BURNS_0T_AHU-01", we need to split carefully
+                # The last two parts are always room and ahu
+                parts = device_id.split('_')
+                if len(parts) >= 3:
+                    # Last two parts are room and ahu
+                    ahu_from_id = parts[-1] if ahu == 'unknown' else ahu
+                    room_from_id = parts[-2] if room == 'unknown' else room
+                    # Everything before the last two parts is the site (may contain spaces)
+                    site_from_id = '_'.join(parts[:-2]) if site == 'unknown' else site
+                    
+                    if site == 'unknown' and site_from_id != 'unknown':
+                        site = site_from_id
+                    if room == 'unknown' and room_from_id != 'unknown':
+                        room = room_from_id
+                    if ahu == 'unknown' and ahu_from_id != 'unknown':
+                        ahu = ahu_from_id
+            
+            # Final fallback defaults (only if still unknown)
             if site == 'unknown':
                 site = 'hospitalA'
             if room == 'unknown':
                 room = 'icu1'
-            if ahu == 'unknown':
-                # Try to extract from device_id format (site_room_ahu)
-                parts = device_id.split('_')
-                if len(parts) >= 3:
-                    site = parts[0] if parts[0] != 'unknown' else site
-                    room = parts[1] if parts[1] != 'unknown' else room
-                    ahu = parts[2] if parts[2] != 'unknown' else ahu
             
             add_device_record(device_id, telemetry, state, data.get('last_update'))
 
@@ -1072,41 +1190,77 @@ def send_command(device_id):
                 'details': 'Please check AWS credentials and IoT endpoint configuration in Railway environment variables'
             }), 500
         
-        # Validate topic configuration
-        if not config.AWS_IOT_TOPIC_SUBSCRIBE:
+        # Determine the correct topic for this device
+        # Look up the device's thing name from cache to build device-specific topic
+        cache_data = device_cache.get(device_id, {})
+        thing_name = None
+        
+        # Try to get thing name from telemetry or state
+        if cache_data:
+            telemetry = cache_data.get('telemetry', {})
+            state = cache_data.get('state', {})
+            thing_name = telemetry.get('thing') or state.get('thing')
+        
+        # Build topic list - publish to all possible topics the device may subscribe to
+        topics_to_publish = []
+        
+        if thing_name:
+            # Primary: device-specific topic (esp32/<thing_name>/sub)
+            device_topic = f"esp32/{thing_name}/sub"
+            topics_to_publish.append(device_topic)
+        
+        # Always include the generic topic as fallback (esp32/sub)
+        generic_topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+        if generic_topic and generic_topic not in topics_to_publish:
+            topics_to_publish.append(generic_topic)
+        
+        if not topics_to_publish:
             return jsonify({
                 'success': False,
-                'error': 'AWS IoT topic not configured'
+                'error': 'No valid topic configured for this device'
             }), 500
         
-        # Publish via AWS IoT Core
+        print(f"[COMMAND] Device: {device_id}, Thing: {thing_name}")
+        print(f"[COMMAND] Publishing to topics: {topics_to_publish}")
+        print(f"[COMMAND] Payload: {payload[:200]}")
+        
+        # Publish via AWS IoT Core to all applicable topics
         try:
-            topic = config.AWS_IOT_TOPIC_SUBSCRIBE
-            print(f"[COMMAND] Publishing to topic: {topic}")
-            print(f"[COMMAND] Payload: {payload[:200]}...")  # Log first 200 chars
+            published_topics = []
+            last_error = None
             
-            response = iot_data.publish(
-                topic=topic,
-                qos=1,
-                payload=payload
-            )
+            for topic in topics_to_publish:
+                try:
+                    response = iot_data.publish(
+                        topic=topic,
+                        qos=1,
+                        payload=payload
+                    )
+                    http_status = response.get('ResponseMetadata', {}).get('HTTPStatusCode', 0)
+                    if http_status == 200:
+                        published_topics.append(topic)
+                        print(f"[COMMAND] ✓ Published to {topic} (HTTP {http_status})")
+                    else:
+                        print(f"[COMMAND] ⚠️ Topic {topic} returned HTTP {http_status}")
+                        last_error = f'HTTP {http_status}'
+                except Exception as topic_err:
+                    print(f"[COMMAND] ❌ Failed to publish to {topic}: {topic_err}")
+                    last_error = str(topic_err)
             
-            # Check response
-            http_status = response.get('ResponseMetadata', {}).get('HTTPStatusCode', 0)
-            if http_status == 200:
-                print(f"[COMMAND] ✓ Command sent successfully (HTTP {http_status})")
+            if published_topics:
+                primary_topic = published_topics[0]
                 return jsonify({
                     'success': True,
                     'message': 'Command sent via AWS IoT Core',
-                    'topic': topic,
-                    'device_id': device_id
+                    'topic': primary_topic,
+                    'topics': published_topics,
+                    'device_id': device_id,
+                    'http_status': 200
                 })
             else:
-                print(f"[COMMAND] ⚠️ Unexpected HTTP status: {http_status}")
                 return jsonify({
                     'success': False,
-                    'error': f'AWS IoT Core returned HTTP status {http_status}',
-                    'response': str(response)
+                    'error': f'Failed to publish to any topic: {last_error}'
                 }), 500
                 
         except Exception as e:
@@ -1116,7 +1270,6 @@ def send_command(device_id):
             import traceback
             traceback.print_exc()
             
-            # Provide helpful error messages based on exception type
             if 'CredentialsError' in error_type or 'InvalidAccessKeyId' in error_type:
                 error_details = 'Invalid AWS credentials. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.'
             elif 'EndpointConnectionError' in error_type or 'ConnectionError' in error_type:
@@ -2878,34 +3031,55 @@ def trigger_ota_update():
         # Send via AWS IoT Core
         if iot_data:
             try:
-                topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+                # Look up device's thing name for device-specific topic routing
+                cache_data = device_cache.get(device_id, {})
+                thing_name = None
+                if cache_data:
+                    telemetry = cache_data.get('telemetry', {})
+                    state = cache_data.get('state', {})
+                    thing_name = telemetry.get('thing') or state.get('thing')
+                
+                # Build topics list - device-specific first, then generic fallback
+                topics_to_publish = []
+                if thing_name:
+                    topics_to_publish.append(f"esp32/{thing_name}/sub")
+                generic_topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+                if generic_topic and generic_topic not in topics_to_publish:
+                    topics_to_publish.append(generic_topic)
+                
+                topic = topics_to_publish[0] if topics_to_publish else config.AWS_IOT_TOPIC_SUBSCRIBE
                 payload = json.dumps(ota_command)
                 
                 print(f"\n{'='*60}")
                 print(f"[OTA] Publishing MQTT message to AWS IoT Core")
-                print(f"[OTA] Topic: {topic}")
+                print(f"[OTA] Device: {device_id}, Thing: {thing_name}")
+                print(f"[OTA] Topics: {topics_to_publish}")
                 print(f"[OTA] Payload length: {len(payload)} bytes")
                 print(f"[OTA] Payload preview: {payload[:300]}...")
                 print(f"{'='*60}\n")
                 
-                # Publish to AWS IoT Core
-                response = iot_data.publish(
-                    topic=topic,
-                    qos=1,
-                    payload=payload
-                )
+                # Publish to all applicable topics
+                published_topics = []
+                for pub_topic in topics_to_publish:
+                    response = iot_data.publish(
+                        topic=pub_topic,
+                        qos=1,
+                        payload=payload
+                    )
+                    http_status = response.get('ResponseMetadata', {}).get('HTTPStatusCode', 0)
+                    if http_status == 200:
+                        published_topics.append(pub_topic)
+                        print(f"[OTA] ✓ Published to {pub_topic}")
+                    else:
+                        print(f"[OTA] ⚠️ Topic {pub_topic} returned HTTP {http_status}")
                 
                 print(f"[OTA] Publish response: {response}")
                 print(f"[OTA] Response metadata: {response.get('ResponseMetadata', {})}")
                 
                 # Verify the message was sent
-                if 'ResponseMetadata' in response:
-                    http_status = response['ResponseMetadata'].get('HTTPStatusCode', 'Unknown')
-                    print(f"[OTA] HTTP Status Code: {http_status}")
-                    if http_status == 200:
-                        print(f"[OTA] ✓ Message published successfully to {topic}")
-                    else:
-                        print(f"[OTA] ⚠️ Unexpected HTTP status: {http_status}")
+                if published_topics:
+                    http_status = 200
+                    print(f"[OTA] ✓ Message published successfully to {published_topics}")
                 
                 return jsonify({
                     'success': True,
@@ -3632,12 +3806,21 @@ if __name__ == '__main__':
                 ssl_context = None
     
     if not ssl_context:
-        socketio.run(
-            app,
-            host=config.HOST,
-            port=config.PORT,
-            debug=config.DEBUG,
-            use_reloader=False,
-            allow_unsafe_werkzeug=True
-        )
+        # For local development, use Flask dev server if eventlet has issues
+        if config.DEBUG or os.getenv('USE_FLASK_DEV_SERVER', 'False').lower() == 'true':
+            print("Using Flask development server (eventlet disabled for local dev)")
+            app.run(
+                host=config.HOST,
+                port=config.PORT,
+                debug=config.DEBUG
+            )
+        else:
+            socketio.run(
+                app,
+                host=config.HOST,
+                port=config.PORT,
+                debug=config.DEBUG,
+                use_reloader=False,
+                allow_unsafe_werkzeug=True
+            )
 

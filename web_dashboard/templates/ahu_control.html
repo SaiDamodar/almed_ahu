@@ -2135,7 +2135,8 @@
                 } else {
                     await api.stopDevice(deviceId);
                 }
-                setTimeout(loadDeviceData, 1000);
+                
+                setTimeout(loadDeviceData, 2000);
             } catch (error) {
                 // Revert optimistic state on error
                 optimisticState.run = null;
