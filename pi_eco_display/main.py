@@ -95,7 +95,10 @@ class App:
         os.environ.setdefault("SDL_MOUSEDEV", "/dev/input/touchscreen")
 
         pygame.init()
-        pygame.mouse.set_visible(not fullscreen)  # Hide cursor only in fullscreen/kiosk mode
+        # For Pi Zero 2W we keep the cursor visible in both
+        # windowed and fullscreen modes to make debugging and
+        # USB-mouse control easier.
+        pygame.mouse.set_visible(True)
 
         if fullscreen:
             self._surf = pygame.display.set_mode(
