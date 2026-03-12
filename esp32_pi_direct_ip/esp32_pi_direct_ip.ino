@@ -3603,7 +3603,7 @@ void setup()
   w2_ssid = prefs.getString("w2_ssid", String(""));
   w2_pass = prefs.getString("w2_pass", String(""));
   
-  // Load Local MQTT broker host (RPi mDNS hostname - works on ANY network!)
+  // Load Local MQTT broker host (direct IP)
   // MDNS MODE: Migrate old IPs to hostname for mass production compatibility
   String savedMqttHost = prefs.getString("mqtt_host", mqttHost);
   mqttHost = savedMqttHost;
@@ -3629,7 +3629,7 @@ void setup()
   
   Serial.println("\n📡 WiFi: Connecting to '" + String(WIFI_SSID) + "' (non-blocking)");
   Serial.println("  📶 ESP32 and RPi both connect to same network");
-  Serial.println("  🌐 mDNS: Will connect to '" + mqttHost + "' (works on any network!)");
+  Serial.println("  📡 Direct IP: Will connect to '" + mqttHost + "'");
   Serial.println("  ⚠️  System will work standalone even without WiFi");
   Serial.println("  ⚠️  WiFi will reconnect automatically in background");
 
@@ -3849,9 +3849,9 @@ void loop()
       selfHealing.wifiFailCount = 0;
       selfHealing.wifiDownSince = 0;
       
-      // Start mDNS for hostname resolution (almed-ahu.local)
+      // Start mDNS for ESP32 service discovery
       if (MDNS.begin("ahu-esp32")) {
-        Serial.println("✓ mDNS started - can resolve almed-ahu.local");
+        Serial.println("✓ mDNS started for ahu-esp32");
       }
     } 
     else if (!wifiConnected && wifiWasConnected) {
