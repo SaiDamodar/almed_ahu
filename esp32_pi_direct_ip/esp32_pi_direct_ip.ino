@@ -3497,6 +3497,7 @@ void setup()
   esp_task_wdt_reset();
 
   prefs.begin("ahu", false);
+  prefs.remove("mqtt_host");  // Force use of hardcoded IP - clear any cached hostname
 
   // Display OTA version info if available (from previous OTA update)
   String otaVersion = prefs.getString("ota_version", "");
