@@ -95,7 +95,7 @@ class App:
         os.environ.setdefault("SDL_MOUSEDEV", "/dev/input/touchscreen")
 
         pygame.init()
-        pygame.mouse.set_visible(False)
+        pygame.mouse.set_visible(not fullscreen)  # Hide cursor only in fullscreen/kiosk mode
 
         if fullscreen:
             self._surf = pygame.display.set_mode(

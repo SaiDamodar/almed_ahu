@@ -8,7 +8,7 @@ WIFI_SSID     = "PiSpot"       # Same hotspot the AHU ESP32 connects to
 WIFI_PASSWORD = "12345678"
 
 # ── MQTT ─────────────────────────────────────────────────────────────────────
-MQTT_BROKER   = "10.42.0.1"   # Pi acts as broker at hotspot gateway IP
+MQTT_BROKER   = "192.168.0.253"   # Pi's static IP on AlMed network
 MQTT_PORT     = 1883
 MQTT_USER     = "almed"
 MQTT_PASS     = "Almed1234$"
