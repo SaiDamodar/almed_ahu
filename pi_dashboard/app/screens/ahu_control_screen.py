@@ -92,23 +92,23 @@ class AhuControlScreen(ctk.CTkFrame):
         self._on_update()
 
     def _build_topbar(self):
-        # Slim top bar for 1024×600 so content gets maximum height.
-        # Don't hardcode height; let it collapse to content with minimal padding.
-        bar = ctk.CTkFrame(self, fg_color=T("topbar"), corner_radius=0)
+        # Compact top bar (approved mock): fixed height, tight padding.
+        bar = ctk.CTkFrame(self, fg_color=T("topbar"), corner_radius=0, height=48)
         bar.pack(fill="x")
+        bar.pack_propagate(False)
 
         # Use a 2-column layout so essential controls never overflow off-screen.
         bar.grid_columnconfigure(0, weight=1)
         bar.grid_columnconfigure(1, weight=0)
 
         left = ctk.CTkFrame(bar, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="w", padx=10, pady=2)
+        left.grid(row=0, column=0, sticky="w", padx=14, pady=0)
 
         ctk.CTkLabel(left, text="ALMED",
                      font=("Helvetica", 18, "bold"), text_color="#3B82F6").pack(
             side="left", pady=0)
         ctk.CTkFrame(left, fg_color=T("border"), width=1).pack(
-            side="left", fill="y", padx=10, pady=2)
+            side="left", fill="y", padx=12, pady=8)
 
         # back button
         ctk.CTkButton(left, text="‹ Back", width=68, height=30,
@@ -116,18 +116,18 @@ class AhuControlScreen(ctk.CTkFrame):
                       text_color=T("text_sec"), hover_color=T("surface2"),
                       corner_radius=8,
                       command=lambda: self._app.show_dashboard(self._role)).pack(
-            side="left", padx=(0, 8), pady=0)
+            side="left", padx=(0, 10), pady=0)
 
         # AHU info
         self._ahu_info = _AhuInfoBar(left, self._provider, self._key)
         self._ahu_info.pack(side="left")
 
         right = ctk.CTkFrame(bar, fg_color="transparent")
-        right.grid(row=0, column=1, sticky="e", padx=10, pady=2)
+        right.grid(row=0, column=1, sticky="e", padx=14, pady=0)
 
         # screen lock button
         self._lock_btn = ctk.CTkButton(right, text="🔒 LOCKED",
-                                       width=106, height=30,
+                                       width=108, height=22,
                                        font=font(11, "bold"),
                                        fg_color=AMBER,
                                        text_color="#FFFFFF",
@@ -139,7 +139,7 @@ class AhuControlScreen(ctk.CTkFrame):
 
         # CP mode
         self._cp_btn = ctk.CTkButton(right, text="DUAL",
-                                     width=78, height=30,
+                                     width=72, height=22,
                                      font=font(11, "bold"),
                                      fg_color=CYAN,
                                      text_color="#FFFFFF",
@@ -150,7 +150,7 @@ class AhuControlScreen(ctk.CTkFrame):
 
         # start/stop
         self._start_stop_btn = ctk.CTkButton(right, text="▶ START",
-                                             width=124, height=30,
+                                             width=96, height=22,
                                              font=font(12, "bold"),
                                              fg_color=SUCCESS,
                                              text_color="#FFFFFF",
@@ -165,7 +165,7 @@ class AhuControlScreen(ctk.CTkFrame):
         # ── row 1: sensor controls ────────────────────────────────────────────
         sr = ctk.CTkFrame(content, fg_color="transparent")
         # Pull content up; minimize wasted space under the top bar.
-        sr.pack(fill="x", padx=12, pady=(6, 6))
+        sr.pack(fill="x", padx=14, pady=(10, 6))
         sr.columnconfigure(0, weight=1)
         sr.columnconfigure(1, weight=1)
 
