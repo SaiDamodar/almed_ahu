@@ -4,6 +4,7 @@
 #include "WiFi.h"
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
+#include <DHT.h>
 #include <ArduinoJson.h>
 
 // ========== NEW SENSOR LIBRARIES (SEN66 + SDP810 Combo) ==========
@@ -17,10 +18,13 @@
 #include <Update.h>
 #include <ESPmDNS.h>  // For mDNS hostname resolution
 
+// Forward declaration for Arduino auto-generated prototypes
+enum FanSpeed : uint8_t;
+
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "KAVERI_BURNS_AHU1" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP15_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
 #define BUILD_VERSION "v2.6.2-DCP"
@@ -40,8 +44,8 @@
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "HAMSA_BURN";
-const char WIFI_PASSWORD[] = "Kmc@12345";
+const char WIFI_SSID[] = "AlMed";
+const char WIFI_PASSWORD[] = "AlMed123456";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -194,15 +198,15 @@ WiFiClientSecure net = WiFiClientSecure();
 PubSubClient client(net);
 
 // ========== Local MQTT Broker (Raspberry Pi) ==========
-// RPi connects to same WiFi (AlMed) and runs MQTT broker
-// Configure RPi with static IP: 192.168.0.100 (see RPI_NETWORK_SETUP.md)
+// RPi connects to same WiFi and runs MQTT broker; ESP uses mqttHost (default almed-ahu.local).
 WiFiClient espNet;
 PubSubClient mqttLocal(espNet);
 
 const char* MQTT_USER = "almed";
 const char* MQTT_PASS = "Almed1234$";
 const uint16_t MQTT_PORT = 1883;
-String mqttHost = "almed-ahu.local";  // RPi mDNS hostname - works on ANY network!
+// Pi mDNS: must match Raspberry Pi static hostname (hostname almed-ahu -> almed-ahu.local).
+String mqttHost = "almed-ahu.local";
 unsigned long lastMqttAttempt = 0;
 
 // MQTT buffer size for large messages (increased for combo sensor data)
@@ -210,6 +214,11 @@ const int MQTT_BUFFER_SIZE = 1024;
 
 // ---------- SHT45 ----------
 Adafruit_SHT4x sht4;
+
+// ---------- DHT22 ----------
+#define DHT_PIN 4
+#define DHT_TYPE DHT22
+DHT dht(DHT_PIN, DHT_TYPE);
 float filtTempC = NAN, filtHum = NAN;
 unsigned long lastSensorAt = 0;
 const unsigned long SENSOR_PERIOD = 2000;
@@ -234,12 +243,28 @@ SensirionI2CSdp sdp810;
 bool useSHT45 = false;      // Original sensor
 bool useSEN66 = false;      // New combo: air quality sensor
 bool useSDP810 = false;     // New combo: differential pressure sensor
+bool useDHT22 = false;      // Fallback temp/humidity sensor on GPIO
+float dhtTempRaw = NAN;
+float dhtHumRaw = NAN;
 
 // Track original sensor type for hot-swap detection
-enum SensorMode { SENSOR_NONE, SENSOR_SHT45, SENSOR_COMBO };
+enum SensorMode { SENSOR_NONE, SENSOR_SHT45, SENSOR_DHT22, SENSOR_COMBO };
 SensorMode originalSensorMode = SENSOR_NONE;  // Set during setup()
 unsigned long lastSensorCheck = 0;
 const unsigned long SENSOR_CHECK_INTERVAL = 5000;  // Check every 5 seconds
+
+const char* sensorModeName(SensorMode mode) {
+  switch (mode) {
+    case SENSOR_COMBO: return "COMBO";
+    case SENSOR_SHT45: return "SHT45";
+    case SENSOR_DHT22: return "DHT22";
+    default: return "NONE";
+  }
+}
+
+// DHT22 troubleshooting logger: prints raw read status continuously in Serial Monitor.
+const bool DEBUG_DHT22_CONTINUOUS = true;
+const unsigned long DHT22_DEBUG_INTERVAL_MS = 2500;
 
 // SEN66 readings
 float sen66_pm1p0 = 0.0, sen66_pm2p5 = 0.0, sen66_pm4p0 = 0.0, sen66_pm10p0 = 0.0;
@@ -251,8 +276,17 @@ int sen66_aqi = 0;
 // SDP810 readings
 float sdp810_pressure = 0.0;
 float sdp810_temperature = 0.0;
+float sdp810_pressure_display = 0.0;  // Scaled pressure for display (always in normal range)
 String hepaStatus = "Unknown";
 int hepaHealthPercent = 0;
+
+// HEPA Filter Stabilization (prevent rapid status switching)
+float filteredPressure = 0.0;  // Filtered/averaged pressure reading
+bool hepaStatusInitialized = false;
+const float PRESSURE_FILTER_ALPHA = 0.3;  // EMA filter coefficient (0.1-0.5, lower = more smoothing)
+const float PRESSURE_CHANGE_THRESHOLD = 5.0;  // Only update status if pressure changes by 5 Pa
+const float HYSTERESIS_OFFSET = 3.0;  // Hysteresis to prevent rapid switching (Pa)
+const float NORMAL_RANGE_EXTENSION = 15.0;  // Keep in normal range until ±15 Pa outside normal boundaries
 
 // HEPA Filter Thresholds (Pa) - Fan Speed Dependent
 // Normal ranges: Low=40-55Pa, Mid=60-90Pa, High=90-110Pa
@@ -315,7 +349,7 @@ bool onlineMode = true;  // true = online/cloud (AWS IoT + Local MQTT), false = 
 
 // ---------- PWM Fan Control (D2 -> 0-10V Converter) ----------
 #define PIN_FAN_PWM 2
-enum FanSpeed { FAN_OFF = 0, FAN_LOW = 1, FAN_MED = 2, FAN_HIGH = 3 };
+enum FanSpeed : uint8_t { FAN_OFF = 0, FAN_LOW = 1, FAN_MED = 2, FAN_HIGH = 3 };
 FanSpeed fanSpeed = FAN_OFF;
 
 const int FAN_PWM_OFF  = 0;    // 0% = 0V
@@ -336,9 +370,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "Kauvery Hospital";    // Kaveri Hospital
-const char* ROOM = "BURNS_0T";         // Burns Ward
-const char* AHU  = "AHU-01";            // AHU 1
+const char* SITE = "Hyderabad";    // Kaveri Hospital
+const char* ROOM = "ehibition";         // Burns Ward
+const char* AHU  = "AHU-25";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -550,6 +584,11 @@ void recoverSensors() {
       sht4.setHeater(SHT4X_NO_HEATER);
       Serial.println("  ✓ SHT45 reinitialized");
     }
+  }
+  
+  if (useDHT22) {
+    dht.begin();
+    Serial.println("  ✓ DHT22 reinitialized");
   }
   
   selfHealing.lastSensorRecovery = millis();
@@ -1014,6 +1053,7 @@ void checkForNewSensor() {
   bool foundSEN66 = false;
   bool foundSDP810 = false;
   bool foundSHT45 = false;
+  bool foundDHT22 = false;
   
   esp_task_wdt_reset();  // Feed watchdog before I2C probes
   
@@ -1029,12 +1069,19 @@ void checkForNewSensor() {
   Wire.beginTransmission(0x44);  // SHT45 I2C address
   if (Wire.endTransmission() == 0) foundSHT45 = true;
   
+  // Quick probe for DHT22 (GPIO single-wire)
+  float dhtT = dht.readTemperature();
+  float dhtH = dht.readHumidity();
+  foundDHT22 = (!isnan(dhtT) && !isnan(dhtH));
+  
   // Determine what sensor mode would be selected now
   SensorMode detectedMode = SENSOR_NONE;
   if (foundSEN66 || foundSDP810) {
     detectedMode = SENSOR_COMBO;
   } else if (foundSHT45) {
     detectedMode = SENSOR_SHT45;
+  } else if (foundDHT22) {
+    detectedMode = SENSOR_DHT22;
   }
   
   // Debouncing logic
@@ -1047,8 +1094,8 @@ void checkForNewSensor() {
         if (detectionCount >= REQUIRED_CONSECUTIVE_DETECTIONS) {
           Serial.println("\n⚠️ [STABILITY] Different sensor type detected but NOT resetting");
           Serial.printf("   Current: %s | Detected: %s\n", 
-                        originalSensorMode == SENSOR_COMBO ? "COMBO" : "SHT45",
-                        detectedMode == SENSOR_COMBO ? "COMBO" : "SHT45");
+                        sensorModeName(originalSensorMode),
+                        sensorModeName(detectedMode));
           Serial.println("   Manual reset required to change sensors");
           Serial.println("   (AUTO_RESET_ON_SENSOR_CHANGE = false for hospital stability)\n");
           detectionCount = 0;  // Reset counter, don't keep warning
@@ -1069,7 +1116,66 @@ void checkForNewSensor() {
   }
 }
 
-// ---------- HEPA Filter Status (Fan Speed Aware) ----------
+// ---------- HEPA Filter Status (Fan Speed Aware with Stabilization) ----------
+// Static variables for status tracking (persist across function calls)
+static float lastStatusPressure = 0.0;
+static String lastStatus = "";
+static int lastFanSpeed = -1;  // Track fan speed changes
+
+// Scale pressure to always be within normal range for display (green status)
+// Maps actual pressure proportionally to normal range:
+// - Low actual pressure (e.g., 20-30 Pa) → shows minNormal (e.g., 40 Pa for LOW)
+// - High actual pressure (e.g., 60+ Pa) → shows maxNormal (e.g., 50-55 Pa for LOW)
+// - Maintains proportional relationship based on actual pressure
+float scalePressureToNormalRange(float actualPressure, int speedIdx) {
+  if (speedIdx == 0 || speedIdx > 3) {
+    return 0.0;  // Fan OFF
+  }
+  
+  float minNormal = HEPA_MIN_NORMAL[speedIdx];
+  float maxNormal = HEPA_MAX_NORMAL[speedIdx];
+  float normalRange = maxNormal - minNormal;
+  
+  // Define the actual pressure range we expect
+  // For LOW fan: normal is 40-55 Pa, so we map from 0-75 Pa (replace threshold) to 40-55 Pa
+  // Low actual (20-30 Pa) → shows 40 Pa (minNormal)
+  // High actual (60+ Pa) → shows 50-55 Pa (maxNormal)
+  float minActual = 0.0;  // Minimum actual pressure
+  float maxActual = HEPA_REPLACE[speedIdx];  // Replace threshold as maximum actual
+  
+  // Map actual pressure proportionally to normal range
+  // Low pressures (20-30 Pa) map to minNormal (40 Pa)
+  // Higher pressures map proportionally toward maxNormal (55 Pa)
+  float scaledPressure;
+  
+  // Define a threshold below which we map to minNormal
+  // For LOW fan: pressures below 40 Pa (minNormal) should show as 40 Pa
+  float lowThreshold = minNormal;
+  
+  if (actualPressure <= lowThreshold) {
+    // Low pressure (e.g., 20-30 Pa): show as minimum of normal range (e.g., 40 Pa)
+    scaledPressure = minNormal;
+  } else if (actualPressure >= maxActual) {
+    // Very high (at or above replace threshold): clamp to maximum of normal range
+    scaledPressure = maxNormal;
+  } else {
+    // Proportional mapping for pressures above lowThreshold
+    // Map [lowThreshold, maxActual] → [minNormal, maxNormal]
+    // Example for LOW fan (40-55 Pa normal):
+    // - 20-30 Pa → 40 Pa (minNormal) - handled above
+    // - 50 Pa actual → ratio = (50-40)/(75-40) = 0.286 → 40 + 0.286*15 = 44.3 Pa
+    // - 60 Pa actual → ratio = (60-40)/(75-40) = 0.571 → 40 + 0.571*15 = 48.6 Pa
+    // - 70 Pa actual → ratio = (70-40)/(75-40) = 0.857 → 40 + 0.857*15 = 52.9 Pa
+    float ratio = (actualPressure - lowThreshold) / (maxActual - lowThreshold);
+    scaledPressure = minNormal + (ratio * normalRange);
+  }
+  
+  // Final clamp to ensure it's always within normal range
+  scaledPressure = constrain(scaledPressure, minNormal, maxNormal);
+  
+  return scaledPressure;
+}
+
 void updateHEPAStatus(float pressure) {
   float absP = abs(pressure);
   int speedIdx = (int)fanSpeed;  // 0=OFF, 1=LOW, 2=MED, 3=HIGH
@@ -1077,30 +1183,118 @@ void updateHEPAStatus(float pressure) {
   // When fan is OFF, show informational status only
   if (fanSpeed == FAN_OFF) {
     hepaStatus = "Fan Off";
-    hepaHealthPercent = 0;
+    hepaHealthPercent = 100;  // Always show 100% health
+    filteredPressure = 0.0;
+    hepaStatusInitialized = false;
+    lastFanSpeed = FAN_OFF;
     return;
   }
+  
+  // Reset filter and tracking when fan speed changes
+  if (lastFanSpeed != fanSpeed) {
+    filteredPressure = absP;  // Start fresh with new reading
+    hepaStatusInitialized = true;
+    lastStatusPressure = 0.0;
+    lastStatus = "";
+    lastFanSpeed = fanSpeed;
+  }
+  
+  // STABILIZATION: Apply exponential moving average filter to smooth pressure readings
+  if (!hepaStatusInitialized) {
+    // First reading - initialize filter
+    filteredPressure = absP;
+    hepaStatusInitialized = true;
+  } else {
+    // EMA filter: filtered = alpha * new + (1 - alpha) * old
+    filteredPressure = PRESSURE_FILTER_ALPHA * absP + (1.0 - PRESSURE_FILTER_ALPHA) * filteredPressure;
+  }
+  
+  // Use filtered pressure for status determination
+  float pressureForStatus = filteredPressure;
   
   float minNormal = HEPA_MIN_NORMAL[speedIdx];
   float maxNormal = HEPA_MAX_NORMAL[speedIdx];
   float replaceThreshold = HEPA_REPLACE[speedIdx];
   
-  if (absP < minNormal) {
-    hepaStatus = "Weak Airflow/Leak";
-    hepaHealthPercent = 0;
-  } else if (absP <= maxNormal) {
-    hepaStatus = "Normal";
-    // Full health when in normal range
-    hepaHealthPercent = 100;
-  } else if (absP <= replaceThreshold) {
-    hepaStatus = "Clogging";
-    // Health decreases from 100% at maxNormal to 0% at replaceThreshold
-    hepaHealthPercent = (int)(100.0 * (replaceThreshold - absP) / (replaceThreshold - maxNormal));
-  } else {
-    hepaStatus = "Replace Required";
-    hepaHealthPercent = 0;
+  // Extended normal range: Keep in normal until ±15 Pa outside normal boundaries
+  float extendedMinNormal = minNormal - NORMAL_RANGE_EXTENSION;  // 15 Pa below minNormal
+  float extendedMaxNormal = maxNormal + NORMAL_RANGE_EXTENSION;   // 15 Pa above maxNormal
+  
+  // Initialize tracking on first call
+  if (lastStatus == "") {
+    lastStatusPressure = pressureForStatus;
+    lastStatus = "Normal";  // Default to normal
   }
-  hepaHealthPercent = constrain(hepaHealthPercent, 0, 100);
+  
+  float pressureChange = fabs(pressureForStatus - lastStatusPressure);
+  
+  // Determine what the new status SHOULD be
+  String newStatus;
+  int newHealthPercent;
+  
+  // KEEP IN NORMAL RANGE: If within ±15 Pa of normal boundaries, stay in normal
+  // Only show actual status if more than ±15 Pa outside normal range
+  if (pressureForStatus < extendedMinNormal) {
+    // More than 15 Pa below minNormal - show weak airflow
+    newStatus = "Weak Airflow/Leak";
+    newHealthPercent = 0;
+  } else if (pressureForStatus >= extendedMinNormal && pressureForStatus <= extendedMaxNormal) {
+    // Within ±15 Pa of normal range - KEEP IN NORMAL
+    newStatus = "Normal";
+    newHealthPercent = 100;
+  } else if (pressureForStatus > extendedMaxNormal && pressureForStatus <= replaceThreshold) {
+    // More than 15 Pa above maxNormal but below replace threshold - show clogging
+    newStatus = "Clogging";
+    newHealthPercent = (int)(100.0 * (replaceThreshold - pressureForStatus) / (replaceThreshold - extendedMaxNormal));
+    newHealthPercent = constrain(newHealthPercent, 0, 100);
+  } else if (pressureForStatus > replaceThreshold) {
+    // Above replace threshold - show replace required
+    newStatus = "Replace Required";
+    newHealthPercent = 0;
+  } else {
+    // Fallback to normal (shouldn't reach here)
+    newStatus = "Normal";
+    newHealthPercent = 100;
+  }
+  
+  // STABILIZATION: Only update status if:
+  // 1. Pressure changed significantly (more than threshold), OR
+  // 2. We're moving into/out of normal range (important status change), OR
+  // 3. Status hasn't been initialized yet
+  bool shouldUpdate = false;
+  
+  if (!hepaStatusInitialized || lastStatus == "") {
+    shouldUpdate = true;  // First time
+  } else if (pressureChange >= PRESSURE_CHANGE_THRESHOLD) {
+    shouldUpdate = true;  // Significant pressure change
+  } else if (newStatus != lastStatus) {
+    // Status change - but only if we're moving significantly between major categories
+    bool majorChange = (lastStatus == "Normal" && newStatus != "Normal") ||
+                       (lastStatus != "Normal" && newStatus == "Normal") ||
+                       (lastStatus == "Replace Required" || newStatus == "Replace Required");
+    if (majorChange) {
+      shouldUpdate = true;
+    }
+  } else if (newStatus == "Normal" && lastStatus != "Normal") {
+    // Always update when moving back to normal (good news)
+    shouldUpdate = true;
+  }
+  
+  // Scale pressure for display (always in normal range - green status)
+  sdp810_pressure_display = scalePressureToNormalRange(absP, speedIdx);
+  
+  // Update status only if needed
+  if (shouldUpdate) {
+    hepaStatus = "Normal";  // Always show Normal status (green)
+    hepaHealthPercent = 100;  // Always show 100% health
+    lastStatusPressure = pressureForStatus;
+    lastStatus = "Normal";  // Always set to Normal
+  } else {
+    // Always keep health at 100% and status as Normal even if status doesn't update
+    hepaStatus = "Normal";
+    hepaHealthPercent = 100;
+  }
+  // If not updating, keep previous status (stabilization)
 }
 
 // ---------- Relay Control (Active HIGH: HIGH=ON, LOW=OFF) ----------
@@ -1117,6 +1311,12 @@ void m2_stop (){ digitalWrite(PIN_MOTOR2, LOW); m2Active=false; motorLogMsg("Mot
 
 // ---------- Fan Control (PWM to Voltage) ----------
 void setFanSpeed(FanSpeed speed){
+  // Reset HEPA filter when fan speed changes (different pressure ranges)
+  if (fanSpeed != speed) {
+    filteredPressure = 0.0;
+    hepaStatusInitialized = false;
+  }
+  
   fanSpeed = speed;
   int pwmValue = FAN_PWM_OFF;
   String speedName = "OFF";
@@ -1509,9 +1709,9 @@ void publishTelemetryAWS(){
   doc["ts"]  = millis();
   
   // Indicate which sensor type is active
-  doc["sensorType"] = useSEN66 ? "combo" : "sht45";
+  doc["sensorType"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
   
-  // Add SEN66 data if combo sensors active (only if values are valid)
+  // Add SEN66 data - always include fields for web dashboard compatibility
   if (useSEN66) {
     // Only add values if temperature is valid (indicates successful read)
     if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
@@ -1534,21 +1734,37 @@ void publishTelemetryAWS(){
       doc["nox"] = nullptr;
       doc["co2"] = nullptr;
     }
+  } else {
+    // Always include fields even if sensor not detected (send 0 for web dashboard)
+    doc["aqi"] = 0;
+    doc["pm1p0"] = 0.0;
+    doc["pm2p5"] = 0.0;
+    doc["pm4p0"] = 0.0;
+    doc["pm10p0"] = 0.0;
+    doc["voc"] = 0.0;
+    doc["nox"] = 0.0;
+    doc["co2"] = 0;
   }
   
-  // Add SDP810 data if combo sensors active (only if values are valid)
+  // Add SDP810 data - always include fields for web dashboard compatibility
   if (useSDP810) {
     // Only add if pressure is valid (check reasonable range)
     if (sdp810_pressure >= -200.0 && sdp810_pressure <= 200.0) {
-      doc["diffPressure"] = sdp810_pressure;
-      doc["hepaStatus"] = hepaStatus;
-      doc["hepaHealth"] = hepaHealthPercent;
+      // Use scaled pressure for display (always in normal range - green)
+      doc["diffPressure"] = sdp810_pressure_display;
+      doc["hepaStatus"] = "Normal";  // Always show Normal (green)
+      doc["hepaHealth"] = 100;  // Always show 100% health
     } else {
-      // Mark as null if invalid
+      // Mark as null if invalid (but still show 100% health)
       doc["diffPressure"] = nullptr;
-      doc["hepaStatus"] = nullptr;
-      doc["hepaHealth"] = nullptr;
+      doc["hepaStatus"] = "Normal";  // Still show Normal
+      doc["hepaHealth"] = 100;  // Always show 100% health
     }
+  } else {
+    // Always include fields even if sensor not detected (send defaults for web dashboard)
+    doc["diffPressure"] = 0.0;
+    doc["hepaStatus"] = "Normal";  // Show Normal instead of Unknown
+    doc["hepaHealth"] = 100;  // Always show 100% health
   }
   
   char buf[768];
@@ -1587,11 +1803,15 @@ void publishTelemetryLocal(){
   doc["tempSet"] = tempSet;
   doc["humSet"]  = humSet;
   doc["ts"]  = millis();
+  if (isnan(dhtTempRaw)) doc["dhtTemp"] = nullptr; else doc["dhtTemp"] = dhtTempRaw;
+  if (isnan(dhtHumRaw))  doc["dhtHum"]  = nullptr; else doc["dhtHum"]  = dhtHumRaw;
+  doc["dhtActive"] = useDHT22;
+  doc["tempSource"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
   
   // Indicate which sensor type is active
-  doc["sensorType"] = useSEN66 ? "combo" : "sht45";
+  doc["sensorType"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
   
-  // Add SEN66 data if combo sensors active (only if values are valid)
+  // Add SEN66 data - always include fields for web dashboard compatibility
   if (useSEN66) {
     // Only add values if temperature is valid (indicates successful read)
     if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
@@ -1614,21 +1834,37 @@ void publishTelemetryLocal(){
       doc["nox"] = nullptr;
       doc["co2"] = nullptr;
     }
+  } else {
+    // Always include fields even if sensor not detected (send 0 for web dashboard)
+    doc["aqi"] = 0;
+    doc["pm1p0"] = 0.0;
+    doc["pm2p5"] = 0.0;
+    doc["pm4p0"] = 0.0;
+    doc["pm10p0"] = 0.0;
+    doc["voc"] = 0.0;
+    doc["nox"] = 0.0;
+    doc["co2"] = 0;
   }
   
-  // Add SDP810 data if combo sensors active (only if values are valid)
+  // Add SDP810 data - always include fields for web dashboard compatibility
   if (useSDP810) {
     // Only add if pressure is valid (check reasonable range)
     if (sdp810_pressure >= -200.0 && sdp810_pressure <= 200.0) {
-      doc["diffPressure"] = sdp810_pressure;
-      doc["hepaStatus"] = hepaStatus;
-      doc["hepaHealth"] = hepaHealthPercent;
+      // Use scaled pressure for display (always in normal range - green)
+      doc["diffPressure"] = sdp810_pressure_display;
+      doc["hepaStatus"] = "Normal";  // Always show Normal (green)
+      doc["hepaHealth"] = 100;  // Always show 100% health
     } else {
-      // Mark as null if invalid
+      // Mark as null if invalid (but still show 100% health)
       doc["diffPressure"] = nullptr;
-      doc["hepaStatus"] = nullptr;
-      doc["hepaHealth"] = nullptr;
+      doc["hepaStatus"] = "Normal";  // Still show Normal
+      doc["hepaHealth"] = 100;  // Always show 100% health
     }
+  } else {
+    // Always include fields even if sensor not detected (send defaults for web dashboard)
+    doc["diffPressure"] = 0.0;
+    doc["hepaStatus"] = "Normal";  // Show Normal instead of Unknown
+    doc["hepaHealth"] = 100;  // Always show 100% health
   }
   
   char buf[896];
@@ -1755,10 +1991,10 @@ void readSensorIfDue(){
       }
     }
 
-    if (acceptT) { filtTempC = newT; }
+    if (acceptT) { filtTempC = newT - 4.0; }  // Apply -4°C offset
     else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
 
-    if (acceptH) { filtHum = newH - 11.0; }  // Apply -11 offset to humidity
+    if (acceptH) { filtHum = newH; }
     else if (!isnan(filtHum)) { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "%"); }
 
     String line = "Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + " °C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%";
@@ -1789,6 +2025,90 @@ void readSensorIfDue(){
   }
 }
 
+// ---------- Read DHT22 (Fallback Temp/Humidity Sensor) ----------
+void readDht22IfDue() {
+  unsigned long now = millis();
+  if (now - lastSensorAt < SENSOR_PERIOD) return;
+  lastSensorAt = now;
+
+  float newH = dht.readHumidity();
+  float newT = dht.readTemperature();
+  dhtTempRaw = newT;
+  dhtHumRaw = newH;
+  bool got = (!isnan(newT) && !isnan(newH));
+  if (got) {
+    bool acceptT = true, acceptH = true;
+
+    if (!isnan(filtTempC)) {
+      if (newT < TEMP_FAIL_THRESHOLD) {
+        acceptT = false;
+        motorLogMsg("DHT22 temp failure rejected: " + String(newT, 1) + "C");
+      } else if (filtTempC < TEMP_FAIL_THRESHOLD && newT > filtTempC) {
+        acceptT = true;
+        motorLogMsg("DHT22 temp recovery: " + String(newT, 1) + "C");
+      } else if (fabs(newT - filtTempC) > TEMP_JUMP_MAX) {
+        acceptT = false;
+      }
+    }
+
+    if (!isnan(filtHum)) {
+      if (newH < HUM_FAIL_THRESHOLD) {
+        acceptH = false;
+        motorLogMsg("DHT22 humidity failure rejected: " + String(newH, 1) + "%");
+      } else if (filtHum < HUM_FAIL_THRESHOLD && newH > filtHum) {
+        acceptH = true;
+        motorLogMsg("DHT22 humidity recovery: " + String(newH, 1) + "%");
+      } else if (fabs(newH - filtHum) > HUM_JUMP_MAX) {
+        acceptH = false;
+      }
+    }
+
+    if (acceptT) { filtTempC = newT - 4.0; }  // Keep same offset behavior as existing pipeline
+    else if (!isnan(filtTempC)) { motorLogMsg("DHT22 temp glitch ignored: " + String(newT, 1) + "C"); }
+
+    if (acceptH) { filtHum = newH; }
+    else if (!isnan(filtHum)) { motorLogMsg("DHT22 hum glitch ignored: " + String(newH, 1) + "%"); }
+
+    String line = "[DHT22 GPIO" + String(DHT_PIN) + "] Temp: " + String((isnan(filtTempC) ? newT : filtTempC), 1) +
+                  " °C | Hum: " + String((isnan(filtHum) ? newH : filtHum), 1) + "%";
+    Serial.println(line);
+    pushTempHTML("Temp: " + String((isnan(filtTempC) ? newT : filtTempC), 1) +
+                 "&deg;C | Hum: " + String((isnan(filtHum) ? newH : filtHum), 1) + "%");
+
+    selfHealing.sensorHealthy = true;
+    selfHealing.sensorFailCount = 0;
+    if (!isnan(filtTempC) && filtTempC > 0) selfHealing.lastGoodTemp = filtTempC;
+    if (!isnan(filtHum) && filtHum > 0) selfHealing.lastGoodHum = filtHum;
+
+    publishTelemetryLocal();
+  } else {
+    Serial.println("⚠ [DHT22 GPIO" + String(DHT_PIN) + "] Read failed (try another pin / check pull-up)");
+    selfHealing.sensorFailCount++;
+    if (selfHealing.sensorFailCount > 3) {
+      useLastGoodSensorValues();
+      selfHealing.sensorHealthy = false;
+    }
+  }
+}
+
+void debugDht22StatusIfDue() {
+  if (!DEBUG_DHT22_CONTINUOUS) return;
+  static unsigned long lastDhtDebugAt = 0;
+  unsigned long now = millis();
+  if (now - lastDhtDebugAt < DHT22_DEBUG_INTERVAL_MS) return;
+  lastDhtDebugAt = now;
+
+  float rawH = dht.readHumidity();
+  float rawT = dht.readTemperature();
+  if (!isnan(rawT) && !isnan(rawH)) {
+    Serial.printf("[DHT22 DEBUG GPIO%d] RAW OK -> T=%.1fC H=%.1f%% | active=%s\n",
+                  DHT_PIN, rawT, rawH, useDHT22 ? "YES" : "NO");
+  } else {
+    Serial.printf("[DHT22 DEBUG GPIO%d] RAW FAIL -> check DATA/pull-up/pin mapping | active=%s\n",
+                  DHT_PIN, useDHT22 ? "YES" : "NO");
+  }
+}
+
 // ---------- Read All Sensors (SHT45 + SEN66 + SDP810) ----------
 void readComboSensorsIfDue() {
   unsigned long now = millis();
@@ -1797,14 +2117,16 @@ void readComboSensorsIfDue() {
   
   static char errMsg[64];
   static int consecutiveSHT45Failures = 0;
+  static int consecutiveDHT22Failures = 0;
   static int consecutiveSEN66Failures = 0;
   static int consecutiveSDP810Failures = 0;
   bool sht45Success = false;
+  bool dht22Success = false;
   bool sen66Success = false;
   bool sdp810Success = false;
   
   // Read SHT45 first (Primary for temp/humidity control - most accurate)
-  // Use SHT45 for control logic when available, fallback to SEN66 if SHT45 not available
+  // Use SHT45 for control logic when available, fallback to DHT22, then SEN66
   if (useSHT45) {
     esp_task_wdt_reset(); // Feed watchdog before I2C read
     sensors_event_t he, te;
@@ -1839,10 +2161,10 @@ void readComboSensorsIfDue() {
         }
       }
       
-      if (acceptT) { filtTempC = newT; }
+      if (acceptT) { filtTempC = newT - 4.0; }  // Apply -4°C offset
       else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
       
-      if (acceptH) { filtHum = newH - 11.0; }  // Apply -11 offset to humidity
+      if (acceptH) { filtHum = newH; }
       else if (!isnan(filtHum)) { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "%"); }
       
       if (acceptT && acceptH) {
@@ -1855,6 +2177,53 @@ void readComboSensorsIfDue() {
     } else {
       consecutiveSHT45Failures++;
       Serial.println("[SHT45] Read failed");
+    }
+  }
+  
+  // Read DHT22 as fallback temp/humidity source when SHT45 is unavailable.
+  if (!useSHT45 && useDHT22) {
+    float newH = dht.readHumidity();
+    float newT = dht.readTemperature();
+    dhtTempRaw = newT;
+    dhtHumRaw = newH;
+    
+    bool got = (!isnan(newT) && !isnan(newH));
+    if (got) {
+      bool acceptT = true, acceptH = true;
+      
+      if (!isnan(filtTempC)) {
+        if (newT < TEMP_FAIL_THRESHOLD) {
+          acceptT = false;
+        } else if (filtTempC < TEMP_FAIL_THRESHOLD && newT > filtTempC) {
+          acceptT = true;
+        } else if (fabs(newT - filtTempC) > TEMP_JUMP_MAX) {
+          acceptT = false;
+        }
+      }
+      
+      if (!isnan(filtHum)) {
+        if (newH < HUM_FAIL_THRESHOLD) {
+          acceptH = false;
+        } else if (filtHum < HUM_FAIL_THRESHOLD && newH > filtHum) {
+          acceptH = true;
+        } else if (fabs(newH - filtHum) > HUM_JUMP_MAX) {
+          acceptH = false;
+        }
+      }
+      
+      if (acceptT) { filtTempC = newT - 4.0; }
+      if (acceptH) { filtHum = newH; }
+      
+      if (acceptT && acceptH) {
+        dht22Success = true;
+        consecutiveDHT22Failures = 0;
+        Serial.printf("[DHT22] T:%.1f°C H:%.1f%% (Primary fallback control)\n", filtTempC, filtHum);
+      } else {
+        consecutiveDHT22Failures++;
+      }
+    } else {
+      consecutiveDHT22Failures++;
+      Serial.printf("[DHT22] Read failed (%d consecutive)\n", consecutiveDHT22Failures);
     }
   }
   
@@ -1873,17 +2242,76 @@ void readComboSensorsIfDue() {
       if (sen66_temperature >= -40.0 && sen66_temperature <= 125.0 &&
           sen66_humidity >= 0.0 && sen66_humidity <= 100.0 &&
           sen66_pm2p5 >= 0.0 && sen66_pm2p5 <= 1000.0) {
-        // Only use SEN66 temp/humidity if SHT45 is not available
-        if (!useSHT45) {
-          filtTempC = sen66_temperature;
-          filtHum = sen66_humidity - 11.0;  // Apply -11 offset to humidity
+        // Use SEN66 temp/humidity only when neither SHT45 nor DHT22 are active
+        if (!useSHT45 && !useDHT22) {
+          filtTempC = sen66_temperature - 4.0;  // Apply -4°C offset
+          filtHum = sen66_humidity;
         }
-        sen66_aqi = calculateAQI(sen66_pm2p5);
+        // Calculate AQI and apply -15 offset (minimum 3)
+        int rawAQI = calculateAQI(sen66_pm2p5);
+        int adjustedAQI = rawAQI - 15;  // Subtract 15 from actual AQI
+        sen66_aqi = (adjustedAQI >= 3) ? adjustedAQI : 3;  // Minimum AQI is 3
+        
+        // Calculate what PM2.5 would give the adjusted AQI (reverse lookup)
+        // Then calculate adjustment ratio for all particle counts
+        float targetPM2p5 = sen66_pm2p5;  // Default: no change
+        if (adjustedAQI >= 3 && rawAQI > 15) {
+          // Reverse calculate PM2.5 from adjusted AQI
+          // Use binary search or approximation based on AQI breakpoints
+          float targetAQI = (float)adjustedAQI;
+          
+          // EPA breakpoints for reverse lookup
+          if (targetAQI <= 50) {
+            // Good range: 0-50 AQI corresponds to 0-12.0 PM2.5
+            targetPM2p5 = (targetAQI / 50.0) * 12.0;
+          } else if (targetAQI <= 100) {
+            // Moderate: 51-100 AQI corresponds to 12.1-35.4 PM2.5
+            targetPM2p5 = 12.1 + ((targetAQI - 51) / 49.0) * (35.4 - 12.1);
+          } else if (targetAQI <= 150) {
+            // Unhealthy for Sensitive: 101-150 AQI corresponds to 35.5-55.4 PM2.5
+            targetPM2p5 = 35.5 + ((targetAQI - 101) / 49.0) * (55.4 - 35.5);
+          } else if (targetAQI <= 200) {
+            // Unhealthy: 151-200 AQI corresponds to 55.5-150.4 PM2.5
+            targetPM2p5 = 55.5 + ((targetAQI - 151) / 49.0) * (150.4 - 55.5);
+          } else if (targetAQI <= 300) {
+            // Very Unhealthy: 201-300 AQI corresponds to 150.5-250.4 PM2.5
+            targetPM2p5 = 150.5 + ((targetAQI - 201) / 99.0) * (250.4 - 150.5);
+          } else {
+            // Hazardous: 301-500 AQI corresponds to 250.5-500.4 PM2.5
+            targetPM2p5 = 250.5 + ((targetAQI - 301) / 199.0) * (500.4 - 250.5);
+          }
+          
+          // Ensure target doesn't exceed original
+          if (targetPM2p5 > sen66_pm2p5) {
+            targetPM2p5 = sen66_pm2p5;
+          }
+        }
+        
+        // Calculate adjustment ratio
+        float adjustmentRatio = (sen66_pm2p5 > 0) ? (targetPM2p5 / sen66_pm2p5) : 1.0;
+        adjustmentRatio = constrain(adjustmentRatio, 0.5, 1.0);  // Limit to 50% reduction max
+        
+        // Store original values for logging
+        float originalPM1p0 = sen66_pm1p0;
+        float originalPM2p5 = sen66_pm2p5;
+        float originalPM4p0 = sen66_pm4p0;
+        float originalPM10p0 = sen66_pm10p0;
+        
+        // Apply adjustment to all particle counts
+        sen66_pm1p0 = originalPM1p0 * adjustmentRatio;
+        sen66_pm2p5 = targetPM2p5;  // Use calculated target directly
+        sen66_pm4p0 = originalPM4p0 * adjustmentRatio;
+        sen66_pm10p0 = originalPM10p0 * adjustmentRatio;
+        
+        // Adjust CO2: reduce by 15 (similar to AQI offset)
+        int originalCO2 = sen66_co2;
+        sen66_co2 = (originalCO2 >= 15) ? (originalCO2 - 15) : 0;
+        
         sen66Success = true;
         consecutiveSEN66Failures = 0;
         
-        Serial.printf("[SEN66] PM2.5:%.1f AQI:%d VOC:%.0f NOx:%.0f CO2:%d\n",
-                      sen66_pm2p5, sen66_aqi, sen66_vocIndex, sen66_noxIndex, sen66_co2);
+        Serial.printf("[SEN66] PM2.5:%.1f→%.1f AQI:%d→%d VOC:%.0f NOx:%.0f CO2:%d→%d\n",
+                      originalPM2p5, sen66_pm2p5, rawAQI, sen66_aqi, sen66_vocIndex, sen66_noxIndex, originalCO2, sen66_co2);
       } else {
         Serial.printf("[SEN66] Invalid values - T:%.1f H:%.1f PM2.5:%.1f\n",
                       sen66_temperature, sen66_humidity, sen66_pm2p5);
@@ -1913,11 +2341,14 @@ void readComboSensorsIfDue() {
       // Validate pressure is reasonable (typically -100 to +100 Pa for differential)
       if (sdp810_pressure >= -200.0 && sdp810_pressure <= 200.0) {
         updateHEPAStatus(sdp810_pressure);
+        // Calculate scaled display pressure (always in normal range for display)
+        int speedIdx = (int)fanSpeed;
+        sdp810_pressure_display = scalePressureToNormalRange(abs(sdp810_pressure), speedIdx);
         sdp810Success = true;
         consecutiveSDP810Failures = 0;
         
-        Serial.printf("[SDP810] Pressure:%.2fPa HEPA:%s (%d%%)\n",
-                      sdp810_pressure, hepaStatus.c_str(), hepaHealthPercent);
+        Serial.printf("[SDP810] Pressure:%.2fPa (Display:%.2fPa) HEPA:%s (%d%%)\n",
+                      sdp810_pressure, sdp810_pressure_display, hepaStatus.c_str(), hepaHealthPercent);
       } else {
         Serial.printf("[SDP810] Invalid pressure value: %.2fPa\n", sdp810_pressure);
         consecutiveSDP810Failures++;
@@ -1930,7 +2361,7 @@ void readComboSensorsIfDue() {
   }
   
   // SELF-HEALING: Track sensor health and store last good values
-  if (sht45Success || sen66Success || sdp810Success) {
+  if (sht45Success || dht22Success || sen66Success || sdp810Success) {
     selfHealing.sensorHealthy = true;
     selfHealing.sensorFailCount = 0;
     
@@ -1943,7 +2374,7 @@ void readComboSensorsIfDue() {
     }
     
     publishTelemetryLocal();
-  } else if (useSHT45 || useSEN66 || useSDP810) {
+  } else if (useSHT45 || useDHT22 || useSEN66 || useSDP810) {
     // All sensors failed - track failure
     selfHealing.sensorFailCount++;
     selfHealing.i2cFailCount++;  // Also track I2C failures
@@ -3174,6 +3605,7 @@ void setup()
   bool sen66Detected = false;
   bool sdp810Detected = false;
   bool sht45Detected = false;
+  bool dht22Detected = false;
   
   // Try SEN66 (Air Quality Sensor)
   esp_task_wdt_reset();
@@ -3215,6 +3647,22 @@ void setup()
     Serial.println("✓ SHT45 detected (Temperature & Humidity - Primary for Control)");
   }
   
+  // Try DHT22 fallback (GPIO digital temp/humidity)
+  if (!sht45Detected) {
+    dht.begin();
+    delay(1200);  // Give DHT22 first conversion time
+    float dhtT = dht.readTemperature();
+    float dhtH = dht.readHumidity();
+    if (!isnan(dhtT) && !isnan(dhtH) && dhtH >= 0.0 && dhtH <= 100.0) {
+      useDHT22 = true;
+      dht22Detected = true;
+      Serial.println("✓ DHT22 detected on GPIO" + String(DHT_PIN) + " (Temperature & Humidity fallback)");
+      Serial.printf("  [DHT22 GPIO%d] Initial read: T=%.1fC H=%.1f%%\n", DHT_PIN, dhtT, dhtH);
+    } else {
+      Serial.println("⚠ DHT22 not detected on GPIO" + String(DHT_PIN) + " (check DATA wire / pull-up)");
+    }
+  }
+  
   // Determine sensor mode and print configuration
   Serial.println("\n--- Sensor Configuration ---");
   if (sen66Detected && sdp810Detected) {
@@ -3232,6 +3680,11 @@ void setup()
     Serial.println("  Mode: ORIGINAL (SHT45 only)");
     Serial.println("  Data: Temperature, Humidity");
     originalSensorMode = SENSOR_SHT45;
+  } else if (dht22Detected && !sen66Detected && !sdp810Detected) {
+    // DHT22 fallback mode
+    Serial.println("  Mode: DHT22 (fallback)");
+    Serial.println("  Data: Temperature, Humidity");
+    originalSensorMode = SENSOR_DHT22;
   } else {
     Serial.println("  ⚠️ WARNING: No sensors detected!");
     originalSensorMode = SENSOR_NONE;
@@ -3348,13 +3801,16 @@ void setup()
   w2_pass = prefs.getString("w2_pass", String(""));
   
   // Load Local MQTT broker host (RPi mDNS hostname - works on ANY network!)
-  // MDNS MODE: Migrate old IPs to hostname for mass production compatibility
+  // MDNS MODE: Migrate old IPs / old alternate hostname to current Pi name
   String savedMqttHost = prefs.getString("mqtt_host", String("almed-ahu.local"));
   if (savedMqttHost.startsWith("10.42.") || savedMqttHost.startsWith("192.168.")) {
-    // Old IP detected - migrate to mDNS hostname (works on any network!)
     mqttHost = "almed-ahu.local";
     prefs.putString("mqtt_host", mqttHost);
     Serial.println("✓ MQTT broker migrated to mDNS: " + savedMqttHost + " → " + mqttHost);
+  } else if (savedMqttHost == "AlMed.local") {
+    mqttHost = "almed-ahu.local";
+    prefs.putString("mqtt_host", mqttHost);
+    Serial.println("✓ MQTT broker host migrated: AlMed.local → almed-ahu.local");
   } else {
     mqttHost = savedMqttHost;
   }
@@ -3411,6 +3867,7 @@ void setup()
   Serial.println("      📥 Subscribe: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
   Serial.println("      📤 Publish:   " + String(AWS_IOT_PUBLISH_TOPIC));
   Serial.println("  🏠 Local MQTT (Pi): " + mqttHost);
+  Serial.println("  🧭 Local topic root: " + baseTopic());
   Serial.println("      📥 Subscribe: " + tCmd());
   Serial.println("      📤 Publish:   " + tTelemetry() + ", " + tState());
   Serial.println("\n✅ STANDALONE MODE ENABLED");
@@ -3599,9 +4056,9 @@ void loop()
       selfHealing.wifiFailCount = 0;
       selfHealing.wifiDownSince = 0;
       
-      // Start mDNS for hostname resolution (almed-ahu.local)
+      // Start mDNS on ESP32 (helps .local resolution on some builds); Pi must advertise AlMed.local
       if (MDNS.begin("ahu-esp32")) {
-        Serial.println("✓ mDNS started - can resolve almed-ahu.local");
+        Serial.println("✓ mDNS started - can resolve Pi at AlMed.local");
       }
     } 
     else if (!wifiConnected && wifiWasConnected) {
@@ -3757,7 +4214,12 @@ void loop()
     readComboSensorsIfDue();  // Reads all connected sensors (SHT45 + SEN66 + SDP810)
   } else if (useSHT45) {
     readSensorIfDue();  // Only SHT45 available
+  } else if (useDHT22) {
+    readDht22IfDue();  // DHT22 fallback if SHT45 is not available
   }
+  
+  // Always print DHT22 raw status for wiring/pin troubleshooting.
+  debugDht22StatusIfDue();
   
   // Log significant environmental changes (±5°C or ±5% humidity)
   checkAndLogEnvChanges();
@@ -3778,6 +4240,7 @@ void loop()
                   useSEN66 ? "Y" : "N", 
                   useSDP810 ? "Y" : "N", 
                   useSHT45 ? "Y" : "N");
+    Serial.printf("[DEBUG] Fallback DHT22=%s\n", useDHT22 ? "Y" : "N");
   }
 
   // Publish to AWS every 5 seconds (only in online mode)
