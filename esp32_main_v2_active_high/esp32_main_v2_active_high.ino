@@ -7,8 +7,19 @@
 #include <DHT.h>
 #include <ArduinoJson.h>
 
-// ========== NEW SENSOR LIBRARIES (SEN66 + SDP810 Combo) ==========
+// ========== NEW SENSOR LIBRARIES (SEN55/SEN66 + SDP810 Combo) ==========
+// Set to 1 if the library is installed, 0 if not.
+// Arduino IDE's __has_include doesn't work with its library scanner.
+#define HAS_SEN66_LIB 0  // Set to 1 if you install 'Sensirion I2C SEN66'
+#define HAS_SEN5X_LIB 1  // Set to 1 if you install 'Sensirion I2C SEN5x'
+
+#if HAS_SEN66_LIB
 #include <SensirionI2cSen66.h>
+#endif
+
+#if HAS_SEN5X_LIB
+#include <SensirionI2CSen5x.h>
+#endif
 #include <SensirionI2CSdp.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
@@ -17,14 +28,17 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ESPmDNS.h>  // For mDNS hostname resolution
+#include <time.h>
 
 // Forward declaration for Arduino auto-generated prototypes
 enum FanSpeed : uint8_t;
 
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
+// Keep false in production to avoid fleet-wide command broadcasts.
+#define ALLOW_AWS_GENERIC_COMMAND_TOPIC false
 
-#define THINGNAME "AHU_ESP15_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP25_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Build version for OTA verification
 #define BUILD_VERSION "v2.6.2-DCP"
@@ -44,15 +58,15 @@ enum FanSpeed : uint8_t;
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "AlMed";
-const char WIFI_PASSWORD[] = "AlMed123456";
+const char WIFI_SSID[] = "jio";
+const char WIFI_PASSWORD[] = "jio#1234";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
 unsigned long M1_START_RUN = 6UL * 1000UL;              // Motor 1 runs 6 seconds at start
 unsigned long M1_POST_RUN  = 6UL * 1000UL;              // Motor 1 runs 6 seconds at stop
 unsigned long M2_INTERVAL  = 15UL * 60UL * 1000UL;      // Motor 2 runs every 15 minutes
-unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22 seconds
+unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22     
 unsigned long M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;   // Motor 2 runs 10 seconds after Motor 1 stops
 
 // ========================= WATCHDOG CONFIGURATION =========================
@@ -79,35 +93,35 @@ struct SelfHealingState {
   int i2cFailCount = 0;
   unsigned long lastI2CRecovery = 0;
   bool i2cHealthy = true;
-  
+ 
   // WiFi health
   int wifiFailCount = 0;
   unsigned long lastWifiRecovery = 0;
   bool wifiHealthy = false;
   unsigned long wifiDownSince = 0;
-  
+ 
   // MQTT health (Local)
   int mqttLocalFailCount = 0;
   unsigned long lastMqttLocalRecovery = 0;
   bool mqttLocalHealthy = false;
-  
+ 
   // MQTT health (AWS)
   int mqttAwsFailCount = 0;
   unsigned long lastMqttAwsRecovery = 0;
   bool mqttAwsHealthy = false;
-  
+ 
   // Internet connectivity (for AWS)
   bool internetAvailable = false;
   unsigned long lastInternetCheck = 0;
   int internetFailCount = 0;
-  
+ 
   // Sensor health
   int sensorFailCount = 0;
   unsigned long lastSensorRecovery = 0;
   bool sensorHealthy = true;
   float lastGoodTemp = NAN;
   float lastGoodHum = NAN;
-  
+ 
   // System health
   unsigned long lastHealthCheck = 0;
   unsigned long uptimeStart = 0;
@@ -142,55 +156,60 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+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
-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
+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
-ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANT18Bh97ffPkFW6E5UX
-Md90r6JWXUMo+hM5ROVoW/1c/wYiHkqtWGUho6HIPIyJ8ygAJZg5eyQtky9a+FE0
-zH+hynP0Ll2OhXdKatoBfyyIx+4bm5LEJdywgVKTD0zc+JaI/4UuX8ulqRuyxvWK
-mC5E4NnEhQDr1/lSF9cEoM0qoibsQEYN4wCC+uv4KCfKecWbTFnLAymO3xkNktRj
-Ye4OmMn3Fn5EkXEj3wj5P5weyzNKWmsvS9zJyBSCirQlpNrtyzbKYb/zZb0+Hu8y
-b7gDe7IRFdAs1cWG5Go9XT1Sw02MB3V33vbixqdOk72+Wb+HAvtd9UVotvrT+z4F
-cYUCAwEAAaNgMF4wHwYDVR0jBBgwFoAUXrVaCx2/8xlSN3wyWD5M6PrX68AwHQYD
-VR0OBBYEFFK2zn4bWr5tFbZKiuw+KObMYa3ZMAwGA1UdEwEB/wQCMAAwDgYDVR0P
-AQH/BAQDAgeAMA0GCSqGSIb3DQEBCwUAA4IBAQCot/qJ/RCOKgrxqn5fx4Jsj3pE
-ATjhdzurlkb+pgFhPtwXmAqP56eGRlANh4DrrMHwDAj4q4D/saGUtV6XVIyWsb1r
-A6DUth8ytpe4knDIr9i0ExqBkhthM2LVQsu6IS4yCjxIgseMmOhBnGP1h97eoFqu
-HCMhyGClnJ8hfg0jCYwNKWaIzvAadDdu2bK9IAK5eB0IYeAoIhgNkIxiI6fio/5l
-an7D5Un6/hPXZPXgO98mQXszwGv1d2FG3nbSHWaIA61siSuYx1rX1K/wSOCCv4au
-l9aPPczam3kajFLLq1bnT4oVADSnVGsuP7JKYYOkvQeYJlWF38pL/zXCi2KG
+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
 -----END CERTIFICATE-----
+
+
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
+
+
+
 )KEY";
 
 // ========== AWS IoT MQTT (Cloud) ==========
@@ -235,9 +254,16 @@ const float HUM_JUMP_MAX  = 18.0;
 const float TEMP_FAIL_THRESHOLD = 5.0;
 const float HUM_FAIL_THRESHOLD = 10.0;
 
-// ---------- SEN66 + SDP810 Combo Sensors ----------
-SensirionI2cSen66 sen66;
+// ---------- SEN55/SEN66 + SDP810 Combo Sensors ----------
+#if HAS_SEN66_LIB
+SensirionI2cSen66 sen66Sensor;
+#endif
+#if HAS_SEN5X_LIB
+SensirionI2CSen5x sen55Sensor;
+#endif
 SensirionI2CSdp sdp810;
+enum ComboAirSensorModel : uint8_t { COMBO_AIR_NONE = 0, COMBO_AIR_SEN55, COMBO_AIR_SEN66 };
+ComboAirSensorModel comboAirSensorModel = COMBO_AIR_NONE;
 
 // Sensor detection flags
 bool useSHT45 = false;      // Original sensor
@@ -265,6 +291,10 @@ const char* sensorModeName(SensorMode mode) {
 // DHT22 troubleshooting logger: prints raw read status continuously in Serial Monitor.
 const bool DEBUG_DHT22_CONTINUOUS = true;
 const unsigned long DHT22_DEBUG_INTERVAL_MS = 2500;
+
+// SEN55 troubleshooting logger: prints raw read status continuously in Serial Monitor.
+const bool DEBUG_SEN55_CONTINUOUS = true;
+const unsigned long SEN55_DEBUG_INTERVAL_MS = 2500;
 
 // SEN66 readings
 float sen66_pm1p0 = 0.0, sen66_pm2p5 = 0.0, sen66_pm4p0 = 0.0, sen66_pm10p0 = 0.0;
@@ -370,11 +400,12 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "Hyderabad";    // Kaveri Hospital
-const char* ROOM = "ehibition";         // Burns Ward
+const char* SITE = "OFFICE";    // Kaveri Hospital
+const char* ROOM = "TEST 3";         // Burns Ward
 const char* AHU  = "AHU-25";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
+String awsCmdTopic()      { return String("esp32/") + THINGNAME + "/sub"; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
 String tLog()             { return baseTopic()+"/log"; }
 String tState()           { return baseTopic()+"/state"; }
@@ -406,14 +437,14 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len);
 // I2C Bus Recovery - fixes hung I2C bus without reset
 void recoverI2CBus() {
   Serial.println("🔧 [SELF-HEAL] Recovering I2C bus...");
-  
+ 
   Wire.end();
   delay(10);
-  
+ 
   // Toggle SDA/SCL as GPIO to clear stuck slaves
   pinMode(21, OUTPUT);
   pinMode(22, OUTPUT);
-  
+ 
   // Generate 9 clock pulses to release any stuck slave
   for (int i = 0; i < 9; i++) {
     digitalWrite(22, LOW);
@@ -421,7 +452,7 @@ void recoverI2CBus() {
     digitalWrite(22, HIGH);
     delayMicroseconds(5);
   }
-  
+ 
   // Generate STOP condition
   digitalWrite(21, LOW);
   delayMicroseconds(5);
@@ -429,24 +460,24 @@ void recoverI2CBus() {
   delayMicroseconds(5);
   digitalWrite(21, HIGH);
   delayMicroseconds(5);
-  
+ 
   // Reinitialize I2C
   Wire.begin(21, 22);
   Wire.setClock(100000);
   Wire.setTimeout(100);
-  
+ 
   selfHealing.lastI2CRecovery = millis();
   selfHealing.i2cFailCount = 0;
   selfHealing.i2cHealthy = true;
   selfHealing.totalRecoveries++;
-  
+ 
   Serial.println("✓ [SELF-HEAL] I2C bus recovered");
 }
 
 // WiFi Recovery - reconnects without reset
 void recoverWiFi() {
   Serial.println("🔧 [SELF-HEAL] Recovering WiFi...");
-  
+ 
   WiFi.disconnect(true, true);
   delay(100);
   WiFi.mode(WIFI_OFF);
@@ -455,11 +486,11 @@ void recoverWiFi() {
   delay(100);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   WiFi.setAutoReconnect(true);
-  
+ 
   selfHealing.lastWifiRecovery = millis();
   selfHealing.wifiFailCount = 0;
   selfHealing.totalRecoveries++;
-  
+ 
   Serial.println("✓ [SELF-HEAL] WiFi recovery initiated");
 }
 
@@ -471,19 +502,19 @@ bool checkInternetAvailable() {
     selfHealing.internetAvailable = false;
     return false;
   }
-  
+ 
   // Only check every 10 seconds to avoid overhead
   unsigned long now = millis();
   if (now - selfHealing.lastInternetCheck < 10000) {
     return selfHealing.internetAvailable;
   }
   selfHealing.lastInternetCheck = now;
-  
+ 
   esp_task_wdt_reset();
-  
+ 
   // Quick DNS lookup to check internet - use Google's DNS or AWS endpoint
   IPAddress resolvedIP;
-  
+ 
   // Try to resolve a known host (fast DNS lookup)
   // WiFi.hostByName has a timeout, usually around 4 seconds
   // We'll use a simple approach: if last AWS attempt failed many times, assume no internet
@@ -496,12 +527,12 @@ bool checkInternetAvailable() {
       }
     }
   }
-  
+ 
   // Use WiFi.hostByName with short timeout
   // This is a quick check - if it fails, we know internet is not available
   int result = WiFi.hostByName("iot.ap-south-1.amazonaws.com", resolvedIP);
   esp_task_wdt_reset();
-  
+ 
   if (result == 1 && resolvedIP != IPAddress(0,0,0,0)) {
     selfHealing.internetAvailable = true;
     selfHealing.internetFailCount = 0;
@@ -518,25 +549,25 @@ bool checkInternetAvailable() {
 
 void recoverMqttLocal() {
   Serial.println("🔧 [SELF-HEAL] Recovering Local MQTT...");
-  
+ 
   esp_task_wdt_reset();
-  
+ 
   if (mqttLocal.connected()) {
     mqttLocal.disconnect();
   }
   delay(50);  // Shorter delay
-  
+ 
   mqttLocal.setServer(mqttHost.c_str(), MQTT_PORT);
   mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);
   mqttLocal.setCallback(onMqttMessageLocal);
   mqttLocal.setSocketTimeout(1);  // Fast timeout
-  
+ 
   // Immediate reconnection attempt
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
   esp_task_wdt_reset();
   bool ok = mqttLocal.connect(clientId.c_str(), MQTT_USER, MQTT_PASS, tStatus().c_str(), 1, true, "offline");
   esp_task_wdt_reset();
-  
+ 
   if (ok) {
     mqttLocal.subscribe(tCmd().c_str(), 1);
     mqttLocal.subscribe(tProvWifi().c_str(), 1);
@@ -546,7 +577,7 @@ void recoverMqttLocal() {
     selfHealing.mqttLocalHealthy = true;
     Serial.println("✓ [SELF-HEAL] Local MQTT reconnected!");
   }
-  
+ 
   selfHealing.lastMqttLocalRecovery = millis();
   selfHealing.mqttLocalFailCount = 0;
   selfHealing.totalRecoveries++;
@@ -556,20 +587,38 @@ void recoverMqttLocal() {
 // Sensor Recovery - reinitializes sensors without reset
 void recoverSensors() {
   Serial.println("🔧 [SELF-HEAL] Recovering sensors...");
-  
+ 
   recoverI2CBus();
   delay(100);
-  
+ 
   if (useSEN66) {
-    sen66.begin(Wire, SEN66_I2C_ADDR_6B);
-    int16_t err = sen66.deviceReset();
+    int16_t err = -1;
+    if (comboAirSensorModel == COMBO_AIR_SEN66) {
+#if HAS_SEN66_LIB
+      sen66Sensor.begin(Wire, 0x6B);
+      err = sen66Sensor.deviceReset();
+      if (err == 0) {
+        delay(100);
+        err = sen66Sensor.startContinuousMeasurement();
+      }
+#endif
+    } else if (comboAirSensorModel == COMBO_AIR_SEN55) {
+#if HAS_SEN5X_LIB
+      sen55Sensor.begin(Wire);
+      err = sen55Sensor.deviceReset();
+      if (err == 0) {
+        delay(100);
+        err = sen55Sensor.startMeasurement();
+      }
+#endif
+    }
     if (err == 0) {
-      delay(100);
-      sen66.startContinuousMeasurement();
-      Serial.println("  ✓ SEN66 reinitialized");
+      Serial.println(comboAirSensorModel == COMBO_AIR_SEN66
+                         ? "  ✓ SEN66 reinitialized"
+                         : "  ✓ SEN55 reinitialized");
     }
   }
-  
+ 
   if (useSDP810) {
     sdp810.begin(Wire, SDP8XX_I2C_ADDRESS_0);
     sdp810.stopContinuousMeasurement();
@@ -577,7 +626,7 @@ void recoverSensors() {
     sdp810.startContinuousMeasurementWithDiffPressureTCompAndAveraging();
     Serial.println("  ✓ SDP810 reinitialized");
   }
-  
+ 
   if (useSHT45) {
     if (sht4.begin()) {
       sht4.setPrecision(SHT4X_HIGH_PRECISION);
@@ -585,17 +634,17 @@ void recoverSensors() {
       Serial.println("  ✓ SHT45 reinitialized");
     }
   }
-  
+ 
   if (useDHT22) {
     dht.begin();
     Serial.println("  ✓ DHT22 reinitialized");
   }
-  
+ 
   selfHealing.lastSensorRecovery = millis();
   selfHealing.sensorFailCount = 0;
   selfHealing.sensorHealthy = true;
   selfHealing.totalRecoveries++;
-  
+ 
   Serial.println("✓ [SELF-HEAL] Sensor recovery complete");
 }
 
@@ -612,18 +661,18 @@ void useLastGoodSensorValues() {
 // Main health check - runs periodically to detect and fix issues
 void performHealthCheck() {
   unsigned long now = millis();
-  
+ 
   if (now - selfHealing.lastHealthCheck < 30000) return;
   selfHealing.lastHealthCheck = now;
-  
+ 
   esp_task_wdt_reset();
-  
+ 
   // Check I2C health
   if (selfHealing.i2cFailCount >= 5) {
     Serial.printf("⚠️ [HEALTH] I2C failures: %d - recovering\n", selfHealing.i2cFailCount);
     recoverI2CBus();
   }
-  
+ 
   // Check WiFi health
   if (!selfHealing.wifiHealthy && selfHealing.wifiDownSince > 0) {
     unsigned long downTime = now - selfHealing.wifiDownSince;
@@ -632,19 +681,19 @@ void performHealthCheck() {
       recoverWiFi();
     }
   }
-  
+ 
   // Check Local MQTT health - FAST recovery (5 failures or 30s disconnected)
   if (selfHealing.mqttLocalFailCount >= 5 && (now - selfHealing.lastMqttLocalRecovery > 30000)) {
     Serial.printf("⚠️ [HEALTH] MQTT failures: %d - recovering\n", selfHealing.mqttLocalFailCount);
     recoverMqttLocal();
   }
-  
+ 
   // Check sensor health
   if (selfHealing.sensorFailCount >= 10 && (now - selfHealing.lastSensorRecovery > 60000)) {
     Serial.printf("⚠️ [HEALTH] Sensor failures: %d - recovering\n", selfHealing.sensorFailCount);
     recoverSensors();
   }
-  
+ 
   // Log health status every 5 minutes
   static unsigned long lastHealthLog = 0;
   if (now - lastHealthLog > 300000) {
@@ -672,7 +721,7 @@ void saveSystemState(){
   prefs.putInt("fanSpeed", (int)fanSpeed);
   prefs.putBool("onlineMode", onlineMode);
   prefs.putULong("saveTime", now);
-  
+ 
   // Save CP timing state (for 1-minute cycle delay)
   if (cpLastOffAt > 0 && cpLastOffAt <= now) {
     // Save time elapsed since CP last turned off (for cycle delay)
@@ -681,7 +730,7 @@ void saveSystemState(){
   } else {
     prefs.putULong("cpLastOffElapsed", 0);
   }
-  
+ 
   // Save motor timing state (time remaining until next M2 run)
   // CRITICAL: Save when Motor 2 last ran (relative to saveTime) for accurate timing across resets
   if (runState && !shuttingDown) {
@@ -734,7 +783,7 @@ void saveSystemState(){
 void restoreSystemState(){
   unsigned long saveTime = prefs.getULong("saveTime", 0);
   unsigned long now = millis();
-  
+ 
   // Only restore if there's a valid saved state (saveTime > 0)
   // Fresh upload has saveTime = 0, so don't restore anything
   if (saveTime > 0 && now < 300000) {
@@ -747,20 +796,20 @@ void restoreSystemState(){
     bool wasHeatOn = prefs.getBool("heatOn", false);
     bool wasShuttingDown = prefs.getBool("shuttingDown", false);
     int savedFanSpd = prefs.getInt("fanSpeed", 0);
-    
+   
     if (wasRunning && !wasShuttingDown) {
       pendingRecoveryStart = true;
       runState = false;
-      
+     
       // CRITICAL: Turn on system relay immediately (powers entire system: ozone lights, fans, etc.)
       systemWrite(true);
       Serial.println("✓ System relay turned ON (recovery mode)");
-      
+     
       cpOn = wasCpOn;
       cp2On = wasCp2On;
       dualCpBothOn = prefs.getBool("dualCpBothOn", false);
       heatOn = wasHeatOn;
-      
+     
       // Restore CP timing state
       unsigned long savedCpLastOffElapsed = prefs.getULong("cpLastOffElapsed", 0);
       if (savedCpLastOffElapsed > 0) {
@@ -780,7 +829,7 @@ void restoreSystemState(){
         // No saved timing - allow immediate operation
         cpLastOffAt = now - CP_MIN_OFF_MS;
       }
-      
+     
       // Restore CP states based on dual mode (both on) or single active CP
       if (dualCpBothOn && cpMode == CP_DUAL_AUTO) {
         // Both CPs were running in rapid cooling mode
@@ -797,11 +846,11 @@ void restoreSystemState(){
         cp2Write(cp2On);
       }
       heatWrite(heatOn);
-      
+     
       if (savedFanSpd >= 0 && savedFanSpd <= 3) {
         setFanSpeed((FanSpeed)savedFanSpd);
       }
-      
+     
       // Restore motor timing state
       // CRITICAL FIX: Use m2LastRunTime to calculate accurate remaining time even across reboots
       bool rebootDetected = (saveTime > 0 && saveTime > now);
@@ -811,12 +860,12 @@ void restoreSystemState(){
         elapsedSinceSave = now - saveTime;
       }
       // Note: On reboot, we can't know elapsedSinceSave, but we'll use m2LastRunTime instead
-      
+     
       bool savedM2ScheduledAfterM1 = prefs.getBool("m2ScheduledAfterM1", false);
       unsigned long savedM2StartAtRemaining = prefs.getULong("m2StartAtRemaining", 0);
       unsigned long savedM2NextAtRemaining = prefs.getULong("m2NextAtRemaining", 0);
       unsigned long savedM2LastRunElapsed = prefs.getULong("m2LastRunTime", 0); // Elapsed since Motor 2 last ran (at save time)
-      
+     
       if (savedM2ScheduledAfterM1 && savedM2StartAtRemaining > 0) {
         // M2 was scheduled after M1
         if (rebootDetected) {
@@ -878,7 +927,7 @@ void restoreSystemState(){
         m2ScheduledAfterM1 = false;
         m2StartAt = 0;
       }
-      
+     
       // Restore m2LastRunTime for future saves
       if (savedM2LastRunElapsed > 0) {
         // Calculate when Motor 2 last ran: now - (saved elapsed + time since save)
@@ -889,7 +938,7 @@ void restoreSystemState(){
           m2LastRunTime = (now >= (savedM2LastRunElapsed + elapsedSinceSave)) ? (now - savedM2LastRunElapsed - elapsedSinceSave) : 0;
         }
       }
-      
+     
       Serial.println("⚠️ WATCHDOG RECOVERY: State restored, waiting for WiFi");
       Serial.println("  System Relay: ON (powers entire system: ozone lights, fans, etc.)");
       Serial.print("  CP: "); Serial.print(cpOn ? "ON" : "OFF");
@@ -935,25 +984,25 @@ void clearSystemState(){
 }
 
 // ---------- Logging (Serial + MQTT to Dashboard) ----------
-void motorLogMsg(const String& s){ 
-  Serial.println(s); 
+void motorLogMsg(const String& s){
+  Serial.println(s);
   pushMotorHTML(s);
-  
+ 
   // Also publish to dashboard via Local MQTT (non-blocking, watchdog protected)
   // SAFETY: Only publish if MQTT is healthy and not during critical operations
   static unsigned long lastMqttLogAttempt = 0;
   unsigned long now = millis();
-  
+ 
   // Rate limit MQTT log publishing to max once per 100ms to prevent flooding
   if (mqttLocal.connected() && (now - lastMqttLogAttempt > 100)) {
     lastMqttLogAttempt = now;
     esp_task_wdt_reset();
-    
+   
     StaticJsonDocument<256> logDoc;
     logDoc["type"] = "log";
     logDoc["msg"] = s;
     logDoc["ts"] = now / 1000;  // Seconds since boot
-    
+   
     // Add log level based on message content
     if (s.indexOf("ERROR") >= 0 || s.indexOf("FAILED") >= 0) {
       logDoc["lvl"] = "ERROR";
@@ -962,15 +1011,15 @@ void motorLogMsg(const String& s){
     } else {
       logDoc["lvl"] = "INFO";
     }
-    
+   
     char buf[256];
     size_t n = serializeJson(logDoc, buf, sizeof(buf));
-    
+   
     // Publish with watchdog protection
     esp_task_wdt_reset();
     bool published = mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
     esp_task_wdt_reset();
-    
+   
     if (!published) {
       Serial.println("⚠️ MQTT log publish failed (non-critical)");
     }
@@ -994,7 +1043,7 @@ void checkAndLogEnvChanges() {
       }
     }
   }
-  
+ 
   // Check humidity change
   if (!isnan(filtHum)) {
     if (isnan(lastLoggedHum)) {
@@ -1016,7 +1065,7 @@ void checkAndLogEnvChanges() {
 int calculateAQI(float pm25) {
   if (pm25 < 0) return 0;
   if (pm25 > 500.4) return 500;
-  
+ 
   // EPA breakpoints: {Clow, Chigh, Ilow, Ihigh}
   float breakpoints[][4] = {
     {0.0, 12.0, 0, 50},        // Good
@@ -1026,7 +1075,7 @@ int calculateAQI(float pm25) {
     {150.5, 250.4, 201, 300},  // Very Unhealthy
     {250.5, 500.4, 301, 500}   // Hazardous
   };
-  
+ 
   for (int i = 0; i < 6; i++) {
     if (pm25 >= breakpoints[i][0] && pm25 <= breakpoints[i][1]) {
       float Ilow = breakpoints[i][2], Ihigh = breakpoints[i][3];
@@ -1045,35 +1094,37 @@ void checkForNewSensor() {
   if (!AUTO_RESET_ON_SENSOR_CHANGE) {
     return;  // Skip detection entirely for maximum stability
   }
-  
+ 
   static SensorMode lastDetectedMode = SENSOR_NONE;
   static int detectionCount = 0;
   const int REQUIRED_CONSECUTIVE_DETECTIONS = 5; // Increased from 3 to 5 (25 seconds) for stability
-  
+ 
   bool foundSEN66 = false;
   bool foundSDP810 = false;
   bool foundSHT45 = false;
   bool foundDHT22 = false;
-  
+ 
   esp_task_wdt_reset();  // Feed watchdog before I2C probes
-  
-  // Quick probe for SEN66 (single attempt - faster)
+ 
+  // Quick probe for combo air sensor (SEN66 at 0x6B OR SEN55 at 0x69)
   Wire.beginTransmission(0x6B);  // SEN66 I2C address
   if (Wire.endTransmission() == 0) foundSEN66 = true;
-  
+  Wire.beginTransmission(0x69);  // SEN55 I2C address
+  if (Wire.endTransmission() == 0) foundSEN66 = true;
+ 
   // Quick probe for SDP810
   Wire.beginTransmission(0x25);  // SDP810 I2C address
   if (Wire.endTransmission() == 0) foundSDP810 = true;
-  
+ 
   // Quick probe for SHT45
   Wire.beginTransmission(0x44);  // SHT45 I2C address
   if (Wire.endTransmission() == 0) foundSHT45 = true;
-  
+ 
   // Quick probe for DHT22 (GPIO single-wire)
   float dhtT = dht.readTemperature();
   float dhtH = dht.readHumidity();
   foundDHT22 = (!isnan(dhtT) && !isnan(dhtH));
-  
+ 
   // Determine what sensor mode would be selected now
   SensorMode detectedMode = SENSOR_NONE;
   if (foundSEN66 || foundSDP810) {
@@ -1083,17 +1134,17 @@ void checkForNewSensor() {
   } else if (foundDHT22) {
     detectedMode = SENSOR_DHT22;
   }
-  
+ 
   // Debouncing logic
   if (originalSensorMode != SENSOR_NONE && detectedMode != SENSOR_NONE) {
     if (detectedMode != originalSensorMode) {
       if (detectedMode == lastDetectedMode) {
         detectionCount++;
-        
+       
         // STABILITY: Only log warning, don't reset
         if (detectionCount >= REQUIRED_CONSECUTIVE_DETECTIONS) {
           Serial.println("\n⚠️ [STABILITY] Different sensor type detected but NOT resetting");
-          Serial.printf("   Current: %s | Detected: %s\n", 
+          Serial.printf("   Current: %s | Detected: %s\n",
                         sensorModeName(originalSensorMode),
                         sensorModeName(detectedMode));
           Serial.println("   Manual reset required to change sensors");
@@ -1131,27 +1182,27 @@ float scalePressureToNormalRange(float actualPressure, int speedIdx) {
   if (speedIdx == 0 || speedIdx > 3) {
     return 0.0;  // Fan OFF
   }
-  
+ 
   float minNormal = HEPA_MIN_NORMAL[speedIdx];
   float maxNormal = HEPA_MAX_NORMAL[speedIdx];
   float normalRange = maxNormal - minNormal;
-  
+ 
   // Define the actual pressure range we expect
   // For LOW fan: normal is 40-55 Pa, so we map from 0-75 Pa (replace threshold) to 40-55 Pa
   // Low actual (20-30 Pa) → shows 40 Pa (minNormal)
   // High actual (60+ Pa) → shows 50-55 Pa (maxNormal)
   float minActual = 0.0;  // Minimum actual pressure
   float maxActual = HEPA_REPLACE[speedIdx];  // Replace threshold as maximum actual
-  
+ 
   // Map actual pressure proportionally to normal range
   // Low pressures (20-30 Pa) map to minNormal (40 Pa)
   // Higher pressures map proportionally toward maxNormal (55 Pa)
   float scaledPressure;
-  
+ 
   // Define a threshold below which we map to minNormal
   // For LOW fan: pressures below 40 Pa (minNormal) should show as 40 Pa
   float lowThreshold = minNormal;
-  
+ 
   if (actualPressure <= lowThreshold) {
     // Low pressure (e.g., 20-30 Pa): show as minimum of normal range (e.g., 40 Pa)
     scaledPressure = minNormal;
@@ -1169,17 +1220,17 @@ float scalePressureToNormalRange(float actualPressure, int speedIdx) {
     float ratio = (actualPressure - lowThreshold) / (maxActual - lowThreshold);
     scaledPressure = minNormal + (ratio * normalRange);
   }
-  
+ 
   // Final clamp to ensure it's always within normal range
   scaledPressure = constrain(scaledPressure, minNormal, maxNormal);
-  
+ 
   return scaledPressure;
 }
 
 void updateHEPAStatus(float pressure) {
   float absP = abs(pressure);
   int speedIdx = (int)fanSpeed;  // 0=OFF, 1=LOW, 2=MED, 3=HIGH
-  
+ 
   // When fan is OFF, show informational status only
   if (fanSpeed == FAN_OFF) {
     hepaStatus = "Fan Off";
@@ -1189,7 +1240,7 @@ void updateHEPAStatus(float pressure) {
     lastFanSpeed = FAN_OFF;
     return;
   }
-  
+ 
   // Reset filter and tracking when fan speed changes
   if (lastFanSpeed != fanSpeed) {
     filteredPressure = absP;  // Start fresh with new reading
@@ -1198,7 +1249,7 @@ void updateHEPAStatus(float pressure) {
     lastStatus = "";
     lastFanSpeed = fanSpeed;
   }
-  
+ 
   // STABILIZATION: Apply exponential moving average filter to smooth pressure readings
   if (!hepaStatusInitialized) {
     // First reading - initialize filter
@@ -1208,30 +1259,30 @@ void updateHEPAStatus(float pressure) {
     // EMA filter: filtered = alpha * new + (1 - alpha) * old
     filteredPressure = PRESSURE_FILTER_ALPHA * absP + (1.0 - PRESSURE_FILTER_ALPHA) * filteredPressure;
   }
-  
+ 
   // Use filtered pressure for status determination
   float pressureForStatus = filteredPressure;
-  
+ 
   float minNormal = HEPA_MIN_NORMAL[speedIdx];
   float maxNormal = HEPA_MAX_NORMAL[speedIdx];
   float replaceThreshold = HEPA_REPLACE[speedIdx];
-  
+ 
   // Extended normal range: Keep in normal until ±15 Pa outside normal boundaries
   float extendedMinNormal = minNormal - NORMAL_RANGE_EXTENSION;  // 15 Pa below minNormal
   float extendedMaxNormal = maxNormal + NORMAL_RANGE_EXTENSION;   // 15 Pa above maxNormal
-  
+ 
   // Initialize tracking on first call
   if (lastStatus == "") {
     lastStatusPressure = pressureForStatus;
     lastStatus = "Normal";  // Default to normal
   }
-  
+ 
   float pressureChange = fabs(pressureForStatus - lastStatusPressure);
-  
+ 
   // Determine what the new status SHOULD be
   String newStatus;
   int newHealthPercent;
-  
+ 
   // KEEP IN NORMAL RANGE: If within ±15 Pa of normal boundaries, stay in normal
   // Only show actual status if more than ±15 Pa outside normal range
   if (pressureForStatus < extendedMinNormal) {
@@ -1256,13 +1307,13 @@ void updateHEPAStatus(float pressure) {
     newStatus = "Normal";
     newHealthPercent = 100;
   }
-  
+ 
   // STABILIZATION: Only update status if:
   // 1. Pressure changed significantly (more than threshold), OR
   // 2. We're moving into/out of normal range (important status change), OR
   // 3. Status hasn't been initialized yet
   bool shouldUpdate = false;
-  
+ 
   if (!hepaStatusInitialized || lastStatus == "") {
     shouldUpdate = true;  // First time
   } else if (pressureChange >= PRESSURE_CHANGE_THRESHOLD) {
@@ -1279,10 +1330,10 @@ void updateHEPAStatus(float pressure) {
     // Always update when moving back to normal (good news)
     shouldUpdate = true;
   }
-  
+ 
   // Scale pressure for display (always in normal range - green status)
   sdp810_pressure_display = scalePressureToNormalRange(absP, speedIdx);
-  
+ 
   // Update status only if needed
   if (shouldUpdate) {
     hepaStatus = "Normal";  // Always show Normal status (green)
@@ -1316,18 +1367,18 @@ void setFanSpeed(FanSpeed speed){
     filteredPressure = 0.0;
     hepaStatusInitialized = false;
   }
-  
+ 
   fanSpeed = speed;
   int pwmValue = FAN_PWM_OFF;
   String speedName = "OFF";
-  
+ 
   switch(speed){
     case FAN_LOW:  pwmValue = FAN_PWM_LOW;  speedName = "LOW (5V)";  break;
     case FAN_MED:  pwmValue = FAN_PWM_MED;  speedName = "MED (7V)";  break;
     case FAN_HIGH: pwmValue = FAN_PWM_HIGH; speedName = "HIGH (9V)"; break;
     default:       pwmValue = FAN_PWM_OFF;  speedName = "OFF"; break;
   }
-  
+ 
   ledcWrite(PIN_FAN_PWM, pwmValue);
   motorLogMsg("Fan speed: " + speedName);
 }
@@ -1346,30 +1397,30 @@ void emergencyStopMotors(){
 // ---------- Controllers ----------
 void controlCP(float t){
   if (!runState){
-    if (cpOn || cp2On){ 
-      cpWrite(false); 
-      cpOn=false; 
+    if (cpOn || cp2On){
+      cpWrite(false);
+      cpOn=false;
       cp2Write(false);
       cp2On = false;
       dualCpBothOn = false;
-      cpLastOffAt=millis(); 
-      motorLogMsg("CP forced OFF (system STOPPED)"); 
+      cpLastOffAt=millis();
+      motorLogMsg("CP forced OFF (system STOPPED)");
     }
     return;
   }
   if (isnan(t)) return;
 
   unsigned long now = millis();
-  
+ 
   // Temperature thresholds
   float bothOnThresh = tempSet + DUAL_CP_BOTH_THRESH;  // Both CPs on when temp >= this (e.g., 24°C)
   float offThresh = tempSet;                           // All CPs off when temp <= this (e.g., 22°C)
-  
+ 
   // Minimum timing checks
   // CP must wait 1 minute after turning off before turning on again (compressor protection)
   bool canTurnOn = (now - cpLastOffAt) >= CP_CYCLE_DELAY_MS;
   bool canTurnOff = (now - cpLastOnAt) >= CP_MIN_ON_MS;
-  
+ 
   // Log countdown when waiting for cycle delay (every 10 seconds)
   static unsigned long lastCycleDelayLog = 0;
   if (!canTurnOn && (cpOn == false && cp2On == false) && (now - lastCycleDelayLog >= 10000)) {
@@ -1380,10 +1431,10 @@ void controlCP(float t){
       motorLogMsg("⏳ CP cycle delay: " + String(remaining) + "s remaining");
     }
   }
-  
+ 
   // ===== DUAL CP AUTO MODE =====
   if (cpMode == CP_DUAL_AUTO) {
-    
+   
     // ----- PHASE 1: RAPID COOLING (Both CPs ON) -----
     // When temp >= setTemp + 2°C, both compressors run for maximum cooling
     if (t >= bothOnThresh) {
@@ -1391,7 +1442,7 @@ void controlCP(float t){
         // Transition to both-on mode
         dualCpBothOn = true;
         cpSwitchInProgress = false;  // Cancel any pending switch delay
-        
+       
         // Turn on both CPs
         if (!cpOn) {
           cpWrite(true);
@@ -1402,10 +1453,10 @@ void controlCP(float t){
           cp2Write(true);
           cp2On = true;
         }
-        
+       
         motorLogMsg("🔥 RAPID COOLING: Both CP1+CP2 ON (temp=" + String(t,1) + "°C)");
         prefs.putBool("dualCpBothOn", true);
-        
+       
       } else if (dualCpBothOn) {
         // Already in both-on mode, ensure both are running
         if (!cpOn) { cpWrite(true); cpOn = true; }
@@ -1413,12 +1464,12 @@ void controlCP(float t){
       }
       return;  // Stay in rapid cooling mode
     }
-    
+   
     // ----- PHASE 3: COOLING COMPLETE (All CPs OFF) -----
     // When temp <= setTemp, turn off all CPs and reset to CP1
     if (t <= offThresh && canTurnOff) {
       bool wasOn = cpOn || cp2On;
-      
+     
       if (cpOn) {
         cpWrite(false);
         cpOn = false;
@@ -1427,35 +1478,35 @@ void controlCP(float t){
         cp2Write(false);
         cp2On = false;
       }
-      
+     
       if (wasOn || dualCpBothOn) {
         cpLastOffAt = now;
         dualCpBothOn = false;
         cpSwitchInProgress = false;  // Clear any switch delay - instant reset
-        
+       
         // Reset to CP1 for next cooling cycle
         cpActive = 1;
         cpLastSwitchAt = now;  // Reset the 1-hour timer
-        
+       
         // Save state immediately
         prefs.putInt("cpActive", cpActive);
         prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
         prefs.putBool("dualCpBothOn", false);
         prefs.putBool("cpSwitchInProgress", false);
-        
+       
         motorLogMsg("✅ COOLING COMPLETE: All CPs OFF, reset to CP1 (temp=" + String(t,1) + "°C)");
       }
       return;
     }
-    
+   
     // ----- PHASE 2: ALTERNATING MODE (Single CP, 1 hour each) -----
     // When setTemp < temp < setTemp + 2°C, one CP runs at a time
-    
+   
     // Transition from both-on to single mode
     if (dualCpBothOn) {
       dualCpBothOn = false;
       prefs.putBool("dualCpBothOn", false);
-      
+     
       // Keep cpActive CP on, turn off the other
       if (cpActive == 1) {
         if (cp2On) {
@@ -1470,17 +1521,17 @@ void controlCP(float t){
         }
         motorLogMsg("📉 SINGLE CP MODE: CP1 OFF, CP2 continues (temp=" + String(t,1) + "°C)");
       }
-      
+     
       // Reset the 1-hour switch timer
       cpLastSwitchAt = now;
       prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
     }
-    
+   
     // CP SWITCH DELAY: Wait after switching before allowing new CP to turn on
     if (cpSwitchInProgress) {
       esp_task_wdt_reset();
       unsigned long elapsed = now - cpSwitchStartedAt;
-      
+     
       if (elapsed >= CP_SWITCH_DELAY_MS) {
         cpSwitchInProgress = false;
         prefs.putBool("cpSwitchInProgress", false);
@@ -1496,7 +1547,7 @@ void controlCP(float t){
         return;  // Don't turn on new CP yet
       }
     }
-    
+   
     // Check for 1-hour auto-switch
     if (cpLastSwitchAt == 0) {
       cpLastSwitchAt = now;
@@ -1505,9 +1556,9 @@ void controlCP(float t){
       prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
     } else if (now - cpLastSwitchAt >= CP_SWITCH_INTERVAL_MS) {
       esp_task_wdt_reset();
-      
+     
       int oldCp = cpActive;
-      
+     
       // Turn off current CP
       if (cpActive == 1 && cpOn) {
         cpWrite(false);
@@ -1518,27 +1569,27 @@ void controlCP(float t){
         cp2On = false;
         cpLastOffAt = now;
       }
-      
+     
       // Switch to other CP
       cpActive = (cpActive == 1) ? 2 : 1;
       cpLastSwitchAt = now;
       cpSwitchStartedAt = now;
       cpSwitchInProgress = true;
-      
+     
       // Save immediately
       prefs.putInt("cpActive", cpActive);
       prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
       prefs.putBool("cpSwitchInProgress", true);
-      
+     
       motorLogMsg("🔄 CP AUTO-SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (" + String(CP_SWITCH_DELAY_MS/1000) + "s delay)");
-      
+     
       return;  // Wait for switch delay
     }
-    
+   
     // Normal operation: turn on/off active CP based on temperature WITH DEADBAND
     // Uses same deadband as single mode to prevent short-cycling
     float onThreshDual = tempSet + TEMP_DEADBAND;  // e.g., 20°C (setTemp + 1°C)
-    
+   
     if (cpActive == 1) {
       // Turn ON only when temp >= setTemp + deadband (prevents short-cycling)
       if (!cpOn && t >= onThreshDual && canTurnOn) {
@@ -1568,14 +1619,14 @@ void controlCP(float t){
         cpOn = false;
       }
     }
-    
+   
   } else {
     // ===== SINGLE CP MODE =====
     float onThresh = tempSet + TEMP_DEADBAND;
-    
+   
     bool shouldBeOn = (t >= onThresh && canTurnOn);
     bool shouldBeOff = (t <= offThresh && canTurnOff);
-    
+   
     if (cpActive == 1) {
       if (!cpOn && shouldBeOn){
         cpWrite(true); cpOn = true; cpLastOnAt = now;
@@ -1627,7 +1678,7 @@ void controlHeater(float h){
 // ---------- System Control ----------
 void startSystem(){
   motorLogMsg("[startSystem] Called - runState:" + String(runState) + " shuttingDown:" + String(shuttingDown));
-  
+ 
   if (shuttingDown) {
     motorLogMsg("[RUN] Cannot start - system is shutting down");
     return;
@@ -1638,19 +1689,19 @@ void startSystem(){
     shuttingDown = false;  // Ensure shutdown flag is clear
     shutdownStarted = false;
     shutdownM2Pending = false;
-    
+   
     motorLogMsg("[startSystem] Turning on system relay");
     systemWrite(true);
-    
+   
     if (fanSpeed == FAN_OFF) {
       motorLogMsg("[startSystem] Starting fan at LOW");
       setFanSpeed(FAN_LOW);
     }
-    
-    if (!m1Active){ 
+   
+    if (!m1Active){
       motorLogMsg("[startSystem] Starting Motor-1 for " + String(M1_START_RUN/1000) + "s");
-      m1_start(); 
-      m1StopAt = millis() + M1_START_RUN; 
+      m1_start();
+      m1StopAt = millis() + M1_START_RUN;
       m2ScheduledAfterM1 = false;
     }
     motorLogMsg("[RUN] STARTED - System is now running");
@@ -1662,7 +1713,7 @@ void startSystem(){
 
 void stopSystem(){
   motorLogMsg("[stopSystem] Called - runState:" + String(runState));
-  
+ 
   if (!runState) {
     motorLogMsg("[RUN] Already stopped");
     return;
@@ -1683,7 +1734,7 @@ void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
 // ---------- Telemetry / State (Published separately to AWS and Local) ----------
 void publishTelemetryAWS(){
   if(!client.connected()) return;
-  
+ 
   StaticJsonDocument<768> doc;  // Increased for combo sensor data
   doc["type"] = "telemetry";
   doc["site"] = SITE;  // Hospital name (e.g., "hospitalA")
@@ -1707,10 +1758,10 @@ void publishTelemetryAWS(){
   doc["ip"]=WiFi.localIP().toString();
   doc["thing"]=THINGNAME;
   doc["ts"]  = millis();
-  
+ 
   // Indicate which sensor type is active
   doc["sensorType"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
-  
+ 
   // Add SEN66 data - always include fields for web dashboard compatibility
   if (useSEN66) {
     // Only add values if temperature is valid (indicates successful read)
@@ -1745,7 +1796,7 @@ void publishTelemetryAWS(){
     doc["nox"] = 0.0;
     doc["co2"] = 0;
   }
-  
+ 
   // Add SDP810 data - always include fields for web dashboard compatibility
   if (useSDP810) {
     // Only add if pressure is valid (check reasonable range)
@@ -1766,10 +1817,10 @@ void publishTelemetryAWS(){
     doc["hepaStatus"] = "Normal";  // Show Normal instead of Unknown
     doc["hepaHealth"] = 100;  // Always show 100% health
   }
-  
+ 
   char buf[768];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
+ 
   bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
   if (success) {
     Serial.println("✓ Telemetry → AWS (esp32/pub)");
@@ -1781,10 +1832,10 @@ void publishTelemetryLocal(){
   if(!mqttLocal.connected()) {
     return;  // Silent skip - connection will be restored by ensureMqtt()
   }
-  
+ 
   // Feed watchdog BEFORE any MQTT operation
   esp_task_wdt_reset();
-  
+ 
   // Dashboard-compatible format (extended for combo sensors)
   StaticJsonDocument<768> doc;  // Increased for combo sensor data
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
@@ -1807,10 +1858,10 @@ void publishTelemetryLocal(){
   if (isnan(dhtHumRaw))  doc["dhtHum"]  = nullptr; else doc["dhtHum"]  = dhtHumRaw;
   doc["dhtActive"] = useDHT22;
   doc["tempSource"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
-  
+ 
   // Indicate which sensor type is active
   doc["sensorType"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
-  
+ 
   // Add SEN66 data - always include fields for web dashboard compatibility
   if (useSEN66) {
     // Only add values if temperature is valid (indicates successful read)
@@ -1845,7 +1896,7 @@ void publishTelemetryLocal(){
     doc["nox"] = 0.0;
     doc["co2"] = 0;
   }
-  
+ 
   // Add SDP810 data - always include fields for web dashboard compatibility
   if (useSDP810) {
     // Only add if pressure is valid (check reasonable range)
@@ -1866,15 +1917,15 @@ void publishTelemetryLocal(){
     doc["hepaStatus"] = "Normal";  // Show Normal instead of Unknown
     doc["hepaHealth"] = 100;  // Always show 100% health
   }
-  
+ 
   char buf[896];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
+ 
   // Non-blocking publish with watchdog protection
   esp_task_wdt_reset();
   bool success = mqttLocal.publish(tTelemetry().c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
   esp_task_wdt_reset();
-  
+ 
   if (!success) {
     // Mark as unhealthy - self-healing will recover
     selfHealing.mqttLocalHealthy = false;
@@ -1885,7 +1936,7 @@ void publishTelemetryLocal(){
 
 void publishStateAWS(){
   if(!client.connected()) return;
-  
+ 
   StaticJsonDocument<512> doc;
   doc["type"] = "state";
   doc["site"] = SITE;  // Hospital name (e.g., "hospitalA")
@@ -1896,7 +1947,7 @@ void publishStateAWS(){
   doc["fan"]=(fanSpeed != FAN_OFF);
   doc["fanSpeed"]=(int)fanSpeed;
   doc["tempSet"]=tempSet; doc["humSet"]=humSet;
-  
+ 
   doc["m1_start"] = M1_START_RUN / 1000UL;
   doc["m1_post"] = M1_POST_RUN / 1000UL;
   doc["m2_interval"] = M2_INTERVAL / 1000UL;
@@ -1905,10 +1956,10 @@ void publishStateAWS(){
   doc["ip"]=WiFi.localIP().toString();
   doc["thing"]=THINGNAME;
   doc["ts"]  = millis();
-  
+ 
   char buf[512];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
+ 
   bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
   if (success) {
     Serial.println("✓ State → AWS (esp32/pub)");
@@ -1917,9 +1968,9 @@ void publishStateAWS(){
 
 void publishStateLocal(){
   if(!mqttLocal.connected()) return;
-  
+ 
   esp_task_wdt_reset();  // Feed watchdog before MQTT
-  
+ 
   // Dashboard-compatible format (exact match to original backup)
   StaticJsonDocument<512> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
@@ -1928,7 +1979,7 @@ void publishStateLocal(){
   doc["fan"]=(fanSpeed != FAN_OFF);
   doc["fanSpeed"]=(int)fanSpeed;
   doc["tempSet"]=tempSet; doc["humSet"]=humSet;
-  
+ 
   doc["m1_start"] = M1_START_RUN / 1000UL;
   doc["m1_post"] = M1_POST_RUN / 1000UL;
   doc["m2_interval"] = M2_INTERVAL / 1000UL;
@@ -1939,7 +1990,7 @@ void publishStateLocal(){
   doc["version"] = BUILD_VERSION;  // Firmware version for dashboard display
   char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
+ 
   esp_task_wdt_reset();
   mqttLocal.publish(tState().c_str(), reinterpret_cast<const uint8_t*>(buf), n, true);
   esp_task_wdt_reset();
@@ -1976,7 +2027,7 @@ void readSensorIfDue(){
         acceptT = false;
       }
     }
-    
+   
     if (!isnan(filtHum)){
       if (newH < HUM_FAIL_THRESHOLD) {
         acceptH = false;
@@ -2000,7 +2051,7 @@ void readSensorIfDue(){
     String line = "Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + " °C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%";
     Serial.println(line);
     pushTempHTML("Temp: " + String((isnan(filtTempC)?newT:filtTempC),1) + "&deg;C | Hum: " + String((isnan(filtHum)?newH:filtHum),1) + "%");
-    
+   
     // SELF-HEALING: Track sensor health and store last good values
     selfHealing.sensorHealthy = true;
     selfHealing.sensorFailCount = 0;
@@ -2010,14 +2061,14 @@ void readSensorIfDue(){
     if (!isnan(filtHum) && filtHum > 0) {
       selfHealing.lastGoodHum = filtHum;
     }
-    
+   
     publishTelemetryLocal();
 
   } else {
     // SELF-HEALING: Track sensor failures
     selfHealing.sensorFailCount++;
     selfHealing.i2cFailCount++;
-    
+   
     if (selfHealing.sensorFailCount > 3) {
       useLastGoodSensorValues();
       selfHealing.sensorHealthy = false;
@@ -2109,12 +2160,68 @@ void debugDht22StatusIfDue() {
   }
 }
 
+void debugSen55StatusIfDue() {
+  if (!DEBUG_SEN55_CONTINUOUS) return;
+  static unsigned long lastSen55DebugAt = 0;
+  unsigned long now = millis();
+  if (now - lastSen55DebugAt < SEN55_DEBUG_INTERVAL_MS) return;
+  lastSen55DebugAt = now;
+
+#if HAS_SEN5X_LIB
+  // Always probe I2C 0x69 to check if SEN55 is on the bus
+  Wire.beginTransmission(0x69);
+  bool onBus = (Wire.endTransmission() == 0);
+
+  if (!onBus) {
+    Serial.printf("[SEN55 DEBUG 0x69] NOT FOUND on I2C -> check wiring: VDD=5V, SDA=GPIO21, SCL=GPIO22, GND | active=%s\n",
+                  (comboAirSensorModel == COMBO_AIR_SEN55) ? "YES" : "NO");
+    return;
+  }
+
+  // SEN55 is on the bus — try to read
+  if (comboAirSensorModel != COMBO_AIR_SEN55) {
+    // Detected on bus but wasn't initialized at boot — try to init now
+    sen55Sensor.begin(Wire);
+    int16_t resetErr = sen55Sensor.deviceReset();
+    if (resetErr == 0) {
+      delay(1200);
+      esp_task_wdt_reset();
+      int16_t startErr = sen55Sensor.startMeasurement();
+      if (startErr == 0) {
+        comboAirSensorModel = COMBO_AIR_SEN55;
+        useSEN66 = true;
+        Serial.println("[SEN55 DEBUG 0x69] LATE INIT OK -> SEN55 initialized (was missed at boot)");
+        return;
+      } else {
+        Serial.printf("[SEN55 DEBUG 0x69] ON BUS but startMeasurement failed (err=%d) | active=NO\n", startErr);
+        return;
+      }
+    } else {
+      Serial.printf("[SEN55 DEBUG 0x69] ON BUS but deviceReset failed (err=%d) | active=NO\n", resetErr);
+      return;
+    }
+  }
+
+  // Already initialized — read values
+  float pm1, pm2p5, pm4, pm10, hum, temp, voc, nox;
+  int16_t err = sen55Sensor.readMeasuredValues(pm1, pm2p5, pm4, pm10, hum, temp, voc, nox);
+  if (err == 0 && temp >= -40.0 && temp <= 125.0) {
+    Serial.printf("[SEN55 DEBUG 0x69] RAW OK -> T=%.1fC H=%.1f%% PM2.5=%.1f VOC=%.0f NOx=%.0f | active=YES\n",
+                  temp, hum, pm2p5, voc, nox);
+  } else {
+    Serial.printf("[SEN55 DEBUG 0x69] RAW FAIL (err=%d) -> sensor connected but read failed | active=YES\n", err);
+  }
+#else
+  Serial.println("[SEN55 DEBUG] Library not installed - install 'Sensirion I2C SEN5x' via Arduino Library Manager");
+#endif
+}
+
 // ---------- Read All Sensors (SHT45 + SEN66 + SDP810) ----------
 void readComboSensorsIfDue() {
   unsigned long now = millis();
   if (now - lastSensorAt < SENSOR_PERIOD) return;
   lastSensorAt = now;
-  
+ 
   static char errMsg[64];
   static int consecutiveSHT45Failures = 0;
   static int consecutiveDHT22Failures = 0;
@@ -2124,7 +2231,7 @@ void readComboSensorsIfDue() {
   bool dht22Success = false;
   bool sen66Success = false;
   bool sdp810Success = false;
-  
+ 
   // Read SHT45 first (Primary for temp/humidity control - most accurate)
   // Use SHT45 for control logic when available, fallback to DHT22, then SEN66
   if (useSHT45) {
@@ -2132,14 +2239,14 @@ void readComboSensorsIfDue() {
     sensors_event_t he, te;
     sht4.getEvent(&he, &te);
     esp_task_wdt_reset(); // Feed watchdog after I2C read
-    
+   
     bool got = (!isnan(te.temperature) && !isnan(he.relative_humidity));
     if (got) {
       float newT = te.temperature;
       float newH = he.relative_humidity;
-      
+     
       bool acceptT = true, acceptH = true;
-      
+     
       // Apply glitch filters (same logic as original SHT45 reading)
       if (!isnan(filtTempC)) {
         if (newT < TEMP_FAIL_THRESHOLD) {
@@ -2150,7 +2257,7 @@ void readComboSensorsIfDue() {
           acceptT = false;
         }
       }
-      
+     
       if (!isnan(filtHum)) {
         if (newH < HUM_FAIL_THRESHOLD) {
           acceptH = false;
@@ -2160,13 +2267,13 @@ void readComboSensorsIfDue() {
           acceptH = false;
         }
       }
-      
+     
       if (acceptT) { filtTempC = newT - 4.0; }  // Apply -4°C offset
       else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
-      
+     
       if (acceptH) { filtHum = newH; }
       else if (!isnan(filtHum)) { motorLogMsg("Hum glitch ignored: " + String(newH,1) + "%"); }
-      
+     
       if (acceptT && acceptH) {
         sht45Success = true;
         consecutiveSHT45Failures = 0;
@@ -2179,18 +2286,18 @@ void readComboSensorsIfDue() {
       Serial.println("[SHT45] Read failed");
     }
   }
-  
+ 
   // Read DHT22 as fallback temp/humidity source when SHT45 is unavailable.
   if (!useSHT45 && useDHT22) {
     float newH = dht.readHumidity();
     float newT = dht.readTemperature();
     dhtTempRaw = newT;
     dhtHumRaw = newH;
-    
+   
     bool got = (!isnan(newT) && !isnan(newH));
     if (got) {
       bool acceptT = true, acceptH = true;
-      
+     
       if (!isnan(filtTempC)) {
         if (newT < TEMP_FAIL_THRESHOLD) {
           acceptT = false;
@@ -2200,7 +2307,7 @@ void readComboSensorsIfDue() {
           acceptT = false;
         }
       }
-      
+     
       if (!isnan(filtHum)) {
         if (newH < HUM_FAIL_THRESHOLD) {
           acceptH = false;
@@ -2210,10 +2317,10 @@ void readComboSensorsIfDue() {
           acceptH = false;
         }
       }
-      
+     
       if (acceptT) { filtTempC = newT - 4.0; }
       if (acceptH) { filtHum = newH; }
-      
+     
       if (acceptT && acceptH) {
         dht22Success = true;
         consecutiveDHT22Failures = 0;
@@ -2226,17 +2333,33 @@ void readComboSensorsIfDue() {
       Serial.printf("[DHT22] Read failed (%d consecutive)\n", consecutiveDHT22Failures);
     }
   }
-  
+ 
   // Read SEN66 (Air Quality) - Feed watchdog before I2C operation
   if (useSEN66) {
     esp_task_wdt_reset(); // Feed watchdog before I2C read
-    int16_t err = sen66.readMeasuredValues(
-      sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
-      sen66_humidity, sen66_temperature,
-      sen66_vocIndex, sen66_noxIndex, sen66_co2
-    );
+    int16_t err = -1;
+    if (comboAirSensorModel == COMBO_AIR_SEN66) {
+#if HAS_SEN66_LIB
+      err = sen66Sensor.readMeasuredValues(
+        sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
+        sen66_humidity, sen66_temperature,
+        sen66_vocIndex, sen66_noxIndex, sen66_co2
+      );
+#endif
+    } else if (comboAirSensorModel == COMBO_AIR_SEN55) {
+#if HAS_SEN5X_LIB
+      err = sen55Sensor.readMeasuredValues(
+        sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
+        sen66_humidity, sen66_temperature,
+        sen66_vocIndex, sen66_noxIndex
+      );
+      sen66_co2 = 0;  // SEN55 does not provide CO2
+#endif
+    } else {
+      sen66_co2 = 0;
+    }
     esp_task_wdt_reset(); // Feed watchdog after I2C read
-    
+   
     if (err == 0) {
       // Validate values are reasonable before accepting
       if (sen66_temperature >= -40.0 && sen66_temperature <= 125.0 &&
@@ -2251,7 +2374,7 @@ void readComboSensorsIfDue() {
         int rawAQI = calculateAQI(sen66_pm2p5);
         int adjustedAQI = rawAQI - 15;  // Subtract 15 from actual AQI
         sen66_aqi = (adjustedAQI >= 3) ? adjustedAQI : 3;  // Minimum AQI is 3
-        
+       
         // Calculate what PM2.5 would give the adjusted AQI (reverse lookup)
         // Then calculate adjustment ratio for all particle counts
         float targetPM2p5 = sen66_pm2p5;  // Default: no change
@@ -2259,7 +2382,7 @@ void readComboSensorsIfDue() {
           // Reverse calculate PM2.5 from adjusted AQI
           // Use binary search or approximation based on AQI breakpoints
           float targetAQI = (float)adjustedAQI;
-          
+         
           // EPA breakpoints for reverse lookup
           if (targetAQI <= 50) {
             // Good range: 0-50 AQI corresponds to 0-12.0 PM2.5
@@ -2280,37 +2403,39 @@ void readComboSensorsIfDue() {
             // Hazardous: 301-500 AQI corresponds to 250.5-500.4 PM2.5
             targetPM2p5 = 250.5 + ((targetAQI - 301) / 199.0) * (500.4 - 250.5);
           }
-          
+         
           // Ensure target doesn't exceed original
           if (targetPM2p5 > sen66_pm2p5) {
             targetPM2p5 = sen66_pm2p5;
           }
         }
-        
+       
         // Calculate adjustment ratio
         float adjustmentRatio = (sen66_pm2p5 > 0) ? (targetPM2p5 / sen66_pm2p5) : 1.0;
         adjustmentRatio = constrain(adjustmentRatio, 0.5, 1.0);  // Limit to 50% reduction max
-        
+       
         // Store original values for logging
         float originalPM1p0 = sen66_pm1p0;
         float originalPM2p5 = sen66_pm2p5;
         float originalPM4p0 = sen66_pm4p0;
         float originalPM10p0 = sen66_pm10p0;
-        
+       
         // Apply adjustment to all particle counts
         sen66_pm1p0 = originalPM1p0 * adjustmentRatio;
         sen66_pm2p5 = targetPM2p5;  // Use calculated target directly
         sen66_pm4p0 = originalPM4p0 * adjustmentRatio;
         sen66_pm10p0 = originalPM10p0 * adjustmentRatio;
-        
+       
         // Adjust CO2: reduce by 15 (similar to AQI offset)
         int originalCO2 = sen66_co2;
         sen66_co2 = (originalCO2 >= 15) ? (originalCO2 - 15) : 0;
-        
+       
         sen66Success = true;
         consecutiveSEN66Failures = 0;
-        
-        Serial.printf("[SEN66] PM2.5:%.1f→%.1f AQI:%d→%d VOC:%.0f NOx:%.0f CO2:%d→%d\n",
+
+        const char* sensorTag = (comboAirSensorModel == COMBO_AIR_SEN55) ? "SEN55" : "SEN66";
+        Serial.printf("[%s] T:%.1f°C H:%.1f%% PM2.5:%.1f→%.1f AQI:%d→%d VOC:%.0f NOx:%.0f CO2:%d→%d\n",
+                      sensorTag, sen66_temperature, sen66_humidity,
                       originalPM2p5, sen66_pm2p5, rawAQI, sen66_aqi, sen66_vocIndex, sen66_noxIndex, originalCO2, sen66_co2);
       } else {
         Serial.printf("[SEN66] Invalid values - T:%.1f H:%.1f PM2.5:%.1f\n",
@@ -2321,7 +2446,7 @@ void readComboSensorsIfDue() {
       consecutiveSEN66Failures++;
       errorToString(err, errMsg, sizeof(errMsg));
       Serial.printf("[SEN66] Read error (%d consecutive): %s\n", consecutiveSEN66Failures, errMsg);
-      
+     
       // After 3 consecutive failures, mark values as invalid (only if not using SHT45)
       if (consecutiveSEN66Failures >= 3 && !useSHT45) {
         filtTempC = NAN;
@@ -2330,13 +2455,13 @@ void readComboSensorsIfDue() {
       }
     }
   }
-  
+ 
   // Read SDP810 (Differential Pressure) - Feed watchdog before I2C operation
   if (useSDP810) {
     esp_task_wdt_reset(); // Feed watchdog before I2C read
     uint16_t err = sdp810.readMeasurement(sdp810_pressure, sdp810_temperature);
     esp_task_wdt_reset(); // Feed watchdog after I2C read
-    
+   
     if (err == 0) {
       // Validate pressure is reasonable (typically -100 to +100 Pa for differential)
       if (sdp810_pressure >= -200.0 && sdp810_pressure <= 200.0) {
@@ -2346,7 +2471,7 @@ void readComboSensorsIfDue() {
         sdp810_pressure_display = scalePressureToNormalRange(abs(sdp810_pressure), speedIdx);
         sdp810Success = true;
         consecutiveSDP810Failures = 0;
-        
+       
         Serial.printf("[SDP810] Pressure:%.2fPa (Display:%.2fPa) HEPA:%s (%d%%)\n",
                       sdp810_pressure, sdp810_pressure_display, hepaStatus.c_str(), hepaHealthPercent);
       } else {
@@ -2359,12 +2484,12 @@ void readComboSensorsIfDue() {
       Serial.printf("[SDP810] Read error (%d consecutive): %s\n", consecutiveSDP810Failures, errMsg);
     }
   }
-  
+ 
   // SELF-HEALING: Track sensor health and store last good values
   if (sht45Success || dht22Success || sen66Success || sdp810Success) {
     selfHealing.sensorHealthy = true;
     selfHealing.sensorFailCount = 0;
-    
+   
     // Store last known good values for graceful degradation
     if (!isnan(filtTempC) && filtTempC > 0) {
       selfHealing.lastGoodTemp = filtTempC;
@@ -2372,13 +2497,13 @@ void readComboSensorsIfDue() {
     if (!isnan(filtHum) && filtHum > 0) {
       selfHealing.lastGoodHum = filtHum;
     }
-    
+   
     publishTelemetryLocal();
   } else if (useSHT45 || useDHT22 || useSEN66 || useSDP810) {
     // All sensors failed - track failure
     selfHealing.sensorFailCount++;
     selfHealing.i2cFailCount++;  // Also track I2C failures
-    
+   
     // SELF-HEALING: Use last known good values (graceful degradation)
     if (selfHealing.sensorFailCount > 3) {
       useLastGoodSensorValues();
@@ -2408,47 +2533,47 @@ void handleSerial(){
       else if (cmd == "toggle") toggleSystem();  // Standalone: works without WiFi/MQTT
       else if (cmd.startsWith("set ")){
         float sp = cmd.substring(4).toFloat();
-        if (sp>=1 && sp<=100){ 
-          tempSet=sp; 
-          prefs.putFloat("tempSet",tempSet); 
-          motorLogMsg("Temp set: "+String(tempSet,1)+"C"); 
+        if (sp>=1 && sp<=100){
+          tempSet=sp;
+          prefs.putFloat("tempSet",tempSet);
+          motorLogMsg("Temp set: "+String(tempSet,1)+"C");
           if(client.connected()) publishStateAWS();
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
       else if (cmd.startsWith("hum ")){
         float hs = cmd.substring(4).toFloat();
-        if (hs>=10 && hs<=90){ 
-          humSet=hs; 
-          prefs.putFloat("humSet",humSet); 
-          motorLogMsg("Hum set: "+String(humSet,1)+"%"); 
+        if (hs>=10 && hs<=90){
+          humSet=hs;
+          prefs.putFloat("humSet",humSet);
+          motorLogMsg("Hum set: "+String(humSet,1)+"%");
           if(client.connected()) publishStateAWS();
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
       else if (cmd.startsWith("fan ")){
         String fanCmd = cmd.substring(4);
-        if (fanCmd == "off" || fanCmd == "0") { 
-          setFanSpeed(FAN_OFF); 
-          prefs.putInt("fanSpeed", 0); 
+        if (fanCmd == "off" || fanCmd == "0") {
+          setFanSpeed(FAN_OFF);
+          prefs.putInt("fanSpeed", 0);
           if(client.connected()) publishStateAWS();
           if(mqttLocal.connected()) publishStateLocal();
         }
-        else if (fanCmd == "low" || fanCmd == "1") { 
-          setFanSpeed(FAN_LOW); 
-          prefs.putInt("fanSpeed", 1); 
+        else if (fanCmd == "low" || fanCmd == "1") {
+          setFanSpeed(FAN_LOW);
+          prefs.putInt("fanSpeed", 1);
           if(client.connected()) publishStateAWS();
           if(mqttLocal.connected()) publishStateLocal();
         }
-        else if (fanCmd == "med" || fanCmd == "2") { 
-          setFanSpeed(FAN_MED); 
-          prefs.putInt("fanSpeed", 2); 
+        else if (fanCmd == "med" || fanCmd == "2") {
+          setFanSpeed(FAN_MED);
+          prefs.putInt("fanSpeed", 2);
           if(client.connected()) publishStateAWS();
           if(mqttLocal.connected()) publishStateLocal();
         }
-        else if (fanCmd == "high" || fanCmd == "3") { 
-          setFanSpeed(FAN_HIGH); 
-          prefs.putInt("fanSpeed", 3); 
+        else if (fanCmd == "high" || fanCmd == "3") {
+          setFanSpeed(FAN_HIGH);
+          prefs.putInt("fanSpeed", 3);
           if(client.connected()) publishStateAWS();
           if(mqttLocal.connected()) publishStateLocal();
         }
@@ -2464,7 +2589,7 @@ void handleSerial(){
 }
 
 // Function to handle incoming MQTT messages
-void messageHandler(char* topic, byte* payload, unsigned int length) 
+void messageHandler(char* topic, byte* payload, unsigned int length)
 {
   // Print raw message to Serial
   Serial.println("\n========================================");
@@ -2493,7 +2618,7 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
   String cmdStr;
   serializeJson(doc, cmdStr);
   Serial.println("📝 Command: " + cmdStr);
-  
+ 
   // Handle test message
   if (doc.containsKey("type") && doc["type"] == "test") {
     Serial.println("🧪 TEST MESSAGE RECEIVED!");
@@ -2502,30 +2627,30 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     Serial.println("✓ MQTT is working! ESP32 can receive messages.");
     return;
   }
-  
+ 
   // Handle OTA Update command FIRST (before other commands)
   if (doc.containsKey("type") && doc["type"] == "ota_update") {
     Serial.println("🔄 OTA Update command detected!");
     handleOTAUpdate(doc);
     return; // Don't process other commands during OTA
   }
-  
+ 
   // Handle RPi OTA commands - relay to local MQTT for RPi
   if (doc.containsKey("type") && doc["type"] == "rpi_ota") {
     Serial.println("🍓 RPi OTA command detected - relaying to local MQTT...");
     String rpiCommand = doc["command"].as<String>();
     String rpiVersion = doc["version"] | "latest";
-    
+   
     // Create command for RPi OTA updater
     StaticJsonDocument<256> rpiDoc;
     rpiDoc["type"] = rpiCommand;  // check_update, ota_update, restart, rollback, status
     rpiDoc["version"] = rpiVersion;
     rpiDoc["timestamp"] = millis();
     rpiDoc["from_esp"] = THINGNAME;
-    
+   
     char rpiPayload[256];
     size_t rpiLen = serializeJson(rpiDoc, rpiPayload, sizeof(rpiPayload));
-    
+   
     // Publish to RPi OTA topic via local MQTT
     if (mqttLocal.connected()) {
       bool sent = mqttLocal.publish("almed/rpi/ota/command", (uint8_t*)rpiPayload, rpiLen, false);
@@ -2544,31 +2669,31 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     }
     return;
   }
-  
+ 
   // Handle motor timing provisioning
-  if (doc.containsKey("m1_start")) { 
-    M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL; 
-    prefs.putULong("m1_start", M1_START_RUN); 
+  if (doc.containsKey("m1_start")) {
+    M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL;
+    prefs.putULong("m1_start", M1_START_RUN);
     Serial.println("✓ M1 start time updated: " + String(M1_START_RUN/1000) + "s");
   }
-  if (doc.containsKey("m1_post")) { 
-    M1_POST_RUN = doc["m1_post"].as<unsigned long>() * 1000UL; 
-    prefs.putULong("m1_post", M1_POST_RUN); 
+  if (doc.containsKey("m1_post")) {
+    M1_POST_RUN = doc["m1_post"].as<unsigned long>() * 1000UL;
+    prefs.putULong("m1_post", M1_POST_RUN);
     Serial.println("✓ M1 post time updated: " + String(M1_POST_RUN/1000) + "s");
   }
-  if (doc.containsKey("m2_interval")) { 
-    M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL; 
-    prefs.putULong("m2_interval", M2_INTERVAL); 
+  if (doc.containsKey("m2_interval")) {
+    M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL;
+    prefs.putULong("m2_interval", M2_INTERVAL);
     Serial.println("✓ M2 interval updated: " + String(M2_INTERVAL/1000) + "s");
   }
-  if (doc.containsKey("m2_run")) { 
-    M2_RUN_TIME = doc["m2_run"].as<unsigned long>() * 1000UL; 
-    prefs.putULong("m2_run", M2_RUN_TIME); 
+  if (doc.containsKey("m2_run")) {
+    M2_RUN_TIME = doc["m2_run"].as<unsigned long>() * 1000UL;
+    prefs.putULong("m2_run", M2_RUN_TIME);
     Serial.println("✓ M2 run time updated: " + String(M2_RUN_TIME/1000) + "s");
   }
-  if (doc.containsKey("m2_delay")) { 
-    M2_DELAY_AFTER_M1_STOP = doc["m2_delay"].as<unsigned long>() * 1000UL; 
-    prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); 
+  if (doc.containsKey("m2_delay")) {
+    M2_DELAY_AFTER_M1_STOP = doc["m2_delay"].as<unsigned long>() * 1000UL;
+    prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
     Serial.println("✓ M2 delay updated: " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
   }
 
@@ -2576,24 +2701,24 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
   static unsigned long lastAwsPrefWrite = 0;
   static bool pendingAwsPrefWrite = false;
   unsigned long now = millis();
-  
+ 
   esp_task_wdt_reset();  // Feed watchdog at start
-  
+ 
   bool stateChanged = false;
-  
-  if (doc.containsKey("start") && doc["start"] == true)  { 
-    Serial.println("→ START"); 
-    startSystem(); 
+ 
+  if (doc.containsKey("start") && doc["start"] == true)  {
+    Serial.println("→ START");
+    startSystem();
     stateChanged = true;
   }
-  else if (doc.containsKey("stop") && doc["stop"] == true)   { 
-    Serial.println("→ STOP"); 
-    stopSystem(); 
+  else if (doc.containsKey("stop") && doc["stop"] == true)   {
+    Serial.println("→ STOP");
+    stopSystem();
     stateChanged = true;
   }
-  else if (doc.containsKey("toggle") && doc["toggle"] == true) { 
-    Serial.println("→ TOGGLE"); 
-    toggleSystem(); 
+  else if (doc.containsKey("toggle") && doc["toggle"] == true) {
+    Serial.println("→ TOGGLE");
+    toggleSystem();
     stateChanged = true;
   }
 
@@ -2628,7 +2753,7 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
       }
     }
   }
-  
+ 
   // Handle fanToggle
   if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
     if (!runState){
@@ -2647,7 +2772,7 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
       stateChanged = true;
     }
   }
-  
+ 
   // DEFERRED preference write - only if 2+ seconds since last write
   if (pendingAwsPrefWrite && (now - lastAwsPrefWrite > 2000)) {
     esp_task_wdt_reset();
@@ -2658,7 +2783,7 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     pendingAwsPrefWrite = false;
     esp_task_wdt_reset();
   }
-  
+ 
   // Handle mode switching (online/offline)
   if (doc.containsKey("mode")){
     String modeStr = doc["mode"].as<String>();
@@ -2679,7 +2804,7 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
       stateChanged = true;
     }
   }
-  
+ 
   // Handle CP mode switching (dual/single) via cloud
   if (doc.containsKey("cpMode")){
     String cpModeStr = doc["cpMode"].as<String>();
@@ -2687,84 +2812,84 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     if (newCpMode != cpMode) {
       Serial.println("🔄 CP MODE CHANGE (Cloud)");
       esp_task_wdt_reset();
-      
+     
       // Stop any running CP first
       if (cpOn) { cpWrite(false); cpOn = false; }
       if (cp2On) { cp2Write(false); cp2On = false; }
       esp_task_wdt_reset();
-      
+     
       cpMode = newCpMode;
       dualCpBothOn = false;
       cpLastOffAt = millis();
-      
+     
       if (cpMode == CP_DUAL_AUTO) {
         cpLastSwitchAt = millis();
         cpActive = 1;
       }
-      
+     
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
-      
+     
       prefs.putInt("cpMode", (int)cpMode);
       prefs.putInt("cpActive", cpActive);
       prefs.putBool("dualCpBothOn", false);
-      
+     
       Serial.println("✓ CP mode: " + String(cpMode == CP_DUAL_AUTO ? "DUAL" : "SINGLE"));
       stateChanged = true;
       esp_task_wdt_reset();
     }
   }
-  
+ 
   // Handle CP active selection (1 or 2) via cloud
   if (doc.containsKey("cpActive")){
     int newCpActive = doc["cpActive"].as<int>();
     if ((newCpActive == 1 || newCpActive == 2) && newCpActive != cpActive) {
       Serial.println("🔄 CP SWITCH (Cloud): CP" + String(cpActive) + " → CP" + String(newCpActive));
       esp_task_wdt_reset();
-      
+     
       // Stop currently running CP
       if (cpActive == 1 && cpOn) { cpWrite(false); cpOn = false; }
       else if (cpActive == 2 && cp2On) { cp2Write(false); cp2On = false; }
-      
+     
       cpWrite(false);
       cp2Write(false);
       cpOn = false;
       cp2On = false;
       cpLastOffAt = millis();
-      
+     
       cpActive = newCpActive;
       dualCpBothOn = false;
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
-      
+     
       prefs.putInt("cpActive", cpActive);
       prefs.putBool("cpSwitchInProgress", true);
       prefs.putBool("dualCpBothOn", false);
-      
+     
       Serial.println("✓ CP active: CP" + String(cpActive));
       stateChanged = true;
       esp_task_wdt_reset();
     }
   }
-  
+ 
   // Handle reset command (same as pressing physical reset button)
   if (doc.containsKey("reset") && doc["reset"] == true) {
     Serial.println("\n========================================");
     Serial.println("🔄 RESET COMMAND RECEIVED!");
     Serial.println("  Saving system state before reset...");
     Serial.println("========================================\n");
-    
+   
     // Save current state before reset
     saveSystemState();
-    
+   
     // Small delay to ensure state is saved
     delay(500);
-    
+   
     // Restart ESP32 (same as pressing reset button)
     ESP.restart();
     return; // Never reached, but good practice
   }
-  
+ 
   // Send updated state immediately after AWS command
   if (stateChanged) {
     Serial.println("📤 Sending updated state...");
@@ -2790,17 +2915,17 @@ void handleOTAUpdate(JsonDocument& doc) {
     publishOTAStatus("error", "WiFi not connected");
     return;
   }
-  
+ 
   // Extract OTA parameters from MQTT command (minimal - ESP32 uses hardcoded values)
   String version = doc["version"] | "latest";
   String commitSha = doc["commit_sha"] | "";
-  
+ 
   // Use hardcoded GitHub values (defined at top of file)
   String repoOwner = String(GITHUB_REPO_OWNER);
   String repoName = String(GITHUB_REPO_NAME);
   String githubToken = String(GITHUB_TOKEN);
   String firmwareAssetName = String(GITHUB_FIRMWARE_ASSET_NAME);
-  
+ 
   // Log OTA parameters
   Serial.println("📋 OTA Parameters:");
   Serial.println("  Version: " + version);
@@ -2808,32 +2933,32 @@ void handleOTAUpdate(JsonDocument& doc) {
   Serial.println("  Repo: " + repoOwner + "/" + repoName + " (hardcoded)");
   Serial.println("  Asset: " + firmwareAssetName + " (hardcoded)");
   Serial.println("  Token: " + (githubToken.length() > 0 ? "***" + githubToken.substring(githubToken.length()-4) : "Not provided"));
-  
+ 
   Serial.println("\n📥 Fetching latest release from GitHub...");
   publishOTAStatus("downloading", "Fetching release info from GitHub...");
-  
+ 
   // CRITICAL: Feed watchdog before starting long OTA process
   esp_task_wdt_reset();
-  
+ 
   // Step 1: Get latest release info
   String releasesUrl = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest";
-  
+ 
   WiFiClientSecure client_ota;
   client_ota.setInsecure(); // Skip certificate validation for GitHub
-  
+ 
   HTTPClient http;
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.setUserAgent("ESP32-OTA-Client");
   http.setTimeout(30000); // 30 second timeout
-  
+ 
   Serial.println("  Releases API: " + releasesUrl);
   http.begin(client_ota, releasesUrl);
   http.addHeader("Authorization", "token " + githubToken);
   http.addHeader("Accept", "application/vnd.github.v3+json");
-  
+ 
   int httpCode = http.GET();
   Serial.println("  HTTP Response Code: " + String(httpCode));
-  
+ 
   if (httpCode != HTTP_CODE_OK) {
     String errorResponse = http.getString();
     Serial.println("❌ Failed to fetch release info: HTTP " + String(httpCode));
@@ -2842,33 +2967,33 @@ void handleOTAUpdate(JsonDocument& doc) {
     publishOTAStatus("error", "Failed to fetch release: HTTP " + String(httpCode));
     return;
   }
-  
+ 
   // Parse release JSON
   StaticJsonDocument<4096> releaseDoc;
   DeserializationError error = deserializeJson(releaseDoc, http.getStream());
   http.end();
-  
+ 
   if (error) {
     Serial.println("❌ Failed to parse release JSON: " + String(error.c_str()));
     publishOTAStatus("error", "Failed to parse release JSON");
     return;
   }
-  
+ 
   String latestVersion = releaseDoc["tag_name"].as<String>();
   Serial.println("✓ Latest release found: " + latestVersion);
   Serial.println("  Searching for asset: " + firmwareAssetName);
-  
+ 
   // Step 2: Find the firmware asset in the release
   // FLEXIBLE: First try exact match, then try any .bin file
   String firmwareUrl = "";
   String foundAssetName = "";
   JsonArray assets = releaseDoc["assets"].as<JsonArray>();
-  
+ 
   // First pass: Try exact match with configured asset name
   for (JsonObject asset : assets) {
     String assetName = asset["name"].as<String>();
     Serial.println("  Found asset: " + assetName);
-    
+   
     if (assetName == firmwareAssetName) {
       String assetId = String(asset["id"].as<long>());
       firmwareUrl = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/assets/" + assetId;
@@ -2877,7 +3002,7 @@ void handleOTAUpdate(JsonDocument& doc) {
       break;
     }
   }
-  
+ 
   // Second pass: If no exact match, find ANY .bin file
   if (firmwareUrl.length() == 0) {
     Serial.println("  No exact match found, searching for any .bin file...");
@@ -2893,7 +3018,7 @@ void handleOTAUpdate(JsonDocument& doc) {
       }
     }
   }
-  
+ 
   if (firmwareUrl.length() == 0) {
     Serial.println("❌ Error: No .bin file found in the release.");
     Serial.println("  Available assets:");
@@ -2903,25 +3028,25 @@ void handleOTAUpdate(JsonDocument& doc) {
     publishOTAStatus("error", "No .bin firmware file found in release");
     return;
   }
-  
+ 
   Serial.println("  Using firmware: " + foundAssetName);
-  
+ 
   // Step 3: Download firmware binary from asset URL
   Serial.println("\n📥 Downloading firmware binary...");
   Serial.println("  Asset URL: " + firmwareUrl);
   publishOTAStatus("installing", "Downloading firmware binary...");
-  
+ 
   // Feed watchdog before starting download
   esp_task_wdt_reset();
-  
+ 
   http.begin(client_ota, firmwareUrl);
   http.addHeader("Accept", "application/octet-stream");  // CRITICAL: Get binary, not JSON
   http.addHeader("Authorization", "token " + githubToken);
   http.setUserAgent("ESP32-OTA-Client");
-  
+ 
   httpCode = http.GET();
   Serial.println("  HTTP Response Code: " + String(httpCode));
-  
+ 
   if (httpCode != HTTP_CODE_OK) {
     String errorResponse = http.getString();
     Serial.println("❌ Download failed: HTTP " + String(httpCode));
@@ -2930,18 +3055,18 @@ void handleOTAUpdate(JsonDocument& doc) {
     publishOTAStatus("error", "Download failed: HTTP " + String(httpCode));
     return;
   }
-  
+ 
   // Get firmware size
   int contentLength = http.getSize();
   Serial.println("  Content Length: " + String(contentLength) + " bytes");
-  
+ 
   if (contentLength <= 0) {
     Serial.println("❌ Error: Invalid content length");
     http.end();
     publishOTAStatus("error", "Invalid content length");
     return;
   }
-  
+ 
   // Start OTA update
   if (!Update.begin(contentLength)) {
     Serial.println("❌ Update.begin() failed: " + String(Update.errorString()));
@@ -2949,24 +3074,24 @@ void handleOTAUpdate(JsonDocument& doc) {
     publishOTAStatus("error", "Update.begin() failed: " + String(Update.errorString()));
     return;
   }
-  
+ 
   Serial.println("✓ Update.begin() successful");
   Serial.println("📦 Writing firmware to flash...");
   Serial.println("  ⚠️ This may take 30-60 seconds for large files. Watchdog will be fed during update.");
-  
+ 
   // Feed watchdog before starting write loop
   esp_task_wdt_reset();
-  
+ 
   // Use chunked reading approach (from reference code)
   WiFiClient* stream = http.getStreamPtr();
   uint8_t buff[1024];
   size_t totalWritten = 0;
   int lastProgress = -1;
-  
+ 
       while (totalWritten < contentLength) {
         // CRITICAL: Feed watchdog during OTA update to prevent timeout
         esp_task_wdt_reset();
-        
+       
         int available = stream->available();
         if (available > 0) {
           int readLen = stream->read(buff, min((size_t)available, sizeof(buff)));
@@ -2977,7 +3102,7 @@ void handleOTAUpdate(JsonDocument& doc) {
             publishOTAStatus("error", "Stream read error");
             return;
           }
-          
+         
           if (Update.write(buff, readLen) != readLen) {
             Serial.println("❌ Update.write failed: " + String(Update.errorString()));
             Serial.println("  Written so far: " + String(totalWritten) + " bytes");
@@ -2987,7 +3112,7 @@ void handleOTAUpdate(JsonDocument& doc) {
             publishOTAStatus("error", "Write failed: " + String(Update.errorString()));
             return;
           }
-          
+         
           totalWritten += readLen;
           int progress = (int)((totalWritten * 100L) / contentLength);
           if (progress > lastProgress && (progress % 5 == 0 || progress == 100)) {
@@ -3003,9 +3128,9 @@ void handleOTAUpdate(JsonDocument& doc) {
         delay(1);
       }
   Serial.println();
-  
+ 
   http.end();
-  
+ 
   // Verify and finalize
   if (totalWritten != contentLength) {
     Serial.println("❌ Error: Write incomplete. Wrote " + String(totalWritten) + " of " + String(contentLength) + " bytes");
@@ -3013,14 +3138,14 @@ void handleOTAUpdate(JsonDocument& doc) {
     publishOTAStatus("error", "Write incomplete");
     return;
   }
-  
+ 
   if (!Update.end()) {
     Serial.println("❌ Update.end() failed: " + String(Update.errorString()));
     publishOTAStatus("error", "Update.end() failed: " + String(Update.errorString()));
     Update.abort();
     return;
   }
-  
+ 
   if (Update.isFinished()) {
     Serial.println("✓ OTA Update successful!");
     Serial.println("  Version: " + latestVersion);
@@ -3038,7 +3163,7 @@ void handleOTAUpdate(JsonDocument& doc) {
     publishOTAStatus("error", "Update not finished");
     Update.abort();
   }
-  
+ 
   Serial.println("========================================\n");
 }
 
@@ -3054,20 +3179,20 @@ void publishOTAStatus(String status, String message) {
   doc["thing"] = THINGNAME;
   doc["version"] = BUILD_VERSION;
   doc["ts"] = millis();
-  
+ 
   char buf[384];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
+ 
   // Publish to AWS IoT
   if (client.connected()) {
     client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
   }
-  
+ 
   // Also publish to local MQTT
   if (mqttLocal.connected()) {
     mqttLocal.publish((baseTopic() + "/ota/status").c_str(), (uint8_t*)buf, n, false);
   }
-  
+ 
   Serial.printf("[OTA] Status: %s - %s\n", status.c_str(), message.c_str());
 }
 
@@ -3076,16 +3201,16 @@ void publishStatusOnline(){
     Serial.println("❌ Cannot publish status - not connected");
     return;
   }
-  
+ 
   StaticJsonDocument<128> doc;
   doc["type"] = "status";
   doc["status"] = "online";
   doc["thing"] = THINGNAME;
   doc["ip"] = WiFi.localIP().toString();
-  
+ 
   char buf[128];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
+ 
   bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
   if (success) {
     Serial.println("✓ Status 'online' sent to esp32/pub (AWS)");
@@ -3108,10 +3233,53 @@ void publishStatusOnlineLocal(){
   }
 }
 
+const char* awsMqttStateToText(int state) {
+  switch (state) {
+    case -4: return "MQTT_CONNECTION_TIMEOUT";
+    case -3: return "MQTT_CONNECTION_LOST";
+    case -2: return "MQTT_CONNECT_FAILED";
+    case -1: return "MQTT_DISCONNECTED";
+    case 0: return "MQTT_CONNECTED";
+    case 1: return "MQTT_CONNECT_BAD_PROTOCOL";
+    case 2: return "MQTT_CONNECT_BAD_CLIENT_ID";
+    case 3: return "MQTT_CONNECT_UNAVAILABLE";
+    case 4: return "MQTT_CONNECT_BAD_CREDENTIALS";
+    case 5: return "MQTT_CONNECT_UNAUTHORIZED";
+    default: return "UNKNOWN_STATE";
+  }
+}
+
+void logAwsConnectFailure(const char* phase) {
+  const int state = client.state();
+  Serial.println("❌ AWS IoT connect failed");
+  Serial.println("  Phase: " + String(phase));
+  Serial.println("  MQTT state: " + String(state) + " (" + String(awsMqttStateToText(state)) + ")");
+  Serial.println("  Thing: " + String(THINGNAME));
+  Serial.println("  Endpoint: " + String(AWS_IOT_ENDPOINT));
+  Serial.println("  WiFi: " + String(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED"));
+  Serial.println("  Hint: ensure cert is ACTIVE, attached to this Thing, and not used by another online board.");
+}
+
+bool syncAwsClock(uint32_t timeoutMs = 12000) {
+  configTime(0, 0, "pool.ntp.org", "time.google.com");
+  const unsigned long start = millis();
+  time_t now = time(nullptr);
+  while (now < 1700000000 && (millis() - start) < timeoutMs) {
+    delay(200);
+    esp_task_wdt_reset();
+    now = time(nullptr);
+  }
+  if (now < 1700000000) {
+    Serial.println("⚠️ NTP sync timeout - TLS may fail");
+    return false;
+  }
+  return true;
+}
+
 // Publish AWS connection status to Local MQTT (for dashboard cloud indicator)
 void publishAwsConnectionStatus(bool connected){
   if(!mqttLocal.connected()) return;
-  
+ 
   StaticJsonDocument<256> doc;
   doc["type"] = "aws_status";
   doc["connected"] = connected;
@@ -3120,14 +3288,14 @@ void publishAwsConnectionStatus(bool connected){
   doc["room"] = ROOM;
   doc["ahu"] = AHU;
   doc["ts"] = millis() / 1000;
-  
+ 
   char buf[256];
   size_t n = serializeJson(doc, buf, sizeof(buf));
-  
+ 
   // Publish to a dedicated AWS status topic
   String awsStatusTopic = baseTopic() + "/aws_status";
   mqttLocal.publish(awsStatusTopic.c_str(), (uint8_t*)buf, n, true);  // Retained message
-  
+ 
   Serial.printf("☁️ AWS status published: %s\n", connected ? "CONNECTED" : "DISCONNECTED");
 }
 
@@ -3141,7 +3309,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   }
   Serial.println();
   Serial.println("========================================\n");
-  
+ 
   String tStr(topic);
   StaticJsonDocument<320> doc;
   if (deserializeJson(doc, payload, len)) return;
@@ -3149,7 +3317,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   // Handle RPi OTA status - relay to AWS IoT
   if (tStr == "almed/rpi/ota/status") {
     Serial.println("🍓 RPi OTA Status received - relaying to AWS...");
-    
+   
     // Add ESP32 identifier and forward to AWS
     StaticJsonDocument<512> awsDoc;
     awsDoc["type"] = "rpi_ota_status";
@@ -3162,10 +3330,10 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     awsDoc["rpi_version"] = doc["current_version"];
     awsDoc["rpi_progress"] = doc["progress"];
     awsDoc["ts"] = millis();
-    
+   
     char awsBuf[512];
     size_t awsLen = serializeJson(awsDoc, awsBuf, sizeof(awsBuf));
-    
+   
     if (client.connected()) {
       client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(awsBuf), awsLen, false);
       Serial.println("✓ RPi OTA status forwarded to AWS IoT");
@@ -3193,27 +3361,27 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     }
     motorLogMsg("Provision: Wi-Fi saved");
     // Send ACK
-    StaticJsonDocument<96> ack; 
-    ack["ok"] = true; 
+    StaticJsonDocument<96> ack;
+    ack["ok"] = true;
     ack["msg"] = "wifi saved";
-    char buf[128]; 
+    char buf[128];
     size_t n = serializeJson(ack, buf, sizeof(buf));
     mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
     Serial.println("✓ ACK sent to: " + tProvAck());
     return;
   }
   else if (tStr == tProvBroker()){
-    if (doc.containsKey("host")) { 
-      mqttHost = String((const char*)doc["host"]); 
-      prefs.putString("mqtt_host", mqttHost); 
+    if (doc.containsKey("host")) {
+      mqttHost = String((const char*)doc["host"]);
+      prefs.putString("mqtt_host", mqttHost);
     motorLogMsg("Provision: Broker saved: " + mqttHost);
       Serial.println("✓ Broker host updated: " + mqttHost);
     }
     // Send ACK
-    StaticJsonDocument<96> ack; 
-    ack["ok"] = true; 
+    StaticJsonDocument<96> ack;
+    ack["ok"] = true;
     ack["msg"] = "broker saved";
-    char buf[128]; 
+    char buf[128];
     size_t n = serializeJson(ack, buf, sizeof(buf));
     mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
     Serial.println("✓ ACK sent to: " + tProvAck());
@@ -3228,10 +3396,10 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     motorLogMsg("Provision: Motor timings saved");
     Serial.println("✓ Motor timings saved (Local)");
     // Send ACK
-    StaticJsonDocument<96> ack; 
-    ack["ok"] = true; 
+    StaticJsonDocument<96> ack;
+    ack["ok"] = true;
     ack["msg"] = "motor timings saved";
-    char buf[128]; 
+    char buf[128];
     size_t n = serializeJson(ack, buf, sizeof(buf));
     mqttLocal.publish(tProvAck().c_str(), (uint8_t*)buf, n, false);
     Serial.println("✓ ACK sent to: " + tProvAck());
@@ -3242,14 +3410,14 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
 
   // Handle commands (same as AWS)
   bool stateChanged = false;
-  
+ 
   // Rate limiting for rapid changes - prevents flash write crashes
   static unsigned long lastPrefWrite = 0;
   static bool pendingPrefWrite = false;
   unsigned long now = millis();
-  
+ 
   esp_task_wdt_reset();  // Feed watchdog at start of message handling
-  
+ 
   if (doc.containsKey("start") && doc["start"] == true)  { Serial.println("→ START"); startSystem(); stateChanged = true; }
   else if (doc.containsKey("stop") && doc["stop"] == true)   { Serial.println("→ STOP"); stopSystem(); stateChanged = true; }
   else if (doc.containsKey("toggle") && doc["toggle"] == true) { Serial.println("→ TOGGLE"); toggleSystem(); stateChanged = true; }
@@ -3257,34 +3425,34 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   // SAFE setpoint handling - NO immediate flash write (prevents crash on rapid changes)
   if (doc.containsKey("setpoint")){
     float sp = doc["setpoint"];
-    if (sp >= 1 && sp <= 100){ 
-      tempSet = sp; 
+    if (sp >= 1 && sp <= 100){
+      tempSet = sp;
       pendingPrefWrite = true;  // Defer write
-      Serial.println("✓ Temp: " + String(tempSet,1) + "°C"); 
-      stateChanged = true; 
+      Serial.println("✓ Temp: " + String(tempSet,1) + "°C");
+      stateChanged = true;
     }
   }
   if (doc.containsKey("humset")){
     float hs = doc["humset"];
-    if (hs >= 10 && hs <= 90){ 
-      humSet = hs; 
+    if (hs >= 10 && hs <= 90){
+      humSet = hs;
       pendingPrefWrite = true;  // Defer write
-      Serial.println("✓ Hum: " + String(humSet,1) + "%"); 
-      stateChanged = true; 
+      Serial.println("✓ Hum: " + String(humSet,1) + "%");
+      stateChanged = true;
     }
   }
   if (doc.containsKey("fan")){
     int fanCmd = doc["fan"];
     if (fanCmd >= 0 && fanCmd <= 3){
       if (!runState && fanCmd != 0){ Serial.println("❌ Fan rejected"); }
-      else { 
-        setFanSpeed((FanSpeed)fanCmd); 
+      else {
+        setFanSpeed((FanSpeed)fanCmd);
         pendingPrefWrite = true;
-        stateChanged = true; 
+        stateChanged = true;
       }
     }
   }
-  
+ 
   // Handle fanToggle
   if (doc.containsKey("fanToggle") && doc["fanToggle"] == true){
     if (!runState){
@@ -3303,7 +3471,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       stateChanged = true;
     }
   }
-  
+ 
   // DEFERRED preference write - only if 2+ seconds since last write
   if (pendingPrefWrite && (now - lastPrefWrite > 2000)) {
     esp_task_wdt_reset();
@@ -3316,7 +3484,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     pendingPrefWrite = false;
     esp_task_wdt_reset();
   }
-  
+ 
   // Handle mode switching (online/offline)
   if (doc.containsKey("mode")){
     String modeStr = doc["mode"].as<String>();
@@ -3337,7 +3505,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       stateChanged = true;
     }
   }
-  
+ 
   // Handle CP mode switching (dual/single) - SAFE with 15s delay
   if (doc.containsKey("cpMode")){
     String cpModeStr = doc["cpMode"].as<String>();
@@ -3345,7 +3513,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     if (newCpMode != cpMode) {
       Serial.println("🔄 CP MODE CHANGE START");
       esp_task_wdt_reset();
-      
+     
       // Stop any running CP first
       if (cpOn) {
         Serial.println("  → Stopping CP1...");
@@ -3363,47 +3531,47 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
         delay(100);
         esp_task_wdt_reset();
       }
-      
+     
       // Ensure both are off
       cpWrite(false);
       cp2Write(false);
-      
+     
       delay(100);
       esp_task_wdt_reset();
-      
+     
       cpMode = newCpMode;
       dualCpBothOn = false;  // Reset dual both-on state
       cpLastOffAt = millis();
-      
+     
       if (cpMode == CP_DUAL_AUTO) {
         cpLastSwitchAt = millis();
         cpActive = 1;  // Start with CP1 in dual mode
       }
-      
+     
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
-      
+     
       // Save state
       prefs.putBool("dualCpBothOn", false);
       prefs.putInt("cpActive", cpActive);
-      
+     
       Serial.print("✓ CP mode: ");
       Serial.println(cpMode == CP_DUAL_AUTO ? "DUAL" : "SINGLE");
-      
+     
       stateChanged = true;
       esp_task_wdt_reset();
     }
   }
-  
+ 
   // Handle CP active selection (1 or 2) - SAFE switching with 15s delay
   if (doc.containsKey("cpActive")){
     int newCpActive = doc["cpActive"].as<int>();
     if ((newCpActive == 1 || newCpActive == 2) && newCpActive != cpActive) {
       Serial.println("🔄 CP SWITCH START (manual)");
       esp_task_wdt_reset();
-      
+     
       int oldCp = cpActive;
-      
+     
       // STEP 1: Stop the currently running CP first (if any)
       if (oldCp == 1 && cpOn) {
         Serial.println("  → Stopping CP1...");
@@ -3420,75 +3588,75 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
         delay(100);  // Let relay fully disengage
         esp_task_wdt_reset();
       }
-      
+     
       // STEP 2: Ensure BOTH relays are off (safety)
       cpWrite(false);
       cp2Write(false);
       cpOn = false;
       cp2On = false;
       cpLastOffAt = millis();
-      
+     
       delay(100);  // Extra settling time
       esp_task_wdt_reset();
-      
+     
       // STEP 3: Update state
       cpActive = newCpActive;
       dualCpBothOn = false;  // Exit both-on mode if active
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
-      
+     
       // STEP 4: IMMEDIATELY save to preferences (critical for crash recovery)
       prefs.putInt("cpActive", cpActive);
       prefs.putBool("cpSwitchInProgress", true);
       prefs.putBool("dualCpBothOn", false);
-      
+     
       // Send switch start message to dashboard
       String switchMsg = "🔄 CP MANUAL SWITCH: CP" + String(oldCp) + " → CP" + String(cpActive) + " (" + String(CP_SWITCH_DELAY_MS/1000) + "s delay)";
       Serial.println(switchMsg);
       motorLogMsg(switchMsg);  // Send to dashboard system logs
-      
+     
       stateChanged = true;
       esp_task_wdt_reset();
     }
   }
-  
+ 
   // Handle reset command (same as pressing physical reset button)
   if (doc.containsKey("reset") && doc["reset"] == true) {
     Serial.println("\n========================================");
     Serial.println("🔄 RESET COMMAND RECEIVED (Local MQTT)!");
     Serial.println("  Saving system state before reset...");
     Serial.println("========================================\n");
-    
+   
     // Save current state before reset
     saveSystemState();
-    
+   
     // Small delay to ensure state is saved
     delay(500);
-    
+   
     // Restart ESP32 (same as pressing reset button)
     ESP.restart();
     return; // Never reached, but good practice
   }
-  
+ 
   // Publish state with watchdog protection (Local MQTT handler)
   if (stateChanged) {
     esp_task_wdt_reset();
     Serial.println("📤 Publishing state...");
-    
+   
     // Local MQTT first (faster, more reliable)
     if (mqttLocal.connected()) {
       esp_task_wdt_reset();
       publishStateLocal();
       esp_task_wdt_reset();
     }
-    
+   
     // AWS MQTT (optional, can be slow)
     if (onlineMode && client.connected()) {
       esp_task_wdt_reset();
       publishStateAWS();
       esp_task_wdt_reset();
     }
-    
+   
     esp_task_wdt_reset();
   }
 }
@@ -3533,21 +3701,21 @@ void ensureMqtt(){
 void setup()
 {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-  
+ 
   Serial.begin(115200);
   delay(500);
-  
+ 
   Serial.println("\n========================================");
   Serial.println("   ALMED AHU Controller v2.0");
   Serial.println("   AWS IoT Cloud Edition");
   Serial.println("========================================");
   Serial.println("HELLO");
   Serial.println("========================================");
-  
+ 
   // Deinitialize watchdog first to prevent "already initialized" error
   esp_task_wdt_deinit();
   delay(10);
-  
+ 
   esp_task_wdt_config_t wdt_config = {
     .timeout_ms = WDT_TIMEOUT * 1000,
     .idle_core_mask = 0,
@@ -3562,7 +3730,7 @@ void setup()
   } else {
     Serial.println("⚠️ Watchdog init skipped (already active)");
   }
-  
+ 
   esp_task_wdt_reset();
 
   // 5-Channel Relay Init
@@ -3571,60 +3739,116 @@ void setup()
   pinMode(PIN_HEAT, OUTPUT);
   pinMode(PIN_CP, OUTPUT);
   pinMode(PIN_SYSTEM, OUTPUT);
-  
+ 
   digitalWrite(PIN_MOTOR1, LOW);
   digitalWrite(PIN_MOTOR2, LOW);
   digitalWrite(PIN_HEAT, LOW);
   digitalWrite(PIN_CP, LOW);
   digitalWrite(PIN_SYSTEM, LOW);
-  
+ 
   // CP2 pin (separate from relay module)
   pinMode(PIN_CP2, OUTPUT);
   digitalWrite(PIN_CP2, LOW);
-  
+ 
   cpLastOffAt = millis();
   heatLastOffAt = millis();
   Serial.println("✓ 5-channel relay module initialized (Active HIGH)");
-  
+ 
   // PWM Fan Init
   ledcAttach(PIN_FAN_PWM, FAN_PWM_FREQ, FAN_PWM_RESOLUTION);
   ledcWrite(PIN_FAN_PWM, FAN_PWM_OFF);
   Serial.println("✓ PWM fan control initialized (25 kHz, 8-bit)");
-  
+ 
   esp_task_wdt_reset();
 
   Wire.begin(21, 22);
   Wire.setClock(100000);  // 100kHz I2C clock (safer for multiple sensors)
-  Wire.setTimeout(50);     // 50ms I2C timeout (prevents hangs)
-  
+  Wire.setTimeout(250);   // 250ms I2C timeout for initial sensor detection
+  delay(100);             // Let I2C bus stabilize before probing sensors
+ 
   // ========== AUTO-DETECT SENSORS (All 3 Together) ==========
   Serial.println("\n--- Detecting Sensors ---");
   Serial.println("  Power: All sensors from ESP32 3.3V pin (~20-28mA total, well within limits)");
-  
+  Serial.println("  I2C: SDA=GPIO21, SCL=GPIO22, 100kHz");
+
+  // I2C bus scan for debugging
+  Serial.print("  I2C scan: ");
+  int i2cDeviceCount = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("0x%02X ", addr);
+      i2cDeviceCount++;
+    }
+  }
+  Serial.printf("(%d device%s found)\n", i2cDeviceCount, i2cDeviceCount == 1 ? "" : "s");
+ 
   // Try all 3 sensors (they all work together, powered from ESP32 3.3V)
   bool sen66Detected = false;
   bool sdp810Detected = false;
   bool sht45Detected = false;
   bool dht22Detected = false;
-  
-  // Try SEN66 (Air Quality Sensor)
+ 
+  // Try combo air sensor: prefer SEN66, then SEN55 (auto-detect)
   esp_task_wdt_reset();
-  sen66.begin(Wire, SEN66_I2C_ADDR_6B);
-  int16_t sen66Err = sen66.deviceReset();
+  int16_t sen66Err = -1;
+#if HAS_SEN66_LIB
+  sen66Sensor.begin(Wire, 0x6B);
+  sen66Err = sen66Sensor.deviceReset();
   if (sen66Err == 0) {
-    // Feed watchdog during warmup (1200ms split into smaller chunks)
     for (int i = 0; i < 6; i++) {
       delay(200);
       esp_task_wdt_reset();
     }
-    sen66Err = sen66.startContinuousMeasurement();
+    sen66Err = sen66Sensor.startContinuousMeasurement();
     if (sen66Err == 0) {
       useSEN66 = true;
       sen66Detected = true;
+      comboAirSensorModel = COMBO_AIR_SEN66;
       Serial.println("✓ SEN66 detected (Air Quality: PM, AQI, VOC, NOx, CO2)");
     }
   }
-  
+#endif
+
+#if HAS_SEN5X_LIB
+  if (!sen66Detected) {
+    Serial.println("  Probing SEN55 at I2C 0x69...");
+    sen55Sensor.begin(Wire);
+    sen66Err = sen55Sensor.deviceReset();
+    if (sen66Err == 0) {
+      for (int i = 0; i < 8; i++) {
+        delay(200);
+        esp_task_wdt_reset();
+      }
+      sen66Err = sen55Sensor.startMeasurement();
+      if (sen66Err == 0) {
+        useSEN66 = true;
+        sen66Detected = true;
+        comboAirSensorModel = COMBO_AIR_SEN55;
+        Serial.println("✓ SEN55 detected (Air Quality: PM, AQI, VOC, NOx)");
+        // First reading after startup — wait for data to be ready
+        delay(1500);
+        esp_task_wdt_reset();
+        float pm1, pm2p5, pm4, pm10, hum, temp, voc, nox;
+        int16_t readErr = sen55Sensor.readMeasuredValues(pm1, pm2p5, pm4, pm10, hum, temp, voc, nox);
+        if (readErr == 0) {
+          Serial.printf("  [SEN55 first read] T:%.1f°C H:%.1f%% PM2.5:%.1f VOC:%.0f NOx:%.0f\n", temp, hum, pm2p5, voc, nox);
+        } else {
+          Serial.printf("  [SEN55 first read] pending (err=%d) - will appear in next cycle\n", readErr);
+        }
+      } else {
+        Serial.printf("✗ SEN55 startMeasurement failed (err=%d)\n", sen66Err);
+      }
+    } else {
+      Serial.printf("✗ SEN55 deviceReset failed (err=%d) - check wiring: VDD=5V, SDA=GPIO21, SCL=GPIO22, GND\n", sen66Err);
+    }
+  }
+#else
+  if (!sen66Detected) {
+    Serial.println("⚠ SEN55 library not installed - install 'Sensirion I2C SEN5x' via Arduino Library Manager");
+  }
+#endif
+ 
   // Try SDP810 (HEPA Pressure Sensor)
   esp_task_wdt_reset();
   sdp810.begin(Wire, SDP8XX_I2C_ADDRESS_0);
@@ -3637,7 +3861,7 @@ void setup()
     sdp810Detected = true;
     Serial.println("✓ SDP810 detected (HEPA Status: Differential Pressure)");
   }
-  
+ 
   // Try SHT45 (Temperature & Humidity Sensor - Most Accurate)
   if (sht4.begin()) {
     sht4.setPrecision(SHT4X_HIGH_PRECISION);
@@ -3646,7 +3870,7 @@ void setup()
     sht45Detected = true;
     Serial.println("✓ SHT45 detected (Temperature & Humidity - Primary for Control)");
   }
-  
+ 
   // Try DHT22 fallback (GPIO digital temp/humidity)
   if (!sht45Detected) {
     dht.begin();
@@ -3662,7 +3886,10 @@ void setup()
       Serial.println("⚠ DHT22 not detected on GPIO" + String(DHT_PIN) + " (check DATA wire / pull-up)");
     }
   }
-  
+ 
+  // Restore tighter timeout for normal operation
+  Wire.setTimeout(50);
+
   // Determine sensor mode and print configuration
   Serial.println("\n--- Sensor Configuration ---");
   if (sen66Detected && sdp810Detected) {
@@ -3690,7 +3917,7 @@ void setup()
     originalSensorMode = SENSOR_NONE;
   }
   Serial.println("  Hot-swap detection: ENABLED (3-check algorithm, auto-reset on sensor type change)");
-  
+ 
   esp_task_wdt_reset();
 
   prefs.begin("ahu", false);
@@ -3708,7 +3935,7 @@ void setup()
   if (sp>=1 && sp<=100) tempSet = sp;
   float hs = prefs.getFloat("humSet", humSet);
   if (hs>=10 && hs<=90) humSet = hs;
-  
+ 
   int savedFan = prefs.getInt("fanSpeed", 0);
   if (savedFan >= 0 && savedFan <= 3) fanSpeed = (FanSpeed)savedFan;
 
@@ -3716,12 +3943,12 @@ void setup()
   onlineMode = prefs.getBool("onlineMode", true);
   Serial.print("  Operation mode: ");
   Serial.println(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)");
-  
+ 
   // Load CP mode (default to dual auto)
   cpMode = (CpMode)prefs.getInt("cpMode", CP_DUAL_AUTO);
   cpActive = prefs.getInt("cpActive", 1);
   cpLastSwitchAt = prefs.getULong("cpLastSwitchAt", 0);
-  
+ 
   // CRASH RECOVERY: Check if we were in the middle of a CP switch
   bool wasSwitchInProgress = prefs.getBool("cpSwitchInProgress", false);
   if (wasSwitchInProgress) {
@@ -3739,7 +3966,7 @@ void setup()
     prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
     Serial.printf("  ✓ CP switch recovery complete - Active CP: CP%d\n", cpActive);
   }
-  
+ 
   Serial.print("  CP mode: ");
   Serial.print(cpMode == CP_DUAL_AUTO ? "DUAL (auto-switch every hour)" : "SINGLE");
   Serial.print(" | Active CP: CP");
@@ -3751,7 +3978,7 @@ void setup()
   // Load motor timings from preferences (with validation)
   unsigned long savedM2Run = prefs.getULong("m2_run", M2_RUN_TIME);
   unsigned long savedM2Delay = prefs.getULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
-  
+ 
   // Validate: M2_RUN_TIME should be around 15-30 seconds, M2_DELAY should be around 5-20 seconds
   // This prevents swapped values from preferences
   if (savedM2Run >= 15000 && savedM2Run <= 30000) {
@@ -3760,14 +3987,14 @@ void setup()
     Serial.println("⚠️ Invalid M2_RUN_TIME in preferences, using default: " + String(M2_RUN_TIME/1000) + "s");
     prefs.putULong("m2_run", M2_RUN_TIME); // Save correct default
   }
-  
+ 
   if (savedM2Delay >= 5000 && savedM2Delay <= 20000) {
     M2_DELAY_AFTER_M1_STOP = savedM2Delay;
   } else {
     Serial.println("⚠️ Invalid M2_DELAY in preferences, using default: " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
     prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); // Save correct default
   }
-  
+ 
   // CRITICAL: Safety check - M2_RUN_TIME should be significantly longer than M2_DELAY_AFTER_M1_STOP
   // If M2_DELAY is longer than M2_RUN_TIME, or if M2_RUN_TIME is too short, values are likely swapped
   // Expected: M2_RUN_TIME ~22s, M2_DELAY ~10s
@@ -3776,7 +4003,7 @@ void setup()
     Serial.println("  M2_RUN_TIME: " + String(M2_RUN_TIME/1000) + "s (should be ~22s)");
     Serial.println("  M2_DELAY: " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s (should be ~10s)");
     Serial.println("  Correcting values...");
-    
+   
     // Swap if delay > run_time, or reset to defaults if values are clearly wrong
     if (M2_DELAY_AFTER_M1_STOP > M2_RUN_TIME && M2_DELAY_AFTER_M1_STOP < 30000) {
       // Values are swapped - swap them back
@@ -3788,18 +4015,18 @@ void setup()
       M2_RUN_TIME = 22UL * 1000UL;
       M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;
     }
-    
+   
     prefs.putULong("m2_run", M2_RUN_TIME);
     prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
     Serial.println("✓ Corrected: M2_RUN_TIME=" + String(M2_RUN_TIME/1000) + "s, M2_DELAY=" + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
   }
-  
+ 
   // Load WiFi credentials (for provisioning - defaults to main WiFi)
   w1_ssid = prefs.getString("w1_ssid", String(WIFI_SSID));
   w1_pass = prefs.getString("w1_pass", String(WIFI_PASSWORD));
   w2_ssid = prefs.getString("w2_ssid", String(""));
   w2_pass = prefs.getString("w2_pass", String(""));
-  
+ 
   // Load Local MQTT broker host (RPi mDNS hostname - works on ANY network!)
   // MDNS MODE: Migrate old IPs / old alternate hostname to current Pi name
   String savedMqttHost = prefs.getString("mqtt_host", String("almed-ahu.local"));
@@ -3814,16 +4041,16 @@ void setup()
   } else {
     mqttHost = savedMqttHost;
   }
-  
+ 
   esp_task_wdt_reset();
-  
+ 
   Serial.println("\n--- Checking for previous state ---");
   restoreSystemState();
-  
+ 
   Serial.println("\n✓ Preferences loaded");
   Serial.println("  Temp setpoint: " + String(tempSet, 1) + "°C");
   Serial.println("  Humidity setpoint: " + String(humSet, 1) + "%");
-  
+ 
   esp_task_wdt_reset();
 
   // ========== STANDALONE MODE: Non-blocking WiFi ==========
@@ -3832,7 +4059,7 @@ void setup()
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   WiFi.setAutoReconnect(true);  // Auto-reconnect on disconnect
   WiFi.persistent(true);         // Save WiFi credentials to flash
-  
+ 
   Serial.println("\n📡 WiFi: Connecting to '" + String(WIFI_SSID) + "' (non-blocking)");
   Serial.println("  📶 ESP32 and RPi both connect to same network");
   Serial.println("  🌐 mDNS: Will connect to '" + mqttHost + "' (works on any network!)");
@@ -3846,15 +4073,17 @@ void setup()
 
   // Connect to the MQTT broker on the AWS endpoint
   client.setServer(AWS_IOT_ENDPOINT, 8883);
-  
+ 
   // Set MQTT buffer size (important for AWS IoT)
   client.setBufferSize(MQTT_BUFFER_SIZE);
-  
+ 
   // Set keep-alive to 60 seconds (AWS IoT default is 1200s, but 60s is safer)
   client.setKeepAlive(60);
-  
-  // Set socket timeout - VERY SHORT timeout to prevent blocking watchdog
-  client.setSocketTimeout(1);  // 1 second max - prevents watchdog resets
+ 
+  // TLS+MQTT handshakes can take longer on hospital WiFi/VPN paths.
+  // Keep these conservative to avoid false MQTT_CONNECTION_TIMEOUT (-4).
+  client.setSocketTimeout(20);
+  net.setHandshakeTimeout(25);
 
   // Set the function to handle messages
   client.setCallback(messageHandler);
@@ -3864,7 +4093,10 @@ void setup()
 
   Serial.println("\n📡 MQTT Configuration (Optional):");
   Serial.println("  ☁️  AWS IoT (Cloud):");
-  Serial.println("      📥 Subscribe: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+  Serial.println("      📥 Subscribe: " + awsCmdTopic());
+  if (ALLOW_AWS_GENERIC_COMMAND_TOPIC) {
+    Serial.println("      ⚠️ Generic:   " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+  }
   Serial.println("      📤 Publish:   " + String(AWS_IOT_PUBLISH_TOPIC));
   Serial.println("  🏠 Local MQTT (Pi): " + mqttHost);
   Serial.println("  🧭 Local topic root: " + baseTopic());
@@ -3882,24 +4114,37 @@ void setup()
   if (onlineMode && WiFi.status() == WL_CONNECTED) {
     Serial.println("📡 Checking internet connectivity...");
     esp_task_wdt_reset();
-    
+   
     // Quick internet check before AWS attempt
     if (checkInternetAvailable()) {
       Serial.println("✓ Internet available - attempting AWS IoT connection...");
-      esp_task_wdt_reset(); // Feed watchdog before connection
-      if (client.connect(THINGNAME)) {
-        esp_task_wdt_reset(); // Feed watchdog after connection
-        Serial.println("✓ AWS IoT connected on startup (cloud service active)");
-        esp_task_wdt_reset(); // Feed watchdog before subscribe
-        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-        esp_task_wdt_reset(); // Feed watchdog after subscribe
-        Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-        Serial.println(subResult ? " ✓" : " ✗ FAILED");
-        publishStatusOnline();
+      if (!syncAwsClock(20000)) {
+        Serial.println("⚠️ Skipping AWS connect on startup - clock not synced yet");
       } else {
-        esp_task_wdt_reset(); // Feed watchdog after failed connection
-        Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
-        Serial.println("  → Local MQTT continues working normally");
+        client.disconnect();
+        net.stop();
+        delay(50);
+        esp_task_wdt_reset(); // Feed watchdog before connection
+        if (client.connect(THINGNAME)) {
+          esp_task_wdt_reset(); // Feed watchdog after connection
+          Serial.println("✓ AWS IoT connected on startup (cloud service active)");
+          esp_task_wdt_reset(); // Feed watchdog before subscribe
+          bool subResult = client.subscribe(awsCmdTopic().c_str());
+          esp_task_wdt_reset(); // Feed watchdog after subscribe
+          Serial.print("📥 Subscribed to: " + awsCmdTopic());
+          Serial.println(subResult ? " ✓" : " ✗ FAILED");
+          if (ALLOW_AWS_GENERIC_COMMAND_TOPIC) {
+            bool genericSubResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+            Serial.print("📥 Generic subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+            Serial.println(genericSubResult ? " ✓" : " ✗ FAILED");
+          }
+          publishStatusOnline();
+        } else {
+          esp_task_wdt_reset(); // Feed watchdog after failed connection
+          logAwsConnectFailure("startup");
+          Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
+          Serial.println("  → Local MQTT continues working normally");
+        }
       }
     } else {
       esp_task_wdt_reset();
@@ -3930,15 +4175,15 @@ void setup()
   // OTA UPDATE VERIFICATION - Send 10 messages to dashboard logs
   // This helps verify the update was successful
   bool otaJustCompleted = prefs.getBool("ota_just_completed", false);
-  
+ 
   // Also check if this is a new build version (different from stored)
   String storedBuildVer = prefs.getString("build_version", "");
   bool isNewBuild = (storedBuildVer != BUILD_VERSION);
-  
+ 
   if (otaJustCompleted || isNewBuild) {
     // Save current build version
     prefs.putString("build_version", BUILD_VERSION);
-    
+   
     Serial.println("\n🎉 ========================================");
     Serial.println("   OTA UPDATE VERIFICATION");
     Serial.println("   Build: " + String(BUILD_VERSION));
@@ -3946,7 +4191,7 @@ void setup()
     Serial.println("   Features: " + String(BUILD_FEATURES));
     Serial.println("   Sending 10 verification messages...");
     Serial.println("==========================================\n");
-    
+   
     // Wait for WiFi and MQTT to connect first (up to 10 seconds)
     unsigned long waitStart = millis();
     while (!mqttLocal.connected() && (millis() - waitStart < 10000)) {
@@ -3956,14 +4201,14 @@ void setup()
       }
       delay(500);
     }
-    
+   
     // Send 10 verification messages to dashboard
     for (int i = 1; i <= 10; i++) {
       esp_task_wdt_reset();
       String msg = "🎉 OTA VERIFIED [" + String(i) + "/10] " + String(BUILD_VERSION) + " | " + String(BUILD_FEATURES);
       motorLogMsg(msg);
       Serial.println(msg);
-      
+     
       // Publish OTA verification with device identification
       StaticJsonDocument<512> verifyDoc;
       verifyDoc["type"] = "ota_verify";
@@ -3980,16 +4225,16 @@ void setup()
       verifyDoc["thing"] = THINGNAME;
       verifyDoc["verified"] = true;
       verifyDoc["ts"] = millis();
-      
+     
       char buf[512];
       size_t n = serializeJson(verifyDoc, buf, sizeof(buf));
-      
+     
       // Publish to AWS IoT for web dashboard
       if (client.connected()) {
         client.publish(AWS_IOT_PUBLISH_TOPIC, (uint8_t*)buf, n, false);
         client.loop();
       }
-      
+     
       // Also publish to local MQTT
       if (mqttLocal.connected()) {
         mqttLocal.publish(tLog().c_str(), (uint8_t*)buf, n, false);
@@ -3997,10 +4242,10 @@ void setup()
       }
       delay(500);  // 500ms between messages
     }
-    
+   
     // Clear the OTA flag so we don't send again on next reboot
     prefs.putBool("ota_just_completed", false);
-    
+   
     Serial.println("\n✅ OTA verification complete - 10 messages sent");
     Serial.println("   Build: " + String(BUILD_VERSION));
     Serial.println("==========================================\n");
@@ -4012,19 +4257,19 @@ void setup()
 void loop()
 {
   unsigned long now = millis();
-  
+ 
   // Feed watchdog at start of every loop
   esp_task_wdt_reset();
-  
+ 
   // SELF-HEALING: Perform periodic health check and auto-recovery
   performHealthCheck();
-  
+ 
   // Check for loop hangs (log only, no reset)
   if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
     Serial.println("⚠️ Loop slow - continuing (no reset)");
   }
   lastLoopTime = now;
-  
+ 
   static unsigned long lastStateSave = 0;
   // STABILITY: Reduced save frequency to prevent flash wear and reduce overhead
   // Save every 60 seconds normally, every 30 seconds when M2 is near
@@ -4043,11 +4288,11 @@ void loop()
   // ========== SELF-HEALING: WiFi Management ==========
   static unsigned long lastWifiCheck = 0;
   static bool wifiWasConnected = false;
-  
+ 
   if (now - lastWifiCheck > 5000) {
     lastWifiCheck = now;
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
-    
+   
     if (wifiConnected && !wifiWasConnected) {
       // WiFi just connected - update self-healing state
       Serial.println("✓ WiFi Connected: " + WiFi.localIP().toString());
@@ -4055,12 +4300,12 @@ void loop()
       selfHealing.wifiHealthy = true;
       selfHealing.wifiFailCount = 0;
       selfHealing.wifiDownSince = 0;
-      
+     
       // Start mDNS on ESP32 (helps .local resolution on some builds); Pi must advertise AlMed.local
       if (MDNS.begin("ahu-esp32")) {
         Serial.println("✓ mDNS started - can resolve Pi at AlMed.local");
       }
-    } 
+    }
     else if (!wifiConnected && wifiWasConnected) {
       // WiFi just disconnected - update self-healing state
       Serial.println("⚠️ WiFi Disconnected (self-healing active)");
@@ -4071,7 +4316,7 @@ void loop()
     else if (!wifiConnected && !wifiWasConnected) {
       // WiFi still down - increment failure counter
       selfHealing.wifiFailCount++;
-      
+     
       // Fast WiFi reconnection - 10 second retry (non-blocking)
       static unsigned long lastWifiReconnectAttempt = 0;
       if (now - lastWifiReconnectAttempt > 10000) {
@@ -4087,14 +4332,14 @@ void loop()
   // ========== SELF-HEALING: AWS IoT MQTT (Cloud) ==========
   // Track AWS connection state changes
   static bool wasAwsConnected = false;
-  
+ 
   if (onlineMode) {
     bool isAwsConnected = client.connected();
-    
+   
     if (isAwsConnected) {
       client.loop();
       selfHealing.mqttAwsHealthy = true;
-      
+     
       // Just connected - notify dashboard
       if (!wasAwsConnected) {
         wasAwsConnected = true;
@@ -4102,7 +4347,7 @@ void loop()
       }
     } else {
       selfHealing.mqttAwsHealthy = false;
-      
+     
       // Just disconnected - notify dashboard
       if (wasAwsConnected) {
         wasAwsConnected = false;
@@ -4110,7 +4355,7 @@ void loop()
         Serial.println("⚠️ AWS IoT disconnected");
       }
     }
-    
+   
     // AWS reconnection - FAST reconnect for hospital reliability
     // CRITICAL: Check internet availability BEFORE attempting AWS connection
     // This prevents TLS handshake blocking for 20+ seconds when no internet
@@ -4124,10 +4369,10 @@ void loop()
       } else {
         retryInterval = 30000;  // Back off to 30s after 10 failures
       }
-      
+     
       if (now - selfHealing.lastMqttAwsRecovery > retryInterval) {
         selfHealing.lastMqttAwsRecovery = now;
-        
+       
         // CHECK INTERNET FIRST - avoids blocking TLS handshake
         if (!checkInternetAvailable()) {
           // No internet - skip AWS connection attempt
@@ -4138,28 +4383,45 @@ void loop()
           // Continue to local MQTT - don't try AWS
         } else {
           // Internet available - try AWS connection
-          esp_task_wdt_reset();
-          Serial.println("📡 Connecting to AWS IoT...");
-          
-          if (client.connect(THINGNAME)) {
+          if (!syncAwsClock(20000)) {
+            selfHealing.mqttAwsFailCount++;
+            if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
+              Serial.printf("⚠️ NTP not synced - delaying AWS connect (attempt %d)\n", selfHealing.mqttAwsFailCount);
+            }
+          } else {
+            // Ensure stale TLS socket state does not carry across retries.
+            client.disconnect();
+            net.stop();
+            delay(50);
+            esp_task_wdt_reset();
+            Serial.println("📡 Connecting to AWS IoT...");
+           
+            if (client.connect(THINGNAME)) {
             esp_task_wdt_reset();
             Serial.println("✓ AWS IoT CONNECTED!");
             selfHealing.mqttAwsFailCount = 0;
             selfHealing.mqttAwsHealthy = true;
             selfHealing.totalRecoveries++;
-            
-            client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+           
+            client.subscribe(awsCmdTopic().c_str());
+            if (ALLOW_AWS_GENERIC_COMMAND_TOPIC) {
+              client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+            }
             publishStatusOnline();
-            
+           
             // Notify dashboard of AWS connection status
             publishAwsConnectionStatus(true);
             motorLogMsg("☁️ Cloud connected (AWS IoT)");
-          } else {
-            esp_task_wdt_reset();
-            selfHealing.mqttAwsFailCount++;
-            if (selfHealing.mqttAwsFailCount <= 3) {
-              Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n", 
-                            selfHealing.mqttAwsFailCount, retryInterval/1000);
+            } else {
+              esp_task_wdt_reset();
+              selfHealing.mqttAwsFailCount++;
+              if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
+                logAwsConnectFailure("runtime");
+              }
+              if (selfHealing.mqttAwsFailCount <= 3) {
+                Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n",
+                              selfHealing.mqttAwsFailCount, retryInterval/1000);
+              }
             }
           }
         }
@@ -4180,13 +4442,13 @@ void loop()
       offlineModeDisconnected = false;
     }
   }
-  
+ 
   // Debug: Log MQTT connection status periodically (every 60 seconds, only in online mode)
   if (onlineMode) {
     static unsigned long lastMqttStatusLog = 0;
     if (now - lastMqttStatusLog > 60000) {
       lastMqttStatusLog = now;
-      Serial.printf("[DEBUG] AWS: %s | WiFi: %s\n", 
+      Serial.printf("[DEBUG] AWS: %s | WiFi: %s\n",
                     client.connected() ? "OK" : "OFF",
                     WiFi.status() == WL_CONNECTED ? "OK" : "OFF");
     }
@@ -4206,7 +4468,7 @@ void loop()
   }
 
   handleSerial();
-  
+ 
   // Read appropriate sensors based on what's detected
   // If all 3 sensors or combo sensors detected, use combo reading function
   // Otherwise use single SHT45 reading function
@@ -4217,28 +4479,29 @@ void loop()
   } else if (useDHT22) {
     readDht22IfDue();  // DHT22 fallback if SHT45 is not available
   }
-  
-  // Always print DHT22 raw status for wiring/pin troubleshooting.
+ 
+  // Always print DHT22/SEN55 raw status for wiring/pin troubleshooting.
   debugDht22StatusIfDue();
-  
+  debugSen55StatusIfDue();
+ 
   // Log significant environmental changes (±5°C or ±5% humidity)
   checkAndLogEnvChanges();
-  
+ 
   // Periodic sensor hot-swap detection (check if NEW sensor type connected)
   // Only reset if a DIFFERENT sensor type is attached (not when same type reconnected)
   if (now - lastSensorCheck >= SENSOR_CHECK_INTERVAL) {
     lastSensorCheck = now;
     checkForNewSensor();
   }
-  
+ 
     // Debug: Log sensor mode periodically (every 60 seconds to reduce log spam)
     static unsigned long lastSensorModeLog = 0;
     if (now - lastSensorModeLog > 60000) {
     lastSensorModeLog = now;
     esp_task_wdt_reset();
-    Serial.printf("[DEBUG] Sensors: SEN66=%s SDP810=%s SHT45=%s\n", 
-                  useSEN66 ? "Y" : "N", 
-                  useSDP810 ? "Y" : "N", 
+    Serial.printf("[DEBUG] Sensors: SEN66=%s SDP810=%s SHT45=%s\n",
+                  useSEN66 ? "Y" : "N",
+                  useSDP810 ? "Y" : "N",
                   useSHT45 ? "Y" : "N");
     Serial.printf("[DEBUG] Fallback DHT22=%s\n", useDHT22 ? "Y" : "N");
   }
@@ -4250,7 +4513,7 @@ void loop()
     publishTelemetryAWS();
     publishStateAWS();
   }
-  
+ 
   // Publish to Local MQTT every 2 seconds (telemetry and state only - status less often)
   static unsigned long lastLocal = 0;
   static unsigned long lastLocalStatus = 0;
@@ -4317,10 +4580,10 @@ void loop()
   // =================== RUNNING SEQUENCE ===================
   if (runState && !shuttingDown){
     // M1 boot drain complete
-    if (m1Active && now >= m1StopAt) { 
+    if (m1Active && now >= m1StopAt) {
       motorLogMsg("[RUN] M1 timer expired - stopping M1");
-      m1_stop(); 
-      m2ScheduledAfterM1 = true; 
+      m1_stop();
+      m2ScheduledAfterM1 = true;
       m2StartAt = now + M2_DELAY_AFTER_M1_STOP;
       motorLogMsg("[RUN] M1 boot done, M2 in " + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
     }
@@ -4350,8 +4613,8 @@ void loop()
   }
 
   // Stop M2 when time is up (both run and shutdown modes)
-  if (m2Active && now >= m2StopAt) { 
-    m2_stop(); 
+  if (m2Active && now >= m2StopAt) {
+    m2_stop();
   }
 
   delay(5);
