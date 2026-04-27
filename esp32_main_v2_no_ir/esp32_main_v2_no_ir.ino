@@ -1,3 +1,4 @@
+#include <cstring>
 #include <pgmspace.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
@@ -16,24 +17,112 @@
 #include <SensirionI2CSdp.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
+#include <esp_system.h>
+#include <esp_err.h>
+#include "esp_idf_version.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ESPmDNS.h>  // For mDNS hostname resolution
+// Must be last include: Arduino inserts forward declarations here; they need SensorMode / FanSpeed.
+#include "ahu_ctrl_types.h"
 
-// Forward declaration for Arduino auto-generated prototypes
-enum FanSpeed : uint8_t;
+// Field trial: disable RTC brownout detector as early as possible (before Arduino init / setup()).
+// Brief 3.3V dips (compressor/relay load) can trigger BOR even when mains returns; this only masks
+// that reset path — fix the supply for production.
+#if defined(ARDUINO_ARCH_ESP32)
+static void __attribute__((constructor(101))) disableBrownoutDetectorEarly() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+}
+#endif
 
-#define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
+static const char* sensorModeName(SensorMode mode) {
+  switch (mode) {
+    case SENSOR_COMBO: return "COMBO";
+    case SENSOR_SHT45: return "SHT45";
+    case SENSOR_DHT22: return "DHT22";
+    default: return "NONE";
+  }
+}
+
+// Boot diagnostics (also published on MQTT — no serial needed in the field).
+static const char* resetReasonTagStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_UNKNOWN:   return "UNKNOWN";
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXTERNAL_PIN";
+    case ESP_RST_SW:        return "SOFTWARE";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default: return "OTHER";
+  }
+}
+
+// Filled in logResetReason(); bootCount set in persistBootDiagnostics() after prefs.begin().
+int g_resetReasonCode = 0;
+char g_resetReasonTag[20] = "OTHER";
+uint32_t g_bootCount = 0;
+
+static void logResetReason() {
+  esp_reset_reason_t r = esp_reset_reason();
+  g_resetReasonCode = (int)r;
+  const char* name = resetReasonTagStr(r);
+  strncpy(g_resetReasonTag, name, sizeof(g_resetReasonTag) - 1);
+  g_resetReasonTag[sizeof(g_resetReasonTag) - 1] = '\0';
+  Serial.printf("\n🔌 Last reset reason: %s (%d)\n", name, (int)r);
+  if (r == ESP_RST_BROWNOUT) {
+    Serial.println("   → Supply dipped below brownout threshold. Check 5V/3.3V to ESP, relay noise, cable length.");
+  }
+}
+
+#define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP25_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP27_CTRL" // Kaveri Hospital Burns Ward AHU 1
+
+// Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
+static inline String awsIotCmdTopicForThisThing() {
+  return String("esp32/") + THINGNAME + "/sub";
+}
+
+static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc) {
+  String t(topic);
+  if (t == awsIotCmdTopicForThisThing()) {
+    return true;
+  }
+  if (t != String(AWS_IOT_SUBSCRIBE_TOPIC)) {
+    Serial.printf("⚠️ OTA ignored: unexpected topic %s\n", topic);
+    return false;
+  }
+  String tgt;
+  if (doc.containsKey("target_thing")) {
+    tgt = doc["target_thing"].as<String>();
+  } else if (doc.containsKey("thing")) {
+    tgt = doc["thing"].as<String>();
+  }
+  if (tgt.length() == 0) {
+    Serial.println("⚠️ OTA rejected on shared esp32/sub: add target_thing (or thing) to the command, or publish to esp32/<THING>/sub");
+    return false;
+  }
+  if (tgt != String(THINGNAME)) {
+    Serial.printf("⚠️ OTA ignored: command for '%s', this device is '%s'\n", tgt.c_str(), THINGNAME);
+    return false;
+  }
+  return true;
+}
 
 // Build version for OTA verification
 #define BUILD_VERSION "v2.6.2-DCP"
 #define BUILD_DATE "2026-01-21"
-#define BUILD_FEATURES "dual-CP for cloud"
+#define BUILD_FEATURES "dual-CP for cloud, BOD-off-field"
 
 // ============ GitHub OTA Configuration (Hardcoded) ============
 #define GITHUB_REPO_OWNER "ESPUpdaterzaid"
@@ -48,8 +137,8 @@ enum FanSpeed : uint8_t;
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "jio";
-const char WIFI_PASSWORD[] = "jio#1234";
+const char WIFI_SSID[] = "AnkurHospital";
+const char WIFI_PASSWORD[] = "Ankur@5522";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -60,10 +149,39 @@ unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22 secon
 unsigned long M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;   // Motor 2 runs 10 seconds after Motor 1 stops
 
 // ========================= WATCHDOG CONFIGURATION =========================
-// STABILITY: Increased timeout to 30s for hospital-grade reliability
-const unsigned long WDT_TIMEOUT = 30;  // 30 seconds
+// Task WDT must exceed worst-case WiFi DNS + AWS TLS on slow links. Arduino pre-inits TWDT with a
+// short default; we reconfigure after subscribe (IDF 5+). 60s reduces spurious TASK_WDT on WiFi.
+const unsigned long WDT_TIMEOUT = 60;  // seconds (loop task TWDT target after reconfigure)
 const unsigned long LOOP_TIMEOUT_MS = 10000;  // 10s warning threshold
 const unsigned long WIFI_FAIL_RESET_MS = 60000;  // Not used for reset, just logging
+
+// Updated every loop() iteration after task WDT feed — independent monitor can detect
+// "spin loops" that reset the task WDT but never return to loop().
+static volatile uint32_t g_loopLastProgressMs = 0;
+
+// START/STOP/TOGGLE must not run inside the MQTT message callback: stopSystem() publishes
+// state/logs on the same PubSubClient and can deadlock or hang the stack (field: STOP from
+// Pi → ESP "offline" until reset). Process these at the top of loop() instead.
+static constexpr uint8_t kDeferAhuNone = 0;
+static constexpr uint8_t kDeferAhuStart = 1;
+static constexpr uint8_t kDeferAhuStop = 2;
+static constexpr uint8_t kDeferAhuToggle = 3;
+static volatile uint8_t g_deferredAhuCmd = kDeferAhuNone;
+
+// Re-entrancy: never call mqttLocal.publish / client.publish from inside the same client's callback.
+static volatile bool g_inLocalMqttCallback = false;
+static volatile bool g_inAwsMqttCallback = false;
+static volatile bool g_deferredPublishStateLocal = false;
+static volatile bool g_deferredPublishStateAws = false;
+
+struct LocalMqttCallbackGuard {
+  LocalMqttCallbackGuard() { g_inLocalMqttCallback = true; }
+  ~LocalMqttCallbackGuard() { g_inLocalMqttCallback = false; }
+};
+struct AwsMqttCallbackGuard {
+  AwsMqttCallbackGuard() { g_inAwsMqttCallback = true; }
+  ~AwsMqttCallbackGuard() { g_inAwsMqttCallback = false; }
+};
 
 // STABILITY: Disable auto-reset on sensor change
 const bool AUTO_RESET_ON_SENSOR_CHANGE = false;
@@ -103,6 +221,7 @@ struct SelfHealingState {
   // Internet connectivity (for AWS)
   bool internetAvailable = false;
   unsigned long lastInternetCheck = 0;
+  unsigned long lastInternetDnsMs = 0;  // Last blocking DNS probe (for 60s backoff when failing)
   int internetFailCount = 0;
  
   // Sensor health
@@ -146,60 +265,76 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-MIIDWTCCAkGgAwIBAgIUeytvn9cWFrHIoRJS4AztRzE2WN4wDQYJKoZIhvcNAQEL
+MIIDWTCCAkGgAwIBAgIUfMA4QI+RHy7VtppffEWd86hd1HkwDQYJKoZIhvcNAQEL
 BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
-SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI2MDQwMjA2MDIy
-MloXDTQ5MTIzMTIzNTk1OVowHjEcMBoGA1UEAwwTQVdTIElvVCBDZXJ0aWZpY2F0
-ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMQ6w3FaHU8RoDxzZHG7
-YKEp8tbsMBG5HvCMVoFIkizPoy0uqhehjeSCAZQfaHXlorRQFUiVPJx+BGrGcKb+
-cubZOOMvl+c3b47peDXBTcfbX0QWoMwCURAAF+QEClA5yv60wS5hWD+MUUBk4c27
-HevxEPO9j43p0jSeZAGKJgWNbUv3L64X4AD+8BvCUKYyw8EV8Aaed9XYfgLkKOoh
-DxeCNi53O5Mz9v5C9HCWgJT8sxbNJDCovcvjfySAq4D0CS6+Qy60WjuSrz1QSSWd
-mm/H3ZJmAOFqQKKS0zrp1evRJRx+bFd0nlNpK6SHBvooGfWTk3ZXWsrLBzmm4TCl
-t/ECAwEAAaNgMF4wHwYDVR0jBBgwFoAUcBsRYUxyIir3DKdjqkuLo/+c/XMwHQYD
-VR0OBBYEFLigGLfl5FtT3RZ2kqD9EtX1gVFfMAwGA1UdEwEB/wQCMAAwDgYDVR0P
-AQH/BAQDAgeAMA0GCSqGSIb3DQEBCwUAA4IBAQCDF7OSUItYjXlu/HYPkv/xwr1A
-tBZmRV30r8cLM1IDj45kN2GNST1Mwq613GAsiytWyvuBAyywyDZHzagSDOZzd57C
-Zo1Dc7EALbsqEEOzdjOEO8X1tNc/GCR8ls506AFE69Ly8Thgzao6hS1Zy4/MFWi2
-MEGGm/Tin90+fnnNjdS5NY/uHjHa9J3f4RsoKh4nvShMsD8sRVTJ5/l5xLv0vVJQ
-x3LxfpWDrOwGscCOYqgopyjWZvT4Znac22pccNFhVeMndJqe55ZZwggHVNEu6b3i
-cuLk95vunVM9EFwpWGAxZmUiwzrCth9Dfm89o5mYQ2Cr5wD8zjPDX60xy45V
+SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI2MDQwMTEyMDQx
+M1oXDTQ5MTIzMTIzNTk1OVowHjEcMBoGA1UEAwwTQVdTIElvVCBDZXJ0aWZpY2F0
+ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAM5/g9JN3Wv+7c898SZY
+6ct4gzl72CwdQeMzNiAIT3JBr2tlRLMrTAqirzs1IBcCHbTvUKTwBlIg3J50IiT0
+Avoi+c00QmtVVDH9LQSxp260S0he2rwVERu0rukCopUgsTHoFwORs15CM7jHDXGc
+iZgGIzvx17qg4oIm4tAIGYGLGNCRL9MQjRW4B8ddbTlHeWDK4F3UAHekFoW/3sLk
+JT6gO/p39aNQvhiRIK7oQt7m+Z9qB2RepmJPtur3OimC4cRT7Ah4syWxX1x/OqKO
+QDU58vLxyOuYvXNlZDmcGsuKT2UC0NXlpV+IjvypWzu5aEryyOUqC2i6uTjdLD4X
+t1kCAwEAAaNgMF4wHwYDVR0jBBgwFoAUzYHSrzF8AiVoPe1IZanomdX3mqEwHQYD
+VR0OBBYEFKj+rxvOz67xAXUuQ/WknMKUcZTuMAwGA1UdEwEB/wQCMAAwDgYDVR0P
+AQH/BAQDAgeAMA0GCSqGSIb3DQEBCwUAA4IBAQBMsB2C/QcY0fpZkIn3XTJ2/cy6
+eUok2Zbv9MxxPqdR/hJN7r+T4QLfMr6q4I9j0toXSen0D71xgzrQQg54HGn8juSl
+/H/AmuaQS6pqYUBkSVGaPzpXRAre8yo3LLPadFV3exFCbD5LAAZXoh7LPSXLd2S7
+aydg3qkuWYwbidkYh7BjIZgAfNmcZDN6HTvgb/W3s/kMxC7Mx2deZVTruqPu1xti
+QyvNb0bQl2qWsh87Ceg3qzv2HvjnNGx+WoQPCWpt0Zke/4gsH2ADkKyGwYgmtCjb
+ElwEIqhG+2JGvfFcdMiFFkUsrnQA1H/cain/icM7NThh5cniET4JSdrsSypB
 -----END CERTIFICATE-----
+
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
+
 )KEY";
 
 // ========== AWS IoT MQTT (Cloud) ==========
 WiFiClientSecure net = WiFiClientSecure();
 PubSubClient client(net);
+
+static void subscribeAwsIotCommandTopics() {
+  esp_task_wdt_reset();
+  bool s0 = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+  esp_task_wdt_reset();
+  bool s1 = client.subscribe(awsIotCmdTopicForThisThing().c_str());
+  esp_task_wdt_reset();
+  Serial.print("📥 AWS cmd topics: ");
+  Serial.print(AWS_IOT_SUBSCRIBE_TOPIC);
+  Serial.print(s0 ? " ✓" : " ✗");
+  Serial.print(" | ");
+  Serial.print(awsIotCmdTopicForThisThing());
+  Serial.println(s1 ? " ✓" : " ✗");
+}
 
 // ========== Local MQTT Broker (Raspberry Pi) ==========
 // RPi connects to same WiFi and runs MQTT broker; ESP uses mqttHost (default almed-ahu.local).
@@ -256,19 +391,9 @@ float dhtTempRaw = NAN;
 float dhtHumRaw = NAN;
 
 // Track original sensor type for hot-swap detection
-enum SensorMode { SENSOR_NONE, SENSOR_SHT45, SENSOR_DHT22, SENSOR_COMBO };
 SensorMode originalSensorMode = SENSOR_NONE;  // Set during setup()
 unsigned long lastSensorCheck = 0;
 const unsigned long SENSOR_CHECK_INTERVAL = 5000;  // Check every 5 seconds
-
-const char* sensorModeName(SensorMode mode) {
-  switch (mode) {
-    case SENSOR_COMBO: return "COMBO";
-    case SENSOR_SHT45: return "SHT45";
-    case SENSOR_DHT22: return "DHT22";
-    default: return "NONE";
-  }
-}
 
 // DHT22 troubleshooting logger: prints raw read status continuously in Serial Monitor.
 const bool DEBUG_DHT22_CONTINUOUS = false;
@@ -362,7 +487,6 @@ bool onlineMode = true;  // true = online/cloud (AWS IoT + Local MQTT), false = 
 
 // ---------- PWM Fan Control (D2 -> 0-10V Converter) ----------
 #define PIN_FAN_PWM 2
-enum FanSpeed : uint8_t { FAN_OFF = 0, FAN_LOW = 1, FAN_MED = 2, FAN_HIGH = 3 };
 FanSpeed fanSpeed = FAN_OFF;
 
 const int FAN_PWM_OFF  = 0;    // 0% = 0V
@@ -383,9 +507,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "jio";    // Kaveri Hospital
-const char* ROOM = "OT";         // Burns Ward
-const char* AHU  = "AHU-25";            // AHU 1
+const char* SITE = "ANKUR HOSPITAL";    // Kaveri Hospital
+const char* ROOM = "OT3";         // Burns Ward
+const char* AHU  = "AHU-27";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -401,6 +525,17 @@ String tProvBroker()      { return baseTopic()+"/provision/broker"; }
 // ---------- Preferences ----------
 Preferences prefs;
 String w1_ssid, w1_pass, w2_ssid, w2_pass;
+
+// After prefs.begin("ahu"): increments bootCount, mirrors reset reason to NVS.
+void persistBootDiagnostics() {
+  uint32_t bc = prefs.getUInt("bootCount", 0) + 1;
+  prefs.putUInt("bootCount", bc);
+  prefs.putUInt("lastResetCode", (uint32_t)(unsigned)g_resetReasonCode);
+  prefs.putString("lastResetTag", g_resetReasonTag);
+  g_bootCount = bc;
+  Serial.printf("📇 Boot #%lu | this boot reset: %s (%d)\n",
+                (unsigned long)g_bootCount, g_resetReasonTag, g_resetReasonCode);
+}
 
 // ---------- Watchdog & State Recovery ----------
 unsigned long lastLoopTime = 0;
@@ -480,7 +615,8 @@ void recoverWiFi() {
 }
 
 // MQTT Recovery - fast reconnection without reset
-// Quick internet check using DNS - non-blocking with short timeout
+// Internet check uses WiFi.hostByName (blocking in lwIP; can take many seconds on bad WiFi).
+// Rate-limited + WDT-fed; after many failures DNS runs at most once per 60s to reduce TWDT risk.
 // Returns true if internet is available, false otherwise
 bool checkInternetAvailable() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -497,30 +633,23 @@ bool checkInternetAvailable() {
  
   esp_task_wdt_reset();
  
-  // Quick DNS lookup to check internet - use Google's DNS or AWS endpoint
-  IPAddress resolvedIP;
- 
-  // Try to resolve a known host (fast DNS lookup)
-  // WiFi.hostByName has a timeout, usually around 4 seconds
-  // We'll use a simple approach: if last AWS attempt failed many times, assume no internet
-  if (selfHealing.internetFailCount >= 3) {
-    // Too many failures - back off checking
-    if (selfHealing.internetFailCount >= 10) {
-      // Only check every 60 seconds after 10 failures
-      if (now - selfHealing.lastInternetCheck < 60000) {
-        return selfHealing.internetAvailable;
-      }
+  // After many failures, slow down *blocking* DNS (hostByName can stall >10s; TWDT needs headroom).
+  if (selfHealing.internetFailCount >= 10) {
+    if (selfHealing.lastInternetDnsMs != 0 &&
+        (now - selfHealing.lastInternetDnsMs) < 60000UL) {
+      return selfHealing.internetAvailable;
     }
   }
  
-  // Use WiFi.hostByName with short timeout
-  // This is a quick check - if it fails, we know internet is not available
+  IPAddress resolvedIP;
+  selfHealing.lastInternetDnsMs = now;
   int result = WiFi.hostByName("iot.ap-south-1.amazonaws.com", resolvedIP);
   esp_task_wdt_reset();
  
   if (result == 1 && resolvedIP != IPAddress(0,0,0,0)) {
     selfHealing.internetAvailable = true;
     selfHealing.internetFailCount = 0;
+    selfHealing.lastInternetDnsMs = 0;
     return true;
   } else {
     selfHealing.internetAvailable = false;
@@ -546,6 +675,7 @@ void recoverMqttLocal() {
   mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);
   mqttLocal.setCallback(onMqttMessageLocal);
   mqttLocal.setSocketTimeout(1);  // Fast timeout
+  espNet.setTimeout(15);
  
   // Immediate reconnection attempt
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
@@ -966,7 +1096,17 @@ void clearSystemState(){
 void motorLogMsg(const String& s){
   Serial.println(s);
   pushMotorHTML(s);
- 
+
+  // Avoid mqttLocal.publish while handling incoming local MQTT or AWS MQTT (nested client use).
+  if (g_inLocalMqttCallback || g_inAwsMqttCallback) {
+    return;
+  }
+  // STOP/shutdown fires many motorLogMsg + flash + PWM; MQTT log spam here correlates with field
+  // "gibberish serial + hang" on weak supplies — keep Serial/HTML, skip log publishes until stable.
+  if (shuttingDown) {
+    return;
+  }
+
   // Also publish to dashboard via Local MQTT (non-blocking, watchdog protected)
   // SAFETY: Only publish if MQTT is healthy and not during critical operations
   static unsigned long lastMqttLogAttempt = 0;
@@ -1691,30 +1831,48 @@ void startSystem(){
 }
 
 void stopSystem(){
-  motorLogMsg("[stopSystem] Called - runState:" + String(runState));
- 
   if (!runState) {
     motorLogMsg("[RUN] Already stopped");
     return;
   }
-  motorLogMsg("[stopSystem] Initiating shutdown sequence");
-  runState = false;
+  // Order matters: RAM shuttingDown before any motorLogMsg so log MQTT is silenced (see motorLogMsg).
   shuttingDown = true;
+  runState = false;
   shutdownStarted = false;
   shutdownM2Pending = false;
+
+  Serial.println("[stopSystem] Initiating shutdown (MQTT log publish paused during shutdown)");
+  esp_task_wdt_reset();
   setFanSpeed(FAN_OFF);
+  esp_task_wdt_reset();
   clearSystemState();
-  motorLogMsg("[RUN] STOP requested → Entering shutdown mode");
-  publishStateLocal();  // Dashboard-compatible: publish state on stop
+  esp_task_wdt_reset();
+  Serial.println("[RUN] STOP → shutdown mode; state publish deferred to next loop slice");
+  g_deferredPublishStateLocal = true;
 }
 
 void toggleSystem(){ if (runState) stopSystem(); else startSystem(); }
+
+static void processDeferredAhuCmdFromMainLoop() {
+  uint8_t c = g_deferredAhuCmd;
+  if (c == kDeferAhuNone) return;
+  g_deferredAhuCmd = kDeferAhuNone;
+  esp_task_wdt_reset();
+  if (c == kDeferAhuStart) {
+    startSystem();
+  } else if (c == kDeferAhuStop) {
+    stopSystem();
+  } else if (c == kDeferAhuToggle) {
+    toggleSystem();
+  }
+  esp_task_wdt_reset();
+}
 
 // ---------- Telemetry / State (Published separately to AWS and Local) ----------
 void publishTelemetryAWS(){
   if(!client.connected()) return;
  
-  StaticJsonDocument<768> doc;  // Increased for combo sensor data
+  StaticJsonDocument<896> doc;  // Combo sensors + boot diagnostics
   doc["type"] = "telemetry";
   doc["site"] = SITE;  // Hospital name (e.g., "hospitalA")
   doc["room"] = ROOM;  // Room name (e.g., "icu2")
@@ -1737,6 +1895,10 @@ void publishTelemetryAWS(){
   doc["ip"]=WiFi.localIP().toString();
   doc["thing"]=THINGNAME;
   doc["ts"]  = millis();
+  doc["fw"] = BUILD_VERSION;
+  doc["resetReason"] = g_resetReasonCode;
+  doc["resetTag"] = g_resetReasonTag;
+  doc["bootCount"] = g_bootCount;
  
   // Indicate which sensor type is active
   doc["sensorType"] = useSEN66 ? "combo" : (useSEN55 ? "sen55" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none")));
@@ -1797,7 +1959,7 @@ void publishTelemetryAWS(){
     doc["hepaHealth"] = 100;  // Always show 100% health
   }
  
-  char buf[768];
+  char buf[1024];
   size_t n = serializeJson(doc, buf, sizeof(buf));
  
   bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
@@ -1816,7 +1978,7 @@ void publishTelemetryLocal(){
   esp_task_wdt_reset();
  
   // Dashboard-compatible format (extended for combo sensors)
-  StaticJsonDocument<768> doc;  // Increased for combo sensor data
+  StaticJsonDocument<896> doc;  // Combo sensors + boot diagnostics
   if(isnan(filtTempC)) doc["temp"] = nullptr; else doc["temp"] = filtTempC;
   if(isnan(filtHum))   doc["hum"]  = nullptr; else doc["hum"]  = filtHum;
   doc["m1"]  = m1Active;
@@ -1833,6 +1995,10 @@ void publishTelemetryLocal(){
   doc["tempSet"] = tempSet;
   doc["humSet"]  = humSet;
   doc["ts"]  = millis();
+  doc["fw"] = BUILD_VERSION;
+  doc["resetReason"] = g_resetReasonCode;
+  doc["resetTag"] = g_resetReasonTag;
+  doc["bootCount"] = g_bootCount;
   if (isnan(dhtTempRaw)) doc["dhtTemp"] = nullptr; else doc["dhtTemp"] = dhtTempRaw;
   if (isnan(dhtHumRaw))  doc["dhtHum"]  = nullptr; else doc["dhtHum"]  = dhtHumRaw;
   doc["dhtActive"] = useDHT22;
@@ -1915,8 +2081,12 @@ void publishTelemetryLocal(){
 
 void publishStateAWS(){
   if(!client.connected()) return;
- 
-  StaticJsonDocument<512> doc;
+  if (g_inAwsMqttCallback) {
+    g_deferredPublishStateAws = true;
+    return;
+  }
+
+  StaticJsonDocument<576> doc;
   doc["type"] = "state";
   doc["site"] = SITE;  // Hospital name (e.g., "hospitalA")
   doc["room"] = ROOM;  // Room name (e.g., "icu2")
@@ -1935,8 +2105,12 @@ void publishStateAWS(){
   doc["ip"]=WiFi.localIP().toString();
   doc["thing"]=THINGNAME;
   doc["ts"]  = millis();
+  doc["version"] = BUILD_VERSION;
+  doc["resetReason"] = g_resetReasonCode;
+  doc["resetTag"] = g_resetReasonTag;
+  doc["bootCount"] = g_bootCount;
  
-  char buf[512];
+  char buf[640];
   size_t n = serializeJson(doc, buf, sizeof(buf));
  
   bool success = client.publish(AWS_IOT_PUBLISH_TOPIC, reinterpret_cast<const uint8_t*>(buf), n, false);
@@ -1947,11 +2121,15 @@ void publishStateAWS(){
 
 void publishStateLocal(){
   if(!mqttLocal.connected()) return;
- 
+  if (g_inLocalMqttCallback) {
+    g_deferredPublishStateLocal = true;
+    return;
+  }
+
   esp_task_wdt_reset();  // Feed watchdog before MQTT
  
   // Dashboard-compatible format (exact match to original backup)
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<576> doc;
   doc["run"]=runState; doc["m1"]=m1Active; doc["m2"]=m2Active;
   doc["cp"]=cpOn; doc["cp2"]=cp2On; doc["cpMode"]=(cpMode == CP_DUAL_AUTO ? "dual" : "single");
   doc["cpActive"]=cpActive; doc["dualCpBothOn"]=dualCpBothOn; doc["heater"]=heatOn;
@@ -1967,7 +2145,10 @@ void publishStateLocal(){
   doc["ip"]=WiFi.localIP().toString();
   doc["onlineMode"] = onlineMode;
   doc["version"] = BUILD_VERSION;  // Firmware version for dashboard display
-  char buf[384];
+  doc["resetReason"] = g_resetReasonCode;
+  doc["resetTag"] = g_resetReasonTag;
+  doc["bootCount"] = g_bootCount;
+  char buf[512];
   size_t n = serializeJson(doc, buf, sizeof(buf));
  
   esp_task_wdt_reset();
@@ -2495,6 +2676,8 @@ void handleSerial(){
 // Function to handle incoming MQTT messages
 void messageHandler(char* topic, byte* payload, unsigned int length)
 {
+  AwsMqttCallbackGuard aws_cb_guard;
+
   // Print raw message to Serial
   Serial.println("\n========================================");
   Serial.print("📩 AWS Message Received from: ");
@@ -2534,7 +2717,10 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
  
   // Handle OTA Update command FIRST (before other commands)
   if (doc.containsKey("type") && doc["type"] == "ota_update") {
-    Serial.println("🔄 OTA Update command detected!");
+    if (!otaAwsPayloadTargetsThisDevice(topic, doc)) {
+      return;
+    }
+    Serial.println("🔄 OTA Update command detected (target OK for this device)");
     handleOTAUpdate(doc);
     return; // Don't process other commands during OTA
   }
@@ -2611,19 +2797,16 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
   bool stateChanged = false;
  
   if (doc.containsKey("start") && doc["start"] == true)  {
-    Serial.println("→ START");
-    startSystem();
-    stateChanged = true;
+    Serial.println("→ START (deferred to main loop — safe for MQTT)");
+    g_deferredAhuCmd = kDeferAhuStart;
   }
   else if (doc.containsKey("stop") && doc["stop"] == true)   {
-    Serial.println("→ STOP");
-    stopSystem();
-    stateChanged = true;
+    Serial.println("→ STOP (deferred to main loop — safe for MQTT)");
+    g_deferredAhuCmd = kDeferAhuStop;
   }
   else if (doc.containsKey("toggle") && doc["toggle"] == true) {
-    Serial.println("→ TOGGLE");
-    toggleSystem();
-    stateChanged = true;
+    Serial.println("→ TOGGLE (deferred to main loop — safe for MQTT)");
+    g_deferredAhuCmd = kDeferAhuToggle;
   }
 
   // SAFE setpoint handling - NO immediate flash write
@@ -2849,18 +3032,21 @@ void handleOTAUpdate(JsonDocument& doc) {
  
   WiFiClientSecure client_ota;
   client_ota.setInsecure(); // Skip certificate validation for GitHub
+  client_ota.setTimeout(15);  // Keep blocking TLS below task WDT margin (messageHandler runs inside client.loop)
  
   HTTPClient http;
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.setUserAgent("ESP32-OTA-Client");
-  http.setTimeout(30000); // 30 second timeout
+  http.setTimeout(20000); // Must stay < task WDT; GET runs without loop() feeding WDT
  
   Serial.println("  Releases API: " + releasesUrl);
   http.begin(client_ota, releasesUrl);
   http.addHeader("Authorization", "token " + githubToken);
   http.addHeader("Accept", "application/vnd.github.v3+json");
  
+  esp_task_wdt_reset();
   int httpCode = http.GET();
+  esp_task_wdt_reset();
   Serial.println("  HTTP Response Code: " + String(httpCode));
  
   if (httpCode != HTTP_CODE_OK) {
@@ -2947,8 +3133,11 @@ void handleOTAUpdate(JsonDocument& doc) {
   http.addHeader("Accept", "application/octet-stream");  // CRITICAL: Get binary, not JSON
   http.addHeader("Authorization", "token " + githubToken);
   http.setUserAgent("ESP32-OTA-Client");
+  http.setTimeout(20000);
  
+  esp_task_wdt_reset();
   httpCode = http.GET();
+  esp_task_wdt_reset();
   Serial.println("  HTTP Response Code: " + String(httpCode));
  
   if (httpCode != HTTP_CODE_OK) {
@@ -3161,6 +3350,8 @@ void publishAwsConnectionStatus(bool connected){
 }
 
 void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
+  LocalMqttCallbackGuard local_cb_guard;
+
   Serial.println("\n========================================");
   Serial.print("📩 Local MQTT Message from: ");
   Serial.println(topic);
@@ -3279,9 +3470,18 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
  
   esp_task_wdt_reset();  // Feed watchdog at start of message handling
  
-  if (doc.containsKey("start") && doc["start"] == true)  { Serial.println("→ START"); startSystem(); stateChanged = true; }
-  else if (doc.containsKey("stop") && doc["stop"] == true)   { Serial.println("→ STOP"); stopSystem(); stateChanged = true; }
-  else if (doc.containsKey("toggle") && doc["toggle"] == true) { Serial.println("→ TOGGLE"); toggleSystem(); stateChanged = true; }
+  if (doc.containsKey("start") && doc["start"] == true)  {
+    Serial.println("→ START (deferred to main loop — safe for MQTT)");
+    g_deferredAhuCmd = kDeferAhuStart;
+  }
+  else if (doc.containsKey("stop") && doc["stop"] == true)   {
+    Serial.println("→ STOP (deferred to main loop — safe for MQTT)");
+    g_deferredAhuCmd = kDeferAhuStop;
+  }
+  else if (doc.containsKey("toggle") && doc["toggle"] == true) {
+    Serial.println("→ TOGGLE (deferred to main loop — safe for MQTT)");
+    g_deferredAhuCmd = kDeferAhuToggle;
+  }
 
   // SAFE setpoint handling - NO immediate flash write (prevents crash on rapid changes)
   if (doc.containsKey("setpoint")){
@@ -3537,6 +3737,7 @@ void ensureMqtt(){
   mqttLocal.setBufferSize(MQTT_BUFFER_SIZE);
   mqttLocal.setCallback(onMqttMessageLocal);
   mqttLocal.setSocketTimeout(1);  // 1 second timeout - faster failure
+  espNet.setTimeout(15);  // Cap blocking TCP reads on underlying client
 
   String clientId = String(AHU)+"-"+String((uint32_t)ESP.getEfuseMac(), HEX);
   esp_task_wdt_reset();
@@ -3558,41 +3759,116 @@ void ensureMqtt(){
   // Silent failure - will retry in 3s
 }
 
+// Runs on the other CPU core (when available). Uses g_loopLastProgressMs updated only when loop()
+// *finishes* an iteration — otherwise code that spins and only calls esp_task_wdt_reset() could
+// still pass the task WDT while never doing real work.
+static void loopProgressWatchdogTask(void* /*param*/) {
+  // Slightly longer than TWDT: TWDT catches blocked tasks; this catches "fed but never returns to loop".
+  const uint32_t stallMs = (uint32_t)WDT_TIMEOUT * 1000U + 45000U;
+  const TickType_t period = pdMS_TO_TICKS(3000);
+  for (;;) {
+    vTaskDelay(period);
+    uint32_t last = g_loopLastProgressMs;
+    if (last == 0U) continue;  // setup: wait until first full loop() completion
+    uint32_t now = millis();
+    if ((now - last) > stallMs) {
+      Serial.printf("\n❌ [LOOP_STALL] no full loop() completion for %lu ms (limit %lu) — esp_restart()\n",
+                    (unsigned long)(now - last), (unsigned long)stallMs);
+      Serial.flush();
+      delay(50);
+      esp_restart();
+    }
+  }
+}
+
+static void startLoopStallMonitor() {
+  const uint32_t stack = 3072;
+  BaseType_t ok;
+  if (ESP.getChipCores() > 1) {
+    ok = xTaskCreatePinnedToCore(loopProgressWatchdogTask, "loopmon", stack, nullptr, 2, nullptr, 0);
+    Serial.println(ok == pdPASS
+                   ? "✓ Loop stall monitor (core 0, >task-WDT catch)"
+                   : "⚠️ Loop stall monitor create failed");
+  } else {
+    ok = xTaskCreate(loopProgressWatchdogTask, "loopmon", stack, nullptr, 2, nullptr);
+    Serial.println(ok == pdPASS
+                   ? "✓ Loop stall monitor (unicore, prio 2)"
+                   : "⚠️ Loop stall monitor create failed");
+  }
+}
 
 void setup()
 {
+  // Belt-and-suspenders after early constructor (see disableBrownoutDetectorEarly).
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
- 
+
   Serial.begin(115200);
   delay(500);
- 
+
   Serial.println("\n========================================");
   Serial.println("   ALMED AHU Controller v2.0");
   Serial.println("   AWS IoT Cloud Edition");
   Serial.println("========================================");
   Serial.println("HELLO");
   Serial.println("========================================");
- 
-  // Deinitialize watchdog first to prevent "already initialized" error
-  esp_task_wdt_deinit();
-  delay(10);
- 
+  logResetReason();
+  Serial.println("⚠️ RTC brownout detector OFF (field trial — check last reset reason above)");
+
+  // Watch idle tasks on both CPUs (when dual-core): detects CPU starvation, not only loop() TWDT.
+  uint32_t twdt_idle_mask = 0;
+  if (ESP.getChipCores() > 1) {
+    twdt_idle_mask = (1u << 0) | (1u << 1);
+  }
   esp_task_wdt_config_t wdt_config = {
     .timeout_ms = WDT_TIMEOUT * 1000,
-    .idle_core_mask = 0,
+    .idle_core_mask = twdt_idle_mask,
     .trigger_panic = true
   };
+  // Prefer subscribing without tearing down the framework watchdog (deinit was fragile on some cores).
   esp_err_t wdt_err = esp_task_wdt_init(&wdt_config);
-  if (wdt_err == ESP_OK) {
-    esp_task_wdt_add(NULL);
-    Serial.print("✓ Watchdog enabled (");
-    Serial.print(WDT_TIMEOUT);
-    Serial.println("s timeout)");
+  if (wdt_err == ESP_ERR_INVALID_STATE) {
+    Serial.println("✓ Task WDT already active (Arduino/core) — subscribing loop task only");
+  } else if (wdt_err != ESP_OK) {
+    Serial.printf("⚠️ Task WDT init: %s — deinit + retry once\n", esp_err_to_name(wdt_err));
+    esp_task_wdt_deinit();
+    delay(10);
+    wdt_err = esp_task_wdt_init(&wdt_config);
+    if (wdt_err != ESP_OK && wdt_err != ESP_ERR_INVALID_STATE) {
+      Serial.printf("❌ Task WDT init failed: %s\n", esp_err_to_name(wdt_err));
+    }
   } else {
-    Serial.println("⚠️ Watchdog init skipped (already active)");
+    Serial.print("✓ Task WDT initialized (");
+    Serial.print(WDT_TIMEOUT);
+    Serial.println("s)");
+  }
+ 
+  if (wdt_err == ESP_OK || wdt_err == ESP_ERR_INVALID_STATE) {
+    esp_err_t add_err = esp_task_wdt_add(NULL);
+    if (add_err == ESP_OK) {
+      Serial.println("✓ Loop task subscribed to task WDT");
+    } else if (add_err == ESP_ERR_INVALID_STATE) {
+      Serial.println("✓ Loop task already on task WDT (Arduino/core)");
+    } else {
+      Serial.printf("❌ esp_task_wdt_add failed: %s — enable loop stall monitor + check power\n",
+                    esp_err_to_name(add_err));
+    }
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    // Extend TWDT period for the already-running watchdog (Arduino init). Not gated on add_err:
+    // loop may already be subscribed by the core; reconfigure still applies the new timeout.
+    esp_err_t rw = esp_task_wdt_reconfigure(&wdt_config);
+    if (rw == ESP_OK) {
+      Serial.printf("✓ TWDT reconfigured to %lu ms (WiFi/TLS safe)\n", (unsigned long)wdt_config.timeout_ms);
+    } else {
+      Serial.printf("⚠️ esp_task_wdt_reconfigure: %s — may still see TASK_WDT on slow networks\n",
+                    esp_err_to_name(rw));
+    }
+#endif
   }
  
   esp_task_wdt_reset();
+  startLoopStallMonitor();
+  // Stall monitor ignores 0 until first full loop() completion (end-of-loop heartbeat).
+  g_loopLastProgressMs = 0;
 
   // 5-Channel Relay Init
   pinMode(PIN_MOTOR1, OUTPUT);
@@ -3749,6 +4025,7 @@ void setup()
   esp_task_wdt_reset();
 
   prefs.begin("ahu", false);
+  persistBootDiagnostics();
 
   // Display OTA version info if available (from previous OTA update)
   String otaVersion = prefs.getString("ota_version", "");
@@ -3901,6 +4178,7 @@ void setup()
   net.setCACert(AWS_CERT_CA);
   net.setCertificate(AWS_CERT_CRT);
   net.setPrivateKey(AWS_CERT_PRIVATE);
+  net.setTimeout(15);  // Limit TLS read/write stall (seconds) — helps avoid task WDT during long ops
 
   // Connect to the MQTT broker on the AWS endpoint
   client.setServer(AWS_IOT_ENDPOINT, 8883);
@@ -3922,7 +4200,7 @@ void setup()
 
   Serial.println("\n📡 MQTT Configuration (Optional):");
   Serial.println("  ☁️  AWS IoT (Cloud):");
-  Serial.println("      📥 Subscribe: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+  Serial.println("      📥 Subscribe: " + String(AWS_IOT_SUBSCRIBE_TOPIC) + " + " + awsIotCmdTopicForThisThing());
   Serial.println("      📤 Publish:   " + String(AWS_IOT_PUBLISH_TOPIC));
   Serial.println("  🏠 Local MQTT (Pi): " + mqttHost);
   Serial.println("  🧭 Local topic root: " + baseTopic());
@@ -3948,11 +4226,8 @@ void setup()
       if (client.connect(THINGNAME)) {
         esp_task_wdt_reset(); // Feed watchdog after connection
         Serial.println("✓ AWS IoT connected on startup (cloud service active)");
-        esp_task_wdt_reset(); // Feed watchdog before subscribe
-        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-        esp_task_wdt_reset(); // Feed watchdog after subscribe
-        Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-        Serial.println(subResult ? " ✓" : " ✗ FAILED");
+        esp_task_wdt_reset();
+        subscribeAwsIotCommandTopics();
         publishStatusOnline();
       } else {
         esp_task_wdt_reset(); // Feed watchdog after failed connection
@@ -4071,10 +4346,23 @@ void setup()
 void loop()
 {
   unsigned long now = millis();
- 
-  // Feed watchdog at start of every loop
+
+  // Feed task WDT at iteration start (long sections below also reset explicitly).
   esp_task_wdt_reset();
- 
+  processDeferredAhuCmdFromMainLoop();
+  if (g_deferredPublishStateLocal) {
+    g_deferredPublishStateLocal = false;
+    if (mqttLocal.connected()) {
+      publishStateLocal();
+    }
+  }
+  if (g_deferredPublishStateAws) {
+    g_deferredPublishStateAws = false;
+    if (client.connected()) {
+      publishStateAWS();
+    }
+  }
+
   // SELF-HEALING: Perform periodic health check and auto-recovery
   performHealthCheck();
 
@@ -4209,7 +4497,7 @@ void loop()
             selfHealing.mqttAwsHealthy = true;
             selfHealing.totalRecoveries++;
            
-            client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+            subscribeAwsIotCommandTopics();
             publishStatusOnline();
            
             // Notify dashboard of AWS connection status
@@ -4373,6 +4661,7 @@ void loop()
       motorLogMsg("[SHUTDOWN] Complete - System OFF");
     }
     delay(5);
+    g_loopLastProgressMs = millis();
     return;
   }
 
@@ -4417,4 +4706,7 @@ void loop()
   }
 
   delay(5);
+  // End-of-loop heartbeat: stall monitor + "did we complete a full pass?" detection.
+  g_loopLastProgressMs = millis();
+  esp_task_wdt_reset();
 }
