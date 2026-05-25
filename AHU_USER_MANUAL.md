@@ -49,7 +49,7 @@ The AHU system:
 You will see a login screen with **TWO large buttons**:
 
 **What you'll see:**
-- **ALMED logo** at the top
+- **ALMED  ** at the top
 - **"Hospital Air Handling System"** text below the logo
 - **Two role selection cards:**
 

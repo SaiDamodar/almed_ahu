@@ -14,6 +14,8 @@ AWS_SECRET_ACCESS_KEY = '3L6R2WDezRxDZfpPbNenkIS6Amb+lOwkMvHWNnAA'  # Set direct
 AWS_IOT_ENDPOINT = 'al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com'  # Your IoT endpoint
 AWS_IOT_TOPIC_PUBLISH = 'esp32/pub'
 AWS_IOT_TOPIC_SUBSCRIBE = 'esp32/sub'
+# OTA: set True only if you must also publish to esp32/sub (legacy). Prefer per-thing topics only.
+# OTA_ALSO_PUBLISH_SHARED_SUBSCRIBE = False
 
 # MongoDB Atlas (historical data storage)
 MONGO_URI = os.getenv(

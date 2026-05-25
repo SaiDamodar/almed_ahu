@@ -510,10 +510,17 @@ def on_aws_iot_message(client, userdata, msg):
         site = payload.get('site', 'unknown')
         room = payload.get('room', 'unknown')
         ahu = payload.get('ahu', 'unknown')
-        
-        # Create composite device_id from location (for backward compatibility with existing code)
-        # Format: site_room_ahu (e.g., "hospitalA_icu1_ahu-01")
-        device_id = f"{site}_{room}_{ahu}" if (site != 'unknown' and room != 'unknown' and ahu != 'unknown') else payload.get('thing', 'unknown')
+        thing_name = payload.get('thing')
+
+        # Primary key: AWS IoT Thing name (unique per certificate). Using only site_room_ahu
+        # merges distinct ESPs that share the same LOCATION strings in firmware (common mistake
+        # after copying one binary) — UI then flickers between two telemetries on one "device".
+        if thing_name:
+            device_id = str(thing_name)
+        elif site != 'unknown' and room != 'unknown' and ahu != 'unknown':
+            device_id = f"{site}_{room}_{ahu}"
+        else:
+            device_id = 'unknown'
         
         # Determine message type
         msg_type = payload.get('type', 'telemetry')
@@ -533,6 +540,8 @@ def on_aws_iot_message(client, userdata, msg):
                 device_cache[device_id]['room'] = room
             if 'ahu' not in device_cache[device_id]:
                 device_cache[device_id]['ahu'] = ahu
+        if thing_name:
+            device_cache[device_id]['thing'] = str(thing_name)
         
         if msg_type == 'telemetry':
             device_cache[device_id]['telemetry'] = payload
@@ -1190,29 +1199,39 @@ def send_command(device_id):
                 'details': 'Please check AWS credentials and IoT endpoint configuration in Railway environment variables'
             }), 500
         
-        # Determine the correct topic for this device
-        # Look up the device's thing name from cache to build device-specific topic
+        # Determine the strict per-device topic for this device.
+        # Never publish control commands to a generic topic unless explicitly requested.
         cache_data = device_cache.get(device_id, {})
         thing_name = None
+        allow_broadcast = bool(data.get('allow_broadcast', False))
         
-        # Try to get thing name from telemetry or state
+        # Try to get thing name from cached metadata/telemetry/state.
         if cache_data:
+            thing_name = cache_data.get('thing')
             telemetry = cache_data.get('telemetry', {})
             state = cache_data.get('state', {})
-            thing_name = telemetry.get('thing') or state.get('thing')
-        
-        # Build topic list - publish to all possible topics the device may subscribe to
+            thing_name = thing_name or telemetry.get('thing') or state.get('thing')
+
+        if not thing_name and not allow_broadcast:
+            return jsonify({
+                'success': False,
+                'error': 'Missing device thing name; refusing generic broadcast publish',
+                'details': 'Wait for fresh telemetry/state from this device or re-open the AHU page before retrying.'
+            }), 409
+
+        # Build topic list for publish.
         topics_to_publish = []
         
         if thing_name:
-            # Primary: device-specific topic (esp32/<thing_name>/sub)
             device_topic = f"esp32/{thing_name}/sub"
             topics_to_publish.append(device_topic)
-        
-        # Always include the generic topic as fallback (esp32/sub)
-        generic_topic = config.AWS_IOT_TOPIC_SUBSCRIBE
-        if generic_topic and generic_topic not in topics_to_publish:
-            topics_to_publish.append(generic_topic)
+
+        # Explicit opt-in only for broadcast commands.
+        if allow_broadcast:
+            generic_topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+            if generic_topic and generic_topic not in topics_to_publish:
+                topics_to_publish.append(generic_topic)
+            print(f"[COMMAND] WARNING: allow_broadcast=true for device {device_id}")
         
         if not topics_to_publish:
             return jsonify({
@@ -3017,7 +3036,7 @@ def trigger_ota_update():
         ota_command = {
             'type': 'ota_update',
             'version': version,
-            'commit_sha': commit_sha if commit_sha else 'latest'
+            'commit_sha': commit_sha if commit_sha else 'latest',
         }
         # Note: ESP32 will use hardcoded GITHUB_REPO_OWNER, GITHUB_REPO_NAME, etc.
         # Only send token if needed (ESP32 also has it hardcoded)
@@ -3038,16 +3057,27 @@ def trigger_ota_update():
                     telemetry = cache_data.get('telemetry', {})
                     state = cache_data.get('state', {})
                     thing_name = telemetry.get('thing') or state.get('thing')
-                
-                # Build topics list - device-specific first, then generic fallback
-                topics_to_publish = []
-                if thing_name:
-                    topics_to_publish.append(f"esp32/{thing_name}/sub")
-                generic_topic = config.AWS_IOT_TOPIC_SUBSCRIBE
-                if generic_topic and generic_topic not in topics_to_publish:
-                    topics_to_publish.append(generic_topic)
-                
-                topic = topics_to_publish[0] if topics_to_publish else config.AWS_IOT_TOPIC_SUBSCRIBE
+                    # device_cache may store thing at top level (see on_aws_iot_message)
+                    if not thing_name:
+                        thing_name = cache_data.get('thing')
+
+                if not thing_name:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Thing name not known for this device — wait for telemetry/state from the ESP, or check site/room/ahu mapping.',
+                        'device_id': device_id,
+                    }), 400
+
+                ota_command['target_thing'] = thing_name
+
+                # Prefer per-thing topic only (other devices do not subscribe here).
+                topics_to_publish = [f"esp32/{thing_name}/sub"]
+                if getattr(config, 'OTA_ALSO_PUBLISH_SHARED_SUBSCRIBE', False):
+                    generic_topic = config.AWS_IOT_TOPIC_SUBSCRIBE
+                    if generic_topic and generic_topic not in topics_to_publish:
+                        topics_to_publish.append(generic_topic)
+
+                topic = topics_to_publish[0]
                 payload = json.dumps(ota_command)
                 
                 print(f"\n{'='*60}")

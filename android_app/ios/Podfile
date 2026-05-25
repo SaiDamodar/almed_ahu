@@ -45,13 +45,8 @@ post_install do |installer|
       ]
       # Firebase 11.x requires Swift 5.7+ - use 5.9 for compatibility
       config.build_settings['SWIFT_VERSION'] = '5.9'
-      # Enable experimental features for Swift 5.9
-      other_swift_flags = config.build_settings['OTHER_SWIFT_FLAGS'] || ['$(inherited)']
-      unless other_swift_flags.any? { |flag| flag.include?('AccessLevelOnImport') }
-        other_swift_flags << '-Xfrontend'
-        other_swift_flags << '-enable-experimental-feature=AccessLevelOnImport'
-      end
-      config.build_settings['OTHER_SWIFT_FLAGS'] = other_swift_flags.uniq
+      # Keep toolchain-compatible Swift flags for broad Xcode support.
+      config.build_settings['OTHER_SWIFT_FLAGS'] = ['$(inherited)']
     end
   end
 end

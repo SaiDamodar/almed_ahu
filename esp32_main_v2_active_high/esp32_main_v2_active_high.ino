@@ -4,22 +4,15 @@
 #include "WiFi.h"
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
+#define ENABLE_DHT22_FALLBACK 0
+#if ENABLE_DHT22_FALLBACK
 #include <DHT.h>
+#endif
 #include <ArduinoJson.h>
 
-// ========== NEW SENSOR LIBRARIES (SEN55/SEN66 + SDP810 Combo) ==========
-// Set to 1 if the library is installed, 0 if not.
-// Arduino IDE's __has_include doesn't work with its library scanner.
-#define HAS_SEN66_LIB 0  // Set to 1 if you install 'Sensirion I2C SEN66'
-#define HAS_SEN5X_LIB 1  // Set to 1 if you install 'Sensirion I2C SEN5x'
-
-#if HAS_SEN66_LIB
+// ========== NEW SENSOR LIBRARIES (SEN66/SEN55 + SDP810 Combo) ==========
 #include <SensirionI2cSen66.h>
-#endif
-
-#if HAS_SEN5X_LIB
-#include <SensirionI2CSen5x.h>
-#endif
+#include <SensirionI2CSen5x.h>   // SEN55 – substitute for SEN66 (no CO2)
 #include <SensirionI2CSdp.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
@@ -28,15 +21,50 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ESPmDNS.h>  // For mDNS hostname resolution
-#include <time.h>
+
+// IRremoteESP8266 compile-time options (must be before include)
+// Keep decoder footprint small to fit ESP32 flash limits.
+#define _IR_ENABLE_DEFAULT_ false
+#define DECODE_HASH 1
+// Enable protocol-level AC decoding only when flash budget allows.
+// Keep OFF by default to preserve machine firmware features under tight flash.
+#define IR_PROTOCOL_LEVEL_DECODE 0
+// Daikin-first protocol decode (used only when IR_PROTOCOL_LEVEL_DECODE=1).
+#if IR_PROTOCOL_LEVEL_DECODE
+#define DECODE_DAIKIN 1
+#define DECODE_DAIKIN2 0
+#define DECODE_DAIKIN216 0
+#define DECODE_DAIKIN160 0
+#define DECODE_DAIKIN176 0
+#define DECODE_DAIKIN128 0
+#define DECODE_DAIKIN152 0
+#define DECODE_DAIKIN64 0
+#else
+#define DECODE_DAIKIN 0
+#define DECODE_DAIKIN2 0
+#define DECODE_DAIKIN216 0
+#define DECODE_DAIKIN160 0
+#define DECODE_DAIKIN176 0
+#define DECODE_DAIKIN128 0
+#define DECODE_DAIKIN152 0
+#define DECODE_DAIKIN64 0
+#endif
+#include <IRremoteESP8266.h>
+#include <IRrecv.h>
+#include <IRutils.h>
+#if IR_PROTOCOL_LEVEL_DECODE
+#include <ir_Daikin.h>
+#endif
 
 // Forward declaration for Arduino auto-generated prototypes
 enum FanSpeed : uint8_t;
+enum IrAction : uint8_t;
+struct IrTokenSet;
+bool getIrSetAndPrefByTarget(const String& target, IrTokenSet*& setPtr, const char*& prefKey);
+void saveIrTokenSetToPrefs(const char* key, const IrTokenSet& set);
 
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // MQTT topic to subscribe to for commands
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
-// Keep false in production to avoid fleet-wide command broadcasts.
-#define ALLOW_AWS_GENERIC_COMMAND_TOPIC false
 
 #define THINGNAME "AHU_ESP25_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
@@ -66,7 +94,7 @@ const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"
 unsigned long M1_START_RUN = 6UL * 1000UL;              // Motor 1 runs 6 seconds at start
 unsigned long M1_POST_RUN  = 6UL * 1000UL;              // Motor 1 runs 6 seconds at stop
 unsigned long M2_INTERVAL  = 15UL * 60UL * 1000UL;      // Motor 2 runs every 15 minutes
-unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22     
+unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22 seconds
 unsigned long M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;   // Motor 2 runs 10 seconds after Motor 1 stops
 
 // ========================= WATCHDOG CONFIGURATION =========================
@@ -175,8 +203,6 @@ MEGGm/Tin90+fnnNjdS5NY/uHjHa9J3f4RsoKh4nvShMsD8sRVTJ5/l5xLv0vVJQ
 x3LxfpWDrOwGscCOYqgopyjWZvT4Znac22pccNFhVeMndJqe55ZZwggHVNEu6b3i
 cuLk95vunVM9EFwpWGAxZmUiwzrCth9Dfm89o5mYQ2Cr5wD8zjPDX60xy45V
 -----END CERTIFICATE-----
-
-
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
@@ -207,9 +233,6 @@ gVAmIQKBgQDXB3k/leeB6ITE4xV1it8WiIfboVkndapkq+gmu1/ySQQQ3DOvZ+2i
 CnO1XViwR+vB8fml5KMpzlKPH0lzb6NKjkRZUDrrDf+d389CsieOnBGxgLQ817YF
 VW/js0s7ngLAoSJEthxFRFAF0IKW9j/b0+m1BYRiTDaQ3BVBW/do+Q==
 -----END RSA PRIVATE KEY-----
-
-
-
 )KEY";
 
 // ========== AWS IoT MQTT (Cloud) ==========
@@ -235,9 +258,11 @@ const int MQTT_BUFFER_SIZE = 1024;
 Adafruit_SHT4x sht4;
 
 // ---------- DHT22 ----------
+#if ENABLE_DHT22_FALLBACK
 #define DHT_PIN 4
 #define DHT_TYPE DHT22
 DHT dht(DHT_PIN, DHT_TYPE);
+#endif
 float filtTempC = NAN, filtHum = NAN;
 unsigned long lastSensorAt = 0;
 const unsigned long SENSOR_PERIOD = 2000;
@@ -254,20 +279,15 @@ const float HUM_JUMP_MAX  = 18.0;
 const float TEMP_FAIL_THRESHOLD = 5.0;
 const float HUM_FAIL_THRESHOLD = 10.0;
 
-// ---------- SEN55/SEN66 + SDP810 Combo Sensors ----------
-#if HAS_SEN66_LIB
-SensirionI2cSen66 sen66Sensor;
-#endif
-#if HAS_SEN5X_LIB
-SensirionI2CSen5x sen55Sensor;
-#endif
+// ---------- SEN66 + SEN55 + SDP810 Combo Sensors ----------
+SensirionI2cSen66 sen66;
+SensirionI2CSen5x sen55;   // SEN55: same as SEN66 but no CO2
 SensirionI2CSdp sdp810;
-enum ComboAirSensorModel : uint8_t { COMBO_AIR_NONE = 0, COMBO_AIR_SEN55, COMBO_AIR_SEN66 };
-ComboAirSensorModel comboAirSensorModel = COMBO_AIR_NONE;
 
 // Sensor detection flags
 bool useSHT45 = false;      // Original sensor
-bool useSEN66 = false;      // New combo: air quality sensor
+bool useSEN66 = false;      // New combo: air quality sensor (SEN66)
+bool useSEN55 = false;      // Substitute for SEN66 (PM + VOC + NOx, no CO2)
 bool useSDP810 = false;     // New combo: differential pressure sensor
 bool useDHT22 = false;      // Fallback temp/humidity sensor on GPIO
 float dhtTempRaw = NAN;
@@ -289,12 +309,8 @@ const char* sensorModeName(SensorMode mode) {
 }
 
 // DHT22 troubleshooting logger: prints raw read status continuously in Serial Monitor.
-const bool DEBUG_DHT22_CONTINUOUS = true;
+const bool DEBUG_DHT22_CONTINUOUS = false;
 const unsigned long DHT22_DEBUG_INTERVAL_MS = 2500;
-
-// SEN55 troubleshooting logger: prints raw read status continuously in Serial Monitor.
-const bool DEBUG_SEN55_CONTINUOUS = true;
-const unsigned long SEN55_DEBUG_INTERVAL_MS = 2500;
 
 // SEN66 readings
 float sen66_pm1p0 = 0.0, sen66_pm2p5 = 0.0, sen66_pm4p0 = 0.0, sen66_pm10p0 = 0.0;
@@ -400,12 +416,11 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "OFFICE";    // Kaveri Hospital
-const char* ROOM = "TEST 3";         // Burns Ward
+const char* SITE = "jio";    // Kaveri Hospital
+const char* ROOM = "OT";         // Burns Ward
 const char* AHU  = "AHU-25";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
-String awsCmdTopic()      { return String("esp32/") + THINGNAME + "/sub"; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
 String tLog()             { return baseTopic()+"/log"; }
 String tState()           { return baseTopic()+"/state"; }
@@ -419,6 +434,89 @@ String tProvBroker()      { return baseTopic()+"/provision/broker"; }
 // ---------- Preferences ----------
 Preferences prefs;
 String w1_ssid, w1_pass, w2_ssid, w2_pass;
+
+// ---------- IR Remote Control (Handheld AC Remote Input) ----------
+// Hardware: Adafruit TSMP96000 breakout (or equivalent demodulated IR receiver)
+#ifndef IR_REMOTE_ENABLED_DEFAULT
+#define IR_REMOTE_ENABLED_DEFAULT true
+#endif
+const bool IR_REMOTE_ENABLED = IR_REMOTE_ENABLED_DEFAULT;
+const bool IR_LOG_UNKNOWN_FRAMES = true;  // Helpful during initial YY-247 code mapping
+// Keep these OFF for production to reduce flash footprint.
+#define IR_VERBOSE_SERIAL 0
+#define IR_DEBUG_IR_LOGS 0
+#define IR_RUNTIME_FEEDBACK 1
+const uint8_t IR_RX_PIN = 27;             // TSMP96000 OUT -> GPIO27
+const uint16_t IR_CAPTURE_BUFFER_SIZE = 300;  // Large enough for AC packets
+const uint8_t IR_CAPTURE_TIMEOUT_MS = 80;     // AC remotes can have long inter-frame gaps
+const float IR_TEMP_MIN = 16.0;
+const float IR_TEMP_MAX = 30.0;
+const unsigned long IR_REPEAT_GUARD_MS = 180;
+const unsigned long IR_BURST_COLLECT_MS = 220;   // Collect subframes of one key press
+const unsigned long IR_PREFS_WRITE_GUARD_MS = 2000;
+const unsigned long IR_POWER_TOGGLE_GUARD_MS = 2200;  // Block double-toggle from one press burst.
+const int IR_NEAREST_ACCEPT_SCORE = 280;          // Lower is better.
+const int IR_NEAREST_MARGIN = 40;                 // Reject if best/next are too close.
+const bool IR_PRINT_EACH_FRAME = false;           // Keep OFF to save flash.
+const bool IR_PRINT_BURST_SUMMARY = false;        // Keep OFF to save flash.
+
+enum IrAction : uint8_t {
+  IR_ACTION_NONE = 0,
+  IR_ACTION_POWER_ON,
+  IR_ACTION_POWER_OFF,
+  IR_ACTION_POWER_TOGGLE,
+  IR_ACTION_TEMP_UP,
+  IR_ACTION_TEMP_DOWN,
+  IR_ACTION_FAN_CYCLE,
+  IR_ACTION_FAN_LOW,
+  IR_ACTION_FAN_MED,
+  IR_ACTION_FAN_HIGH
+};
+
+const uint8_t IR_MAX_TOKENS_PER_ACTION = 12;
+struct IrTokenSet {
+  uint64_t tokens[IR_MAX_TOKENS_PER_ACTION];
+  uint8_t count = 0;
+};
+
+// Learned frame-token mappings (persisted in Preferences).
+IrTokenSet irTokensPowerOn;
+IrTokenSet irTokensPowerOff;
+IrTokenSet irTokensPowerToggle;
+IrTokenSet irTokensTempUp;
+IrTokenSet irTokensTempDown;
+IrTokenSet irTokensFanCycle;
+IrTokenSet irTokensFanLow;
+IrTokenSet irTokensFanMed;
+IrTokenSet irTokensFanHigh;
+
+bool irLearnArmed = false;
+char irLearnTarget[16] = {0};
+uint8_t irLearnSamplesRemaining = 0;
+bool irPendingPrefsWrite = false;
+unsigned long irLastActionAt = 0;
+unsigned long irLastPrefsWriteAt = 0;
+unsigned long irLastPowerToggleAt = 0;
+uint64_t irLastUnknownRaw = 0;
+unsigned long irLastUnknownLogAt = 0;
+
+struct IrBurstState {
+  bool active = false;
+  unsigned long startedAt = 0;
+  unsigned long lastFrameAt = 0;
+  uint8_t frameCount = 0;
+  uint16_t bestRawlen = 0;
+  uint64_t bestToken = 0;
+  uint64_t bestRaw = 0;
+  uint8_t bestBits = 0;
+  uint16_t bestAddress = 0;
+  uint16_t bestCommand = 0;
+  int bestProto = 0;
+  bool bestRepeat = false;
+} irBurst;
+
+IRrecv irrecv(IR_RX_PIN, IR_CAPTURE_BUFFER_SIZE, IR_CAPTURE_TIMEOUT_MS, true);
+decode_results irResults;
 
 // ---------- Watchdog & State Recovery ----------
 unsigned long lastLoopTime = 0;
@@ -484,7 +582,10 @@ void recoverWiFi() {
   delay(100);
   WiFi.mode(WIFI_STA);
   delay(100);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Use provisioned primary WiFi if available; otherwise fallback defaults.
+  const char* ssid = (w1_ssid.length() > 0) ? w1_ssid.c_str() : WIFI_SSID;
+  const char* pass = (w1_pass.length() > 0) ? w1_pass.c_str() : WIFI_PASSWORD;
+  WiFi.begin(ssid, pass);
   WiFi.setAutoReconnect(true);
  
   selfHealing.lastWifiRecovery = millis();
@@ -592,30 +693,22 @@ void recoverSensors() {
   delay(100);
  
   if (useSEN66) {
-    int16_t err = -1;
-    if (comboAirSensorModel == COMBO_AIR_SEN66) {
-#if HAS_SEN66_LIB
-      sen66Sensor.begin(Wire, 0x6B);
-      err = sen66Sensor.deviceReset();
-      if (err == 0) {
-        delay(100);
-        err = sen66Sensor.startContinuousMeasurement();
-      }
-#endif
-    } else if (comboAirSensorModel == COMBO_AIR_SEN55) {
-#if HAS_SEN5X_LIB
-      sen55Sensor.begin(Wire);
-      err = sen55Sensor.deviceReset();
-      if (err == 0) {
-        delay(100);
-        err = sen55Sensor.startMeasurement();
-      }
-#endif
-    }
+    sen66.begin(Wire, SEN66_I2C_ADDR_6B);
+    int16_t err = sen66.deviceReset();
     if (err == 0) {
-      Serial.println(comboAirSensorModel == COMBO_AIR_SEN66
-                         ? "  ✓ SEN66 reinitialized"
-                         : "  ✓ SEN55 reinitialized");
+      delay(100);
+      sen66.startContinuousMeasurement();
+      Serial.println("  ✓ SEN66 reinitialized");
+    }
+  }
+
+  if (useSEN55) {
+    sen55.begin(Wire);
+    uint16_t err = sen55.deviceReset();
+    if (err == 0) {
+      delay(100);
+      sen55.startMeasurement();
+      Serial.println("  ✓ SEN55 reinitialized");
     }
   }
  
@@ -635,10 +728,12 @@ void recoverSensors() {
     }
   }
  
+  #if ENABLE_DHT22_FALLBACK
   if (useDHT22) {
     dht.begin();
     Serial.println("  ✓ DHT22 reinitialized");
   }
+  #endif
  
   selfHealing.lastSensorRecovery = millis();
   selfHealing.sensorFailCount = 0;
@@ -1106,10 +1201,8 @@ void checkForNewSensor() {
  
   esp_task_wdt_reset();  // Feed watchdog before I2C probes
  
-  // Quick probe for combo air sensor (SEN66 at 0x6B OR SEN55 at 0x69)
+  // Quick probe for SEN66 (single attempt - faster)
   Wire.beginTransmission(0x6B);  // SEN66 I2C address
-  if (Wire.endTransmission() == 0) foundSEN66 = true;
-  Wire.beginTransmission(0x69);  // SEN55 I2C address
   if (Wire.endTransmission() == 0) foundSEN66 = true;
  
   // Quick probe for SDP810
@@ -1120,10 +1213,12 @@ void checkForNewSensor() {
   Wire.beginTransmission(0x44);  // SHT45 I2C address
   if (Wire.endTransmission() == 0) foundSHT45 = true;
  
+  #if ENABLE_DHT22_FALLBACK
   // Quick probe for DHT22 (GPIO single-wire)
   float dhtT = dht.readTemperature();
   float dhtH = dht.readHumidity();
   foundDHT22 = (!isnan(dhtT) && !isnan(dhtH));
+  #endif
  
   // Determine what sensor mode would be selected now
   SensorMode detectedMode = SENSOR_NONE;
@@ -1760,10 +1855,10 @@ void publishTelemetryAWS(){
   doc["ts"]  = millis();
  
   // Indicate which sensor type is active
-  doc["sensorType"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
+  doc["sensorType"] = useSEN66 ? "combo" : (useSEN55 ? "sen55" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none")));
  
-  // Add SEN66 data - always include fields for web dashboard compatibility
-  if (useSEN66) {
+  // Add SEN66/SEN55 data - always include fields for web dashboard compatibility
+  if (useSEN66 || useSEN55) {
     // Only add values if temperature is valid (indicates successful read)
     if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
       doc["aqi"] = sen66_aqi;
@@ -1773,7 +1868,7 @@ void publishTelemetryAWS(){
       doc["pm10p0"] = sen66_pm10p0;
       doc["voc"] = sen66_vocIndex;
       doc["nox"] = sen66_noxIndex;
-      doc["co2"] = sen66_co2;
+      doc["co2"] = useSEN66 ? (int)sen66_co2 : 0;  // SEN55 has no CO2
     } else {
       // Mark as null if invalid (prevents sending stale 0.0 values)
       doc["aqi"] = nullptr;
@@ -1857,13 +1952,13 @@ void publishTelemetryLocal(){
   if (isnan(dhtTempRaw)) doc["dhtTemp"] = nullptr; else doc["dhtTemp"] = dhtTempRaw;
   if (isnan(dhtHumRaw))  doc["dhtHum"]  = nullptr; else doc["dhtHum"]  = dhtHumRaw;
   doc["dhtActive"] = useDHT22;
-  doc["tempSource"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
+  doc["tempSource"] = useSEN66 ? "combo" : (useSEN55 ? "sen55" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none")));
  
   // Indicate which sensor type is active
-  doc["sensorType"] = useSEN66 ? "combo" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none"));
+  doc["sensorType"] = useSEN66 ? "combo" : (useSEN55 ? "sen55" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none")));
  
-  // Add SEN66 data - always include fields for web dashboard compatibility
-  if (useSEN66) {
+  // Add SEN66/SEN55 data - always include fields for web dashboard compatibility
+  if (useSEN66 || useSEN55) {
     // Only add values if temperature is valid (indicates successful read)
     if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
       doc["aqi"] = sen66_aqi;
@@ -1873,7 +1968,7 @@ void publishTelemetryLocal(){
       doc["pm10p0"] = sen66_pm10p0;
       doc["voc"] = sen66_vocIndex;
       doc["nox"] = sen66_noxIndex;
-      doc["co2"] = sen66_co2;
+      doc["co2"] = useSEN66 ? (int)sen66_co2 : 0;  // SEN55 has no CO2
     } else {
       // Mark as null if invalid (prevents sending stale 0.0 values)
       doc["aqi"] = nullptr;
@@ -2042,7 +2137,7 @@ void readSensorIfDue(){
       }
     }
 
-    if (acceptT) { filtTempC = newT - 4.0; }  // Apply -4°C offset
+    if (acceptT) { filtTempC = newT; }
     else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
 
     if (acceptH) { filtHum = newH; }
@@ -2077,6 +2172,7 @@ void readSensorIfDue(){
 }
 
 // ---------- Read DHT22 (Fallback Temp/Humidity Sensor) ----------
+#if ENABLE_DHT22_FALLBACK
 void readDht22IfDue() {
   unsigned long now = millis();
   if (now - lastSensorAt < SENSOR_PERIOD) return;
@@ -2114,7 +2210,7 @@ void readDht22IfDue() {
       }
     }
 
-    if (acceptT) { filtTempC = newT - 4.0; }  // Keep same offset behavior as existing pipeline
+    if (acceptT) { filtTempC = newT; }
     else if (!isnan(filtTempC)) { motorLogMsg("DHT22 temp glitch ignored: " + String(newT, 1) + "C"); }
 
     if (acceptH) { filtHum = newH; }
@@ -2159,62 +2255,10 @@ void debugDht22StatusIfDue() {
                   DHT_PIN, useDHT22 ? "YES" : "NO");
   }
 }
-
-void debugSen55StatusIfDue() {
-  if (!DEBUG_SEN55_CONTINUOUS) return;
-  static unsigned long lastSen55DebugAt = 0;
-  unsigned long now = millis();
-  if (now - lastSen55DebugAt < SEN55_DEBUG_INTERVAL_MS) return;
-  lastSen55DebugAt = now;
-
-#if HAS_SEN5X_LIB
-  // Always probe I2C 0x69 to check if SEN55 is on the bus
-  Wire.beginTransmission(0x69);
-  bool onBus = (Wire.endTransmission() == 0);
-
-  if (!onBus) {
-    Serial.printf("[SEN55 DEBUG 0x69] NOT FOUND on I2C -> check wiring: VDD=5V, SDA=GPIO21, SCL=GPIO22, GND | active=%s\n",
-                  (comboAirSensorModel == COMBO_AIR_SEN55) ? "YES" : "NO");
-    return;
-  }
-
-  // SEN55 is on the bus — try to read
-  if (comboAirSensorModel != COMBO_AIR_SEN55) {
-    // Detected on bus but wasn't initialized at boot — try to init now
-    sen55Sensor.begin(Wire);
-    int16_t resetErr = sen55Sensor.deviceReset();
-    if (resetErr == 0) {
-      delay(1200);
-      esp_task_wdt_reset();
-      int16_t startErr = sen55Sensor.startMeasurement();
-      if (startErr == 0) {
-        comboAirSensorModel = COMBO_AIR_SEN55;
-        useSEN66 = true;
-        Serial.println("[SEN55 DEBUG 0x69] LATE INIT OK -> SEN55 initialized (was missed at boot)");
-        return;
-      } else {
-        Serial.printf("[SEN55 DEBUG 0x69] ON BUS but startMeasurement failed (err=%d) | active=NO\n", startErr);
-        return;
-      }
-    } else {
-      Serial.printf("[SEN55 DEBUG 0x69] ON BUS but deviceReset failed (err=%d) | active=NO\n", resetErr);
-      return;
-    }
-  }
-
-  // Already initialized — read values
-  float pm1, pm2p5, pm4, pm10, hum, temp, voc, nox;
-  int16_t err = sen55Sensor.readMeasuredValues(pm1, pm2p5, pm4, pm10, hum, temp, voc, nox);
-  if (err == 0 && temp >= -40.0 && temp <= 125.0) {
-    Serial.printf("[SEN55 DEBUG 0x69] RAW OK -> T=%.1fC H=%.1f%% PM2.5=%.1f VOC=%.0f NOx=%.0f | active=YES\n",
-                  temp, hum, pm2p5, voc, nox);
-  } else {
-    Serial.printf("[SEN55 DEBUG 0x69] RAW FAIL (err=%d) -> sensor connected but read failed | active=YES\n", err);
-  }
 #else
-  Serial.println("[SEN55 DEBUG] Library not installed - install 'Sensirion I2C SEN5x' via Arduino Library Manager");
+void readDht22IfDue() {}
+void debugDht22StatusIfDue() {}
 #endif
-}
 
 // ---------- Read All Sensors (SHT45 + SEN66 + SDP810) ----------
 void readComboSensorsIfDue() {
@@ -2226,10 +2270,12 @@ void readComboSensorsIfDue() {
   static int consecutiveSHT45Failures = 0;
   static int consecutiveDHT22Failures = 0;
   static int consecutiveSEN66Failures = 0;
+  static int consecutiveSEN55Failures = 0;
   static int consecutiveSDP810Failures = 0;
   bool sht45Success = false;
   bool dht22Success = false;
   bool sen66Success = false;
+  bool sen55Success = false;
   bool sdp810Success = false;
  
   // Read SHT45 first (Primary for temp/humidity control - most accurate)
@@ -2268,7 +2314,7 @@ void readComboSensorsIfDue() {
         }
       }
      
-      if (acceptT) { filtTempC = newT - 4.0; }  // Apply -4°C offset
+      if (acceptT) { filtTempC = newT; }
       else if (!isnan(filtTempC)) { motorLogMsg("Temp glitch ignored: " + String(newT,1) + "C"); }
      
       if (acceptH) { filtHum = newH; }
@@ -2287,6 +2333,7 @@ void readComboSensorsIfDue() {
     }
   }
  
+  #if ENABLE_DHT22_FALLBACK
   // Read DHT22 as fallback temp/humidity source when SHT45 is unavailable.
   if (!useSHT45 && useDHT22) {
     float newH = dht.readHumidity();
@@ -2318,7 +2365,7 @@ void readComboSensorsIfDue() {
         }
       }
      
-      if (acceptT) { filtTempC = newT - 4.0; }
+      if (acceptT) { filtTempC = newT; }
       if (acceptH) { filtHum = newH; }
      
       if (acceptT && acceptH) {
@@ -2333,31 +2380,16 @@ void readComboSensorsIfDue() {
       Serial.printf("[DHT22] Read failed (%d consecutive)\n", consecutiveDHT22Failures);
     }
   }
+  #endif
  
   // Read SEN66 (Air Quality) - Feed watchdog before I2C operation
   if (useSEN66) {
     esp_task_wdt_reset(); // Feed watchdog before I2C read
-    int16_t err = -1;
-    if (comboAirSensorModel == COMBO_AIR_SEN66) {
-#if HAS_SEN66_LIB
-      err = sen66Sensor.readMeasuredValues(
-        sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
-        sen66_humidity, sen66_temperature,
-        sen66_vocIndex, sen66_noxIndex, sen66_co2
-      );
-#endif
-    } else if (comboAirSensorModel == COMBO_AIR_SEN55) {
-#if HAS_SEN5X_LIB
-      err = sen55Sensor.readMeasuredValues(
-        sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
-        sen66_humidity, sen66_temperature,
-        sen66_vocIndex, sen66_noxIndex
-      );
-      sen66_co2 = 0;  // SEN55 does not provide CO2
-#endif
-    } else {
-      sen66_co2 = 0;
-    }
+    int16_t err = sen66.readMeasuredValues(
+      sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
+      sen66_humidity, sen66_temperature,
+      sen66_vocIndex, sen66_noxIndex, sen66_co2
+    );
     esp_task_wdt_reset(); // Feed watchdog after I2C read
    
     if (err == 0) {
@@ -2367,76 +2399,16 @@ void readComboSensorsIfDue() {
           sen66_pm2p5 >= 0.0 && sen66_pm2p5 <= 1000.0) {
         // Use SEN66 temp/humidity only when neither SHT45 nor DHT22 are active
         if (!useSHT45 && !useDHT22) {
-          filtTempC = sen66_temperature - 4.0;  // Apply -4°C offset
+          filtTempC = sen66_temperature;
           filtHum = sen66_humidity;
         }
-        // Calculate AQI and apply -15 offset (minimum 3)
-        int rawAQI = calculateAQI(sen66_pm2p5);
-        int adjustedAQI = rawAQI - 15;  // Subtract 15 from actual AQI
-        sen66_aqi = (adjustedAQI >= 3) ? adjustedAQI : 3;  // Minimum AQI is 3
-       
-        // Calculate what PM2.5 would give the adjusted AQI (reverse lookup)
-        // Then calculate adjustment ratio for all particle counts
-        float targetPM2p5 = sen66_pm2p5;  // Default: no change
-        if (adjustedAQI >= 3 && rawAQI > 15) {
-          // Reverse calculate PM2.5 from adjusted AQI
-          // Use binary search or approximation based on AQI breakpoints
-          float targetAQI = (float)adjustedAQI;
-         
-          // EPA breakpoints for reverse lookup
-          if (targetAQI <= 50) {
-            // Good range: 0-50 AQI corresponds to 0-12.0 PM2.5
-            targetPM2p5 = (targetAQI / 50.0) * 12.0;
-          } else if (targetAQI <= 100) {
-            // Moderate: 51-100 AQI corresponds to 12.1-35.4 PM2.5
-            targetPM2p5 = 12.1 + ((targetAQI - 51) / 49.0) * (35.4 - 12.1);
-          } else if (targetAQI <= 150) {
-            // Unhealthy for Sensitive: 101-150 AQI corresponds to 35.5-55.4 PM2.5
-            targetPM2p5 = 35.5 + ((targetAQI - 101) / 49.0) * (55.4 - 35.5);
-          } else if (targetAQI <= 200) {
-            // Unhealthy: 151-200 AQI corresponds to 55.5-150.4 PM2.5
-            targetPM2p5 = 55.5 + ((targetAQI - 151) / 49.0) * (150.4 - 55.5);
-          } else if (targetAQI <= 300) {
-            // Very Unhealthy: 201-300 AQI corresponds to 150.5-250.4 PM2.5
-            targetPM2p5 = 150.5 + ((targetAQI - 201) / 99.0) * (250.4 - 150.5);
-          } else {
-            // Hazardous: 301-500 AQI corresponds to 250.5-500.4 PM2.5
-            targetPM2p5 = 250.5 + ((targetAQI - 301) / 199.0) * (500.4 - 250.5);
-          }
-         
-          // Ensure target doesn't exceed original
-          if (targetPM2p5 > sen66_pm2p5) {
-            targetPM2p5 = sen66_pm2p5;
-          }
-        }
-       
-        // Calculate adjustment ratio
-        float adjustmentRatio = (sen66_pm2p5 > 0) ? (targetPM2p5 / sen66_pm2p5) : 1.0;
-        adjustmentRatio = constrain(adjustmentRatio, 0.5, 1.0);  // Limit to 50% reduction max
-       
-        // Store original values for logging
-        float originalPM1p0 = sen66_pm1p0;
-        float originalPM2p5 = sen66_pm2p5;
-        float originalPM4p0 = sen66_pm4p0;
-        float originalPM10p0 = sen66_pm10p0;
-       
-        // Apply adjustment to all particle counts
-        sen66_pm1p0 = originalPM1p0 * adjustmentRatio;
-        sen66_pm2p5 = targetPM2p5;  // Use calculated target directly
-        sen66_pm4p0 = originalPM4p0 * adjustmentRatio;
-        sen66_pm10p0 = originalPM10p0 * adjustmentRatio;
-       
-        // Adjust CO2: reduce by 15 (similar to AQI offset)
-        int originalCO2 = sen66_co2;
-        sen66_co2 = (originalCO2 >= 15) ? (originalCO2 - 15) : 0;
+        sen66_aqi = calculateAQI(sen66_pm2p5);
        
         sen66Success = true;
         consecutiveSEN66Failures = 0;
-
-        const char* sensorTag = (comboAirSensorModel == COMBO_AIR_SEN55) ? "SEN55" : "SEN66";
-        Serial.printf("[%s] T:%.1f°C H:%.1f%% PM2.5:%.1f→%.1f AQI:%d→%d VOC:%.0f NOx:%.0f CO2:%d→%d\n",
-                      sensorTag, sen66_temperature, sen66_humidity,
-                      originalPM2p5, sen66_pm2p5, rawAQI, sen66_aqi, sen66_vocIndex, sen66_noxIndex, originalCO2, sen66_co2);
+       
+        Serial.printf("[SEN66] PM2.5:%.1f AQI:%d VOC:%.0f NOx:%.0f CO2:%d\n",
+                      sen66_pm2p5, sen66_aqi, sen66_vocIndex, sen66_noxIndex, sen66_co2);
       } else {
         Serial.printf("[SEN66] Invalid values - T:%.1f H:%.1f PM2.5:%.1f\n",
                       sen66_temperature, sen66_humidity, sen66_pm2p5);
@@ -2452,6 +2424,52 @@ void readComboSensorsIfDue() {
         filtTempC = NAN;
         filtHum = NAN;
         Serial.println("[SEN66] Multiple failures - marking values as invalid");
+      }
+    }
+  }
+
+  // Read SEN55 (Air Quality – substitute for SEN66, no CO2)
+  // Values are written into the same sen66_* globals so all downstream code
+  // (AQI calc, telemetry, HEPA logic) works without any further changes.
+  if (useSEN55) {
+    esp_task_wdt_reset();
+    uint16_t err = sen55.readMeasuredValues(
+      sen66_pm1p0, sen66_pm2p5, sen66_pm4p0, sen66_pm10p0,
+      sen66_humidity, sen66_temperature,
+      sen66_vocIndex, sen66_noxIndex
+    );
+    sen66_co2 = 0;  // SEN55 has no CO2 sensor
+    esp_task_wdt_reset();
+
+    if (err == 0) {
+      if (sen66_temperature >= -40.0 && sen66_temperature <= 125.0 &&
+          sen66_humidity >= 0.0 && sen66_humidity <= 100.0 &&
+          sen66_pm2p5 >= 0.0 && sen66_pm2p5 <= 1000.0) {
+        // Use SEN55 temp/humidity only when neither SHT45 nor DHT22 are active
+        if (!useSHT45 && !useDHT22) {
+          filtTempC = sen66_temperature;
+          filtHum = sen66_humidity;
+        }
+        sen66_aqi = calculateAQI(sen66_pm2p5);
+
+        sen55Success = true;
+        consecutiveSEN55Failures = 0;
+        Serial.printf("[SEN55] PM2.5:%.1f AQI:%d VOC:%.0f NOx:%.0f (no CO2)\n",
+                      sen66_pm2p5, sen66_aqi,
+                      sen66_vocIndex, sen66_noxIndex);
+      } else {
+        Serial.printf("[SEN55] Invalid values – T:%.1f H:%.1f PM2.5:%.1f\n",
+                      sen66_temperature, sen66_humidity, sen66_pm2p5);
+        consecutiveSEN55Failures++;
+      }
+    } else {
+      consecutiveSEN55Failures++;
+      errorToString(err, errMsg, sizeof(errMsg));
+      Serial.printf("[SEN55] Read error (%d consecutive): %s\n", consecutiveSEN55Failures, errMsg);
+      if (consecutiveSEN55Failures >= 3 && !useSHT45) {
+        filtTempC = NAN;
+        filtHum = NAN;
+        Serial.println("[SEN55] Multiple failures – marking values as invalid");
       }
     }
   }
@@ -2486,7 +2504,7 @@ void readComboSensorsIfDue() {
   }
  
   // SELF-HEALING: Track sensor health and store last good values
-  if (sht45Success || dht22Success || sen66Success || sdp810Success) {
+  if (sht45Success || dht22Success || sen66Success || sen55Success || sdp810Success) {
     selfHealing.sensorHealthy = true;
     selfHealing.sensorFailCount = 0;
    
@@ -2499,7 +2517,7 @@ void readComboSensorsIfDue() {
     }
    
     publishTelemetryLocal();
-  } else if (useSHT45 || useDHT22 || useSEN66 || useSDP810) {
+  } else if (useSHT45 || useDHT22 || useSEN66 || useSEN55 || useSDP810) {
     // All sensors failed - track failure
     selfHealing.sensorFailCount++;
     selfHealing.i2cFailCount++;  // Also track I2C failures
@@ -2578,6 +2596,78 @@ void handleSerial(){
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
+      else if (cmd == "ir show" || cmd == "irshow") {
+        Serial.println("IR map counts:");
+        Serial.println("poweron=" + String(irTokensPowerOn.count));
+        Serial.println("poweroff=" + String(irTokensPowerOff.count));
+        Serial.println("power=" + String(irTokensPowerToggle.count));
+        Serial.println("tempup=" + String(irTokensTempUp.count));
+        Serial.println("tempdown=" + String(irTokensTempDown.count));
+        Serial.println("fancycle=" + String(irTokensFanCycle.count));
+        Serial.println("fanlow=" + String(irTokensFanLow.count));
+        Serial.println("fanmed=" + String(irTokensFanMed.count));
+        Serial.println("fanhigh=" + String(irTokensFanHigh.count));
+      }
+      else if (cmd.startsWith("ir learn ")) {
+        String learnArgs = cmd.substring(9);
+        learnArgs.trim();
+        int splitPos = learnArgs.indexOf(' ');
+        String target = (splitPos == -1) ? learnArgs : learnArgs.substring(0, splitPos);
+        int sampleCount = 1;
+        if (splitPos != -1) {
+          String countPart = learnArgs.substring(splitPos + 1);
+          countPart.trim();
+          int parsed = countPart.toInt();
+          if (parsed > 0) sampleCount = parsed;
+        }
+        if (sampleCount > 20) sampleCount = 20;
+        if (target == "poweron" || target == "poweroff" || target == "power" ||
+            target == "tempup" || target == "tempdown" ||
+            target == "fancycle" || target == "fanlow" || target == "fanmed" || target == "fanhigh") {
+          target.toCharArray(irLearnTarget, sizeof(irLearnTarget));
+          irLearnArmed = true;
+          irLearnSamplesRemaining = (uint8_t)sampleCount;
+          #if IR_VERBOSE_SERIAL
+          Serial.println("🎯 IR learn armed for '" + target + "' x" + String(irLearnSamplesRemaining) + ". Press remote button(s) now.");
+          #endif
+        } else {
+          Serial.println("❌ Invalid IR learn target");
+        }
+      }
+      else if (cmd == "ir clear" || cmd == "irclear") {
+        irTokensPowerOn.count = 0;
+        irTokensPowerOff.count = 0;
+        irTokensPowerToggle.count = 0;
+        irTokensTempUp.count = 0;
+        irTokensTempDown.count = 0;
+        irTokensFanCycle.count = 0;
+        irTokensFanLow.count = 0;
+        irTokensFanMed.count = 0;
+        irTokensFanHigh.count = 0;
+        saveIrTokenSetToPrefs("ir_power_on", irTokensPowerOn);
+        saveIrTokenSetToPrefs("ir_power_off", irTokensPowerOff);
+        saveIrTokenSetToPrefs("ir_power", irTokensPowerToggle);
+        saveIrTokenSetToPrefs("ir_temp_up", irTokensTempUp);
+        saveIrTokenSetToPrefs("ir_temp_down", irTokensTempDown);
+        saveIrTokenSetToPrefs("ir_fan_cycle", irTokensFanCycle);
+        saveIrTokenSetToPrefs("ir_fan_low", irTokensFanLow);
+        saveIrTokenSetToPrefs("ir_fan_med", irTokensFanMed);
+        saveIrTokenSetToPrefs("ir_fan_high", irTokensFanHigh);
+        Serial.println("IR cleared: all");
+      }
+      else if (cmd.startsWith("ir clear ")) {
+        String target = cmd.substring(9);
+        target.trim();
+        IrTokenSet* setPtr = nullptr;
+        const char* prefKey = nullptr;
+        if (getIrSetAndPrefByTarget(target, setPtr, prefKey)) {
+          setPtr->count = 0;
+          saveIrTokenSetToPrefs(prefKey, *setPtr);
+          Serial.println("IR cleared: " + target);
+        } else {
+          Serial.println("Invalid ir clear target");
+        }
+      }
       else if (cmd.length() > 0) motorLogMsg("Unknown cmd: " + cmd);
     } else {
       if (serialBufIdx < 64) {
@@ -2586,6 +2676,682 @@ void handleSerial(){
       // Silently drop chars if buffer full
     }
   }
+}
+
+String formatIrRawHex(uint64_t raw) {
+  char rawHex[19];
+  snprintf(rawHex, sizeof(rawHex), "%016llX", (unsigned long long)raw);
+  return String("0x") + String(rawHex);
+}
+
+bool tokenSetContainsExact(const IrTokenSet& set, uint64_t token) {
+  if (token == 0) return false;
+  for (uint8_t i = 0; i < set.count; i++) {
+    if (set.tokens[i] == token) return true;
+  }
+  return false;
+}
+
+bool tokenSetAdd(IrTokenSet& set, uint64_t token) {
+  if (token == 0) return false;
+  if (tokenSetContainsExact(set, token)) return false;
+  if (set.count < IR_MAX_TOKENS_PER_ACTION) {
+    set.tokens[set.count++] = token;
+    return true;
+  }
+  // FIFO replacement when full
+  for (uint8_t i = 1; i < set.count; i++) {
+    set.tokens[i - 1] = set.tokens[i];
+  }
+  set.tokens[set.count - 1] = token;
+  return true;
+}
+
+void saveIrTokenSetToPrefs(const char* key, const IrTokenSet& set) {
+  if (set.count == 0) {
+    prefs.remove(key);
+    return;
+  }
+  String joined = "";
+  for (uint8_t i = 0; i < set.count; i++) {
+    if (i > 0) joined += ",";
+    joined += formatIrRawHex(set.tokens[i]);
+  }
+  prefs.putString(key, joined);
+}
+
+void loadIrTokenSetFromPrefs(const char* key, IrTokenSet& set) {
+  set.count = 0;
+  String value = prefs.getString(key, "");
+  value.trim();
+  if (value.length() == 0) return;
+
+  int start = 0;
+  while (start < value.length() && set.count < IR_MAX_TOKENS_PER_ACTION) {
+    int comma = value.indexOf(',', start);
+    String item = (comma == -1) ? value.substring(start) : value.substring(start, comma);
+    item.trim();
+    if (item.startsWith("0x") || item.startsWith("0X")) item = item.substring(2);
+    if (item.length() > 0) {
+      uint64_t token = strtoull(item.c_str(), nullptr, 16);
+      if (token != 0) {
+        set.tokens[set.count++] = token;
+      }
+    }
+    if (comma == -1) break;
+    start = comma + 1;
+  }
+}
+
+bool getIrSetAndPrefByTarget(const String& target, IrTokenSet*& setPtr, const char*& prefKey) {
+  if (target == "poweron")    { setPtr = &irTokensPowerOn; prefKey = "ir_power_on"; return true; }
+  if (target == "poweroff")   { setPtr = &irTokensPowerOff; prefKey = "ir_power_off"; return true; }
+  if (target == "power")      { setPtr = &irTokensPowerToggle; prefKey = "ir_power"; return true; }
+  if (target == "tempup")     { setPtr = &irTokensTempUp; prefKey = "ir_temp_up"; return true; }
+  if (target == "tempdown")   { setPtr = &irTokensTempDown; prefKey = "ir_temp_down"; return true; }
+  if (target == "fancycle")   { setPtr = &irTokensFanCycle; prefKey = "ir_fan_cycle"; return true; }
+  if (target == "fanlow")     { setPtr = &irTokensFanLow; prefKey = "ir_fan_low"; return true; }
+  if (target == "fanmed")     { setPtr = &irTokensFanMed; prefKey = "ir_fan_med"; return true; }
+  if (target == "fanhigh")    { setPtr = &irTokensFanHigh; prefKey = "ir_fan_high"; return true; }
+  setPtr = nullptr;
+  prefKey = nullptr;
+  return false;
+}
+
+uint32_t computeIrTimingSignature(const decode_results& irData) {
+  // Build a coarse structural fingerprint from selected timing points.
+  // This is intentionally low-resolution so it stays stable across jitter.
+  uint16_t rawlen = irData.rawlen;
+  if (rawlen < 6) {
+    return (uint32_t)(irData.value & 0xFFFFFFFFu);
+  }
+
+  const uint8_t sampleIdx[6] = {3, 7, 11, 15, 19, 23};
+  uint32_t signature = 0;
+
+  // Upper 8 bits: coarse raw length bucket (cap at 255)
+  uint8_t rawlenBucket = (rawlen > 255) ? 255 : (uint8_t)rawlen;
+  signature |= ((uint32_t)rawlenBucket << 24);
+
+  // Lower 24 bits: 6 samples x 4-bit bucket each.
+  for (uint8_t i = 0; i < 6; i++) {
+    uint8_t idx = sampleIdx[i];
+    uint16_t ticks = (idx < rawlen) ? (uint16_t)irData.rawbuf[idx] : 0;
+    // 50us ticks -> divide by 8 to reduce sensitivity to small jitter.
+    uint8_t bucket = (ticks + 4) / 8;
+    if (bucket > 15) bucket = 15;
+    signature |= ((uint32_t)bucket << ((5 - i) * 4));
+  }
+
+  return signature;
+}
+
+bool isSignatureToken(uint64_t token) {
+  return (token & (1ULL << 63)) != 0;
+}
+
+bool tokenRoughlyMatches(uint64_t learned, uint64_t incoming) {
+  if (learned == incoming) return true;
+  if (!isSignatureToken(learned) || !isSignatureToken(incoming)) return false;
+
+  uint8_t learnedBits = (learned >> 32) & 0xFFu;
+  uint8_t incomingBits = (incoming >> 32) & 0xFFu;
+  if (learnedBits != incomingBits) return false;
+
+  uint8_t learnedLenBucket = (learned >> 24) & 0xFFu;
+  uint8_t incomingLenBucket = (incoming >> 24) & 0xFFu;
+  int lenDiff = abs((int)learnedLenBucket - (int)incomingLenBucket);
+  if (lenDiff > 90) return false;  // AC remotes can vary notably between state frames.
+
+  // Compare six 4-bit shape buckets (24 bits). Allow small jitter per bucket.
+  uint32_t learnedShape = learned & 0xFFFFFFu;
+  uint32_t incomingShape = incoming & 0xFFFFFFu;
+  uint8_t closeBuckets = 0;
+  for (int i = 0; i < 6; i++) {
+    uint8_t a = (learnedShape >> (i * 4)) & 0x0Fu;
+    uint8_t b = (incomingShape >> (i * 4)) & 0x0Fu;
+    int d = abs((int)a - (int)b);
+    if (d <= 1) closeBuckets++;
+  }
+  return closeBuckets >= 4;
+}
+
+bool tokenSetMatches(const IrTokenSet& set, uint64_t token) {
+  if (token == 0) return false;
+  for (uint8_t i = 0; i < set.count; i++) {
+    if (tokenRoughlyMatches(set.tokens[i], token)) return true;
+  }
+  return false;
+}
+
+bool tokenPowerMatchesStrict(uint64_t learned, uint64_t incoming) {
+  if (learned == incoming) return true;
+  if (!isSignatureToken(learned) || !isSignatureToken(incoming)) return false;
+
+  uint8_t learnedBits = (learned >> 32) & 0xFFu;
+  uint8_t incomingBits = (incoming >> 32) & 0xFFu;
+  if (learnedBits != incomingBits) return false;
+
+  uint8_t learnedLenBucket = (learned >> 24) & 0xFFu;
+  uint8_t incomingLenBucket = (incoming >> 24) & 0xFFu;
+  int lenDiff = abs((int)learnedLenBucket - (int)incomingLenBucket);
+  if (lenDiff > 28) return false;  // Much stricter for power safety.
+
+  uint32_t learnedShape = learned & 0xFFFFFFu;
+  uint32_t incomingShape = incoming & 0xFFFFFFu;
+  uint8_t closeBuckets = 0;
+  for (int i = 0; i < 6; i++) {
+    uint8_t a = (learnedShape >> (i * 4)) & 0x0Fu;
+    uint8_t b = (incomingShape >> (i * 4)) & 0x0Fu;
+    int d = abs((int)a - (int)b);
+    if (d <= 1) closeBuckets++;
+  }
+  return closeBuckets >= 5;
+}
+
+bool tokenSetMatchesPower(const IrTokenSet& set, uint64_t token) {
+  if (token == 0) return false;
+  for (uint8_t i = 0; i < set.count; i++) {
+    if (tokenPowerMatchesStrict(set.tokens[i], token)) return true;
+  }
+  return false;
+}
+
+int tokenDistanceScore(uint64_t learned, uint64_t incoming) {
+  if (learned == incoming) return 0;
+  if (!isSignatureToken(learned) || !isSignatureToken(incoming)) return 1000000;
+
+  uint8_t learnedBits = (learned >> 32) & 0xFFu;
+  uint8_t incomingBits = (incoming >> 32) & 0xFFu;
+  if (learnedBits != incomingBits) return 1000000;
+
+  uint8_t learnedLenBucket = (learned >> 24) & 0xFFu;
+  uint8_t incomingLenBucket = (incoming >> 24) & 0xFFu;
+  int lenDiff = abs((int)learnedLenBucket - (int)incomingLenBucket);
+
+  uint32_t learnedShape = learned & 0xFFFFFFu;
+  uint32_t incomingShape = incoming & 0xFFFFFFu;
+  int shapeSumDiff = 0;
+  int shapeMaxDiff = 0;
+  for (int i = 0; i < 6; i++) {
+    uint8_t a = (learnedShape >> (i * 4)) & 0x0Fu;
+    uint8_t b = (incomingShape >> (i * 4)) & 0x0Fu;
+    int d = abs((int)a - (int)b);
+    shapeSumDiff += d;
+    if (d > shapeMaxDiff) shapeMaxDiff = d;
+  }
+
+  // Weighted score tuned for noisy AC-style full-state remotes.
+  return (lenDiff * 2) + (shapeSumDiff * 10) + (shapeMaxDiff * 6);
+}
+
+int tokenSetBestScore(const IrTokenSet& set, uint64_t token) {
+  if (token == 0 || set.count == 0) return 1000000;
+  int best = 1000000;
+  for (uint8_t i = 0; i < set.count; i++) {
+    int score = tokenDistanceScore(set.tokens[i], token);
+    if (score < best) best = score;
+  }
+  return best;
+}
+
+uint64_t buildIrMatchToken(const decode_results& irData) {
+  bool protocolKnown = (irData.decode_type != UNKNOWN);
+  if (protocolKnown && irData.value != 0) {
+    return irData.value;
+  }
+
+  uint32_t sig = computeIrTimingSignature(irData);
+  uint64_t token = (1ULL << 63);  // Marker: signature-based token
+  token |= ((uint64_t)irData.bits & 0xFFu) << 32;
+  token |= sig;
+  return token;
+}
+
+bool applyEspAcDecodedState(const decode_results& results) {
+#if !IR_PROTOCOL_LEVEL_DECODE
+  (void)results;
+  return false;
+#else
+  bool supported = false;
+  bool decodedPower = runState;
+  float decodedTemp = tempSet;
+  FanSpeed decodedFan = fanSpeed;
+
+  switch (results.decode_type) {
+    case DAIKIN: {
+      supported = true;
+      IRDaikinESP ac(0);
+      ac.setRaw((uint8_t*)results.state);
+      decodedPower = ac.getPower();
+      decodedTemp = constrain((float)ac.getTemp(), IR_TEMP_MIN, IR_TEMP_MAX);
+      uint8_t dFan = ac.getFan();
+      if (dFan >= kDaikinFanMax) decodedFan = FAN_HIGH;
+      else if (dFan >= kDaikinFanMed) decodedFan = FAN_MED;
+      else decodedFan = FAN_LOW;
+      break;
+    }
+    default:
+      return false;
+  }
+
+  if (!supported) return false;
+
+  bool changed = false;
+  if (decodedPower != runState) {
+    if (decodedPower) startSystem();
+    else stopSystem();
+    changed = true;
+  }
+
+  if (fabs(decodedTemp - tempSet) >= 0.1f) {
+    tempSet = decodedTemp;
+    irPendingPrefsWrite = true;
+    changed = true;
+  }
+
+  if (decodedPower && decodedFan != fanSpeed) {
+    setFanSpeed(decodedFan);
+    irPendingPrefsWrite = true;
+    changed = true;
+  }
+
+  if (changed) {
+    motorLogMsg("IR AC decoded protocol=" + String((int)results.decode_type) + " applied");
+    publishStateAfterIrAction();
+  }
+  return true;
+#endif
+}
+
+void publishStateAfterIrAction() {
+  if (mqttLocal.connected()) publishStateLocal();
+  if (onlineMode && client.connected()) publishStateAWS();
+}
+
+void persistIrStateIfDue(unsigned long now) {
+  if (!irPendingPrefsWrite) return;
+  if (now - irLastPrefsWriteAt < IR_PREFS_WRITE_GUARD_MS) return;
+  prefs.putFloat("tempSet", tempSet);
+  prefs.putInt("fanSpeed", (int)fanSpeed);
+  irLastPrefsWriteAt = now;
+  irPendingPrefsWrite = false;
+}
+
+IrAction resolveIrAction(uint64_t token) {
+  if (token == 0) return IR_ACTION_NONE;
+  if (tokenSetContainsExact(irTokensPowerOn, token) || tokenSetMatchesPower(irTokensPowerOn, token)) {
+    return IR_ACTION_POWER_ON;
+  }
+  if (tokenSetContainsExact(irTokensPowerOff, token) || tokenSetMatchesPower(irTokensPowerOff, token)) {
+    return IR_ACTION_POWER_OFF;
+  }
+  // Keep POWER mapping strict to prevent accidental toggles from temp/fan keys.
+  if (tokenSetContainsExact(irTokensPowerToggle, token) || tokenSetMatchesPower(irTokensPowerToggle, token)) {
+    return IR_ACTION_POWER_TOGGLE;
+  }
+  if (tokenSetMatches(irTokensTempUp, token)) return IR_ACTION_TEMP_UP;
+  if (tokenSetMatches(irTokensTempDown, token)) return IR_ACTION_TEMP_DOWN;
+  if (tokenSetMatches(irTokensFanCycle, token)) return IR_ACTION_FAN_CYCLE;
+  if (tokenSetMatches(irTokensFanLow, token)) return IR_ACTION_FAN_LOW;
+  if (tokenSetMatches(irTokensFanMed, token)) return IR_ACTION_FAN_MED;
+  if (tokenSetMatches(irTokensFanHigh, token)) return IR_ACTION_FAN_HIGH;
+
+  // Nearest-neighbor fallback for remotes that emit variable full-state frames.
+  int bestScore = 1000000;
+  int secondScore = 1000000;
+  IrAction bestAction = IR_ACTION_NONE;
+
+  auto checkCandidate = [&](IrAction action, const IrTokenSet& set) {
+    int score = tokenSetBestScore(set, token);
+    if (score < bestScore) {
+      secondScore = bestScore;
+      bestScore = score;
+      bestAction = action;
+    } else if (score < secondScore) {
+      secondScore = score;
+    }
+  };
+
+  // Do not nearest-match POWER; this is intentionally strict for safety.
+  checkCandidate(IR_ACTION_TEMP_UP, irTokensTempUp);
+  checkCandidate(IR_ACTION_TEMP_DOWN, irTokensTempDown);
+  checkCandidate(IR_ACTION_FAN_CYCLE, irTokensFanCycle);
+  checkCandidate(IR_ACTION_FAN_LOW, irTokensFanLow);
+  checkCandidate(IR_ACTION_FAN_MED, irTokensFanMed);
+  checkCandidate(IR_ACTION_FAN_HIGH, irTokensFanHigh);
+
+  if (bestAction == IR_ACTION_NONE) return IR_ACTION_NONE;
+  if (bestScore > IR_NEAREST_ACCEPT_SCORE) return IR_ACTION_NONE;
+  if ((secondScore - bestScore) < IR_NEAREST_MARGIN) return IR_ACTION_NONE;
+  return bestAction;
+}
+
+bool learnIrMapping(const char* target, uint64_t token) {
+  if (target == nullptr || token == 0) return false;
+  IrTokenSet* setPtr = nullptr;
+  const char* prefKey = nullptr;
+  if (!getIrSetAndPrefByTarget(String(target), setPtr, prefKey) || setPtr == nullptr || prefKey == nullptr) {
+    return false;
+  }
+  bool added = tokenSetAdd(*setPtr, token);
+  if (added) {
+    saveIrTokenSetToPrefs(prefKey, *setPtr);
+  }
+  return true;
+}
+
+FanSpeed nextFanSpeedForCycle(FanSpeed current) {
+  switch (current) {
+    case FAN_OFF:
+    case FAN_LOW: return FAN_MED;
+    case FAN_MED: return FAN_HIGH;
+    case FAN_HIGH: return FAN_LOW;
+    default: return FAN_LOW;
+  }
+}
+
+void applyIrAction(IrAction action) {
+  unsigned long now = millis();
+  bool changed = false;
+  switch (action) {
+    case IR_ACTION_POWER_ON:
+      if (shuttingDown || runState) break;
+      startSystem();
+      #if IR_RUNTIME_FEEDBACK
+      Serial.println("✅ IR action: power on");
+      #endif
+      changed = true;
+      break;
+    case IR_ACTION_POWER_OFF:
+      if (!runState || shuttingDown) break;
+      stopSystem();
+      #if IR_RUNTIME_FEEDBACK
+      Serial.println("✅ IR action: power off");
+      #endif
+      changed = true;
+      break;
+    case IR_ACTION_POWER_TOGGLE:
+      // AC remotes can emit multiple nearby frames; avoid OFF->ON bounce.
+      if (now - irLastPowerToggleAt < IR_POWER_TOGGLE_GUARD_MS) {
+        #if IR_RUNTIME_FEEDBACK
+        Serial.println("ℹ️ IR power toggle ignored (guard)");
+        #endif
+        break;
+      }
+      // Ignore toggles while shutdown sequence is active.
+      if (shuttingDown) {
+        #if IR_RUNTIME_FEEDBACK
+        Serial.println("ℹ️ IR power toggle ignored (shutting down)");
+        #endif
+        break;
+      }
+      irLastPowerToggleAt = now;
+      toggleSystem();
+      #if IR_RUNTIME_FEEDBACK
+      Serial.println("✅ IR action: power toggle");
+      #endif
+      changed = true;
+      break;
+    case IR_ACTION_TEMP_UP: {
+      float updated = min(IR_TEMP_MAX, tempSet + 1.0f);
+      if (updated != tempSet) {
+        tempSet = updated;
+        irPendingPrefsWrite = true;
+        motorLogMsg("IR: Temp set -> " + String(tempSet, 1) + "C");
+        #if IR_RUNTIME_FEEDBACK
+        Serial.println("✅ IR action: temp up -> " + String(tempSet, 1) + "C");
+        #endif
+        changed = true;
+      }
+      break;
+    }
+    case IR_ACTION_TEMP_DOWN: {
+      float updated = max(IR_TEMP_MIN, tempSet - 1.0f);
+      if (updated != tempSet) {
+        tempSet = updated;
+        irPendingPrefsWrite = true;
+        motorLogMsg("IR: Temp set -> " + String(tempSet, 1) + "C");
+        #if IR_RUNTIME_FEEDBACK
+        Serial.println("✅ IR action: temp down -> " + String(tempSet, 1) + "C");
+        #endif
+        changed = true;
+      }
+      break;
+    }
+    case IR_ACTION_FAN_CYCLE: {
+      if (!runState) startSystem();
+      FanSpeed next = nextFanSpeedForCycle(fanSpeed);
+      setFanSpeed(next);
+      irPendingPrefsWrite = true;
+      #if IR_RUNTIME_FEEDBACK
+      Serial.println("✅ IR action: fan cycle -> " + String((int)next));
+      #endif
+      changed = true;
+      break;
+    }
+    case IR_ACTION_FAN_LOW:
+      if (!runState) startSystem();
+      setFanSpeed(FAN_LOW);
+      irPendingPrefsWrite = true;
+      #if IR_RUNTIME_FEEDBACK
+      Serial.println("✅ IR action: fan low");
+      #endif
+      changed = true;
+      break;
+    case IR_ACTION_FAN_MED:
+      if (!runState) startSystem();
+      setFanSpeed(FAN_MED);
+      irPendingPrefsWrite = true;
+      #if IR_RUNTIME_FEEDBACK
+      Serial.println("✅ IR action: fan med");
+      #endif
+      changed = true;
+      break;
+    case IR_ACTION_FAN_HIGH:
+      if (!runState) startSystem();
+      setFanSpeed(FAN_HIGH);
+      irPendingPrefsWrite = true;
+      #if IR_RUNTIME_FEEDBACK
+      Serial.println("✅ IR action: fan high");
+      #endif
+      changed = true;
+      break;
+    case IR_ACTION_NONE:
+    default:
+      break;
+  }
+
+  if (changed) {
+    publishStateAfterIrAction();
+  }
+}
+
+void processIrCandidate(unsigned long now,
+                        uint64_t token,
+                        uint64_t raw,
+                        int proto,
+                        uint8_t bits,
+                        uint16_t rawlen,
+                        uint16_t address,
+                        uint16_t command,
+                        bool isRepeat) {
+  if (isRepeat && (now - irLastActionAt < IR_REPEAT_GUARD_MS)) {
+    return;
+  }
+
+  if (irLearnArmed) {
+    IrTokenSet* learnSet = nullptr;
+    const char* learnKey = nullptr;
+    bool targetOk = getIrSetAndPrefByTarget(String(irLearnTarget), learnSet, learnKey);
+    uint8_t beforeCount = (targetOk && learnSet != nullptr) ? learnSet->count : 0;
+    if (learnIrMapping(irLearnTarget, token)) {
+      uint8_t afterCount = (targetOk && learnSet != nullptr) ? learnSet->count : beforeCount;
+      bool added = afterCount > beforeCount;
+      if (added) {
+        Serial.println("✅ IR learned [" + String(irLearnTarget) + "] total=" + String(afterCount));
+      } else {
+        Serial.println("ℹ️ IR duplicate [" + String(irLearnTarget) + "] total=" + String(afterCount));
+      }
+    } else {
+      Serial.println("❌ IR learn failed for target: " + String(irLearnTarget));
+    }
+    if (irLearnSamplesRemaining > 0) irLearnSamplesRemaining--;
+    if (irLearnSamplesRemaining == 0) {
+      irLearnArmed = false;
+      irLearnTarget[0] = '\0';
+    } else {
+      Serial.println("  ↳ Learn remaining: " + String(irLearnSamplesRemaining));
+    }
+    irLastActionAt = now;
+    return;
+  }
+
+  IrAction action = resolveIrAction(token);
+  if (action == IR_ACTION_NONE) {
+    #if IR_RUNTIME_FEEDBACK
+    static unsigned long lastIrUnmappedAt = 0;
+    if (now - lastIrUnmappedAt > 1200) {
+      lastIrUnmappedAt = now;
+      Serial.println("📡 IR frame received (no mapped action)");
+    }
+    #endif
+    #if IR_DEBUG_IR_LOGS
+    if (IR_LOG_UNKNOWN_FRAMES &&
+        (token != irLastUnknownRaw || (now - irLastUnknownLogAt > 1200))) {
+      irLastUnknownRaw = token;
+      irLastUnknownLogAt = now;
+      Serial.printf("📡 IR unknown token=%s raw=%s proto=%d bits=%u rawlen=%u addr=0x%04X cmd=0x%04X repeat=%d\n",
+                    formatIrRawHex(token).c_str(),
+                    formatIrRawHex(raw).c_str(),
+                    proto,
+                    bits,
+                    rawlen,
+                    address,
+                    command,
+                    isRepeat ? 1 : 0);
+    }
+    #endif
+    return;
+  }
+
+  applyIrAction(action);
+  irLastActionAt = now;
+}
+
+void finalizeIrBurst(unsigned long now) {
+  if (!irBurst.active) return;
+  if (IR_PRINT_BURST_SUMMARY) {
+    Serial.printf("📦 IR burst frames=%u selected token=%s raw=%s proto=%d bits=%u rawlen=%u addr=0x%04X cmd=0x%04X repeat=%d\n",
+                  irBurst.frameCount,
+                  formatIrRawHex(irBurst.bestToken).c_str(),
+                  formatIrRawHex(irBurst.bestRaw).c_str(),
+                  irBurst.bestProto,
+                  irBurst.bestBits,
+                  irBurst.bestRawlen,
+                  irBurst.bestAddress,
+                  irBurst.bestCommand,
+                  irBurst.bestRepeat ? 1 : 0);
+  }
+  processIrCandidate(now,
+                     irBurst.bestToken,
+                     irBurst.bestRaw,
+                     irBurst.bestProto,
+                     irBurst.bestBits,
+                     irBurst.bestRawlen,
+                     irBurst.bestAddress,
+                     irBurst.bestCommand,
+                     irBurst.bestRepeat);
+  irBurst.active = false;
+  irBurst.frameCount = 0;
+}
+
+void handleIrRemote(unsigned long now) {
+  if (!IR_REMOTE_ENABLED) return;
+
+  // Finalize pending burst after collection window ends.
+  if (irBurst.active && (now - irBurst.lastFrameAt > IR_BURST_COLLECT_MS)) {
+    finalizeIrBurst(now);
+  }
+
+  if (!irrecv.decode(&irResults)) return;
+
+  auto &irData = irResults;
+
+  // Ignore overflowed frames (usually truncated long AC frames / noise).
+  if (irData.overflow) {
+    #if IR_DEBUG_IR_LOGS
+    if (IR_LOG_UNKNOWN_FRAMES && (now - irLastUnknownLogAt > 1200)) {
+      irLastUnknownLogAt = now;
+      Serial.printf("📡 IR overflow frame ignored (rawlen=%u bits=%u)\n",
+                    irData.rawlen,
+                    irData.bits);
+    }
+    #endif
+    irrecv.resume();
+    return;
+  }
+
+  uint64_t raw = irData.value;
+  uint64_t token = buildIrMatchToken(irData);
+  bool isRepeat = irData.repeat;
+  int proto = (int)irData.decode_type;
+  uint16_t rawlen = irData.rawlen;
+  uint8_t bits = irData.bits;
+  uint16_t address = irData.address;
+  uint16_t command = irData.command;
+
+  if (IR_PRINT_EACH_FRAME) {
+    Serial.printf("📡 IR rx token=%s raw=%s proto=%d bits=%u rawlen=%u addr=0x%04X cmd=0x%04X repeat=%d\n",
+                  formatIrRawHex(token).c_str(),
+                  formatIrRawHex(raw).c_str(),
+                  proto,
+                  bits,
+                  rawlen,
+                  address,
+                  command,
+                  isRepeat ? 1 : 0);
+  }
+
+  // Protocol-level AC decode path (IRremoteESP8266 common A/C conversion).
+  if (!irLearnArmed && applyEspAcDecodedState(irData)) {
+    irLastActionAt = now;
+    irrecv.resume();
+    return;
+  }
+
+  if (!irBurst.active) {
+    irBurst.active = true;
+    irBurst.startedAt = now;
+    irBurst.lastFrameAt = now;
+    irBurst.frameCount = 1;
+    irBurst.bestToken = token;
+    irBurst.bestRaw = raw;
+    irBurst.bestRawlen = rawlen;
+    irBurst.bestBits = bits;
+    irBurst.bestAddress = address;
+    irBurst.bestCommand = command;
+    irBurst.bestProto = proto;
+    irBurst.bestRepeat = isRepeat;
+  } else {
+    irBurst.frameCount++;
+    irBurst.lastFrameAt = now;
+
+    int bestScore = (int)irBurst.bestRawlen + (irBurst.bestProto != 0 ? 1000 : 0) + (irBurst.bestRepeat ? 0 : 80);
+    int newScore = (int)rawlen + (proto != 0 ? 1000 : 0) + (isRepeat ? 0 : 80);
+    if (newScore >= bestScore) {
+      irBurst.bestToken = token;
+      irBurst.bestRaw = raw;
+      irBurst.bestRawlen = rawlen;
+      irBurst.bestBits = bits;
+      irBurst.bestAddress = address;
+      irBurst.bestCommand = command;
+      irBurst.bestProto = proto;
+      irBurst.bestRepeat = isRepeat;
+    }
+  }
+
+  irrecv.resume();
 }
 
 // Function to handle incoming MQTT messages
@@ -3233,49 +3999,6 @@ void publishStatusOnlineLocal(){
   }
 }
 
-const char* awsMqttStateToText(int state) {
-  switch (state) {
-    case -4: return "MQTT_CONNECTION_TIMEOUT";
-    case -3: return "MQTT_CONNECTION_LOST";
-    case -2: return "MQTT_CONNECT_FAILED";
-    case -1: return "MQTT_DISCONNECTED";
-    case 0: return "MQTT_CONNECTED";
-    case 1: return "MQTT_CONNECT_BAD_PROTOCOL";
-    case 2: return "MQTT_CONNECT_BAD_CLIENT_ID";
-    case 3: return "MQTT_CONNECT_UNAVAILABLE";
-    case 4: return "MQTT_CONNECT_BAD_CREDENTIALS";
-    case 5: return "MQTT_CONNECT_UNAUTHORIZED";
-    default: return "UNKNOWN_STATE";
-  }
-}
-
-void logAwsConnectFailure(const char* phase) {
-  const int state = client.state();
-  Serial.println("❌ AWS IoT connect failed");
-  Serial.println("  Phase: " + String(phase));
-  Serial.println("  MQTT state: " + String(state) + " (" + String(awsMqttStateToText(state)) + ")");
-  Serial.println("  Thing: " + String(THINGNAME));
-  Serial.println("  Endpoint: " + String(AWS_IOT_ENDPOINT));
-  Serial.println("  WiFi: " + String(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED"));
-  Serial.println("  Hint: ensure cert is ACTIVE, attached to this Thing, and not used by another online board.");
-}
-
-bool syncAwsClock(uint32_t timeoutMs = 12000) {
-  configTime(0, 0, "pool.ntp.org", "time.google.com");
-  const unsigned long start = millis();
-  time_t now = time(nullptr);
-  while (now < 1700000000 && (millis() - start) < timeoutMs) {
-    delay(200);
-    esp_task_wdt_reset();
-    now = time(nullptr);
-  }
-  if (now < 1700000000) {
-    Serial.println("⚠️ NTP sync timeout - TLS may fail");
-    return false;
-  }
-  return true;
-}
-
 // Publish AWS connection status to Local MQTT (for dashboard cloud indicator)
 void publishAwsConnectionStatus(bool connected){
   if(!mqttLocal.connected()) return;
@@ -3763,91 +4486,55 @@ void setup()
 
   Wire.begin(21, 22);
   Wire.setClock(100000);  // 100kHz I2C clock (safer for multiple sensors)
-  Wire.setTimeout(250);   // 250ms I2C timeout for initial sensor detection
-  delay(100);             // Let I2C bus stabilize before probing sensors
+  Wire.setTimeout(50);     // 50ms I2C timeout (prevents hangs)
  
   // ========== AUTO-DETECT SENSORS (All 3 Together) ==========
   Serial.println("\n--- Detecting Sensors ---");
   Serial.println("  Power: All sensors from ESP32 3.3V pin (~20-28mA total, well within limits)");
-  Serial.println("  I2C: SDA=GPIO21, SCL=GPIO22, 100kHz");
-
-  // I2C bus scan for debugging
-  Serial.print("  I2C scan: ");
-  int i2cDeviceCount = 0;
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("0x%02X ", addr);
-      i2cDeviceCount++;
-    }
-  }
-  Serial.printf("(%d device%s found)\n", i2cDeviceCount, i2cDeviceCount == 1 ? "" : "s");
  
-  // Try all 3 sensors (they all work together, powered from ESP32 3.3V)
+  // Try all sensors (they all work together, powered from ESP32 3.3V)
   bool sen66Detected = false;
+  bool sen55Detected = false;
   bool sdp810Detected = false;
   bool sht45Detected = false;
   bool dht22Detected = false;
  
-  // Try combo air sensor: prefer SEN66, then SEN55 (auto-detect)
+  // Try SEN66 first (Air Quality Sensor – preferred, has CO2)
   esp_task_wdt_reset();
-  int16_t sen66Err = -1;
-#if HAS_SEN66_LIB
-  sen66Sensor.begin(Wire, 0x6B);
-  sen66Err = sen66Sensor.deviceReset();
+  sen66.begin(Wire, SEN66_I2C_ADDR_6B);
+  int16_t sen66Err = sen66.deviceReset();
   if (sen66Err == 0) {
+    // Feed watchdog during warmup (1200ms split into smaller chunks)
     for (int i = 0; i < 6; i++) {
       delay(200);
       esp_task_wdt_reset();
     }
-    sen66Err = sen66Sensor.startContinuousMeasurement();
+    sen66Err = sen66.startContinuousMeasurement();
     if (sen66Err == 0) {
       useSEN66 = true;
       sen66Detected = true;
-      comboAirSensorModel = COMBO_AIR_SEN66;
       Serial.println("✓ SEN66 detected (Air Quality: PM, AQI, VOC, NOx, CO2)");
     }
   }
-#endif
 
-#if HAS_SEN5X_LIB
+  // Try SEN55 only when SEN66 is absent (same job, no CO2)
   if (!sen66Detected) {
-    Serial.println("  Probing SEN55 at I2C 0x69...");
-    sen55Sensor.begin(Wire);
-    sen66Err = sen55Sensor.deviceReset();
-    if (sen66Err == 0) {
-      for (int i = 0; i < 8; i++) {
+    esp_task_wdt_reset();
+    sen55.begin(Wire);  // SEN55 default I2C address 0x69
+    uint16_t sen55Err = sen55.deviceReset();
+    if (sen55Err == 0) {
+      for (int i = 0; i < 6; i++) {
         delay(200);
         esp_task_wdt_reset();
       }
-      sen66Err = sen55Sensor.startMeasurement();
-      if (sen66Err == 0) {
-        useSEN66 = true;
-        sen66Detected = true;
-        comboAirSensorModel = COMBO_AIR_SEN55;
-        Serial.println("✓ SEN55 detected (Air Quality: PM, AQI, VOC, NOx)");
-        // First reading after startup — wait for data to be ready
-        delay(1500);
-        esp_task_wdt_reset();
-        float pm1, pm2p5, pm4, pm10, hum, temp, voc, nox;
-        int16_t readErr = sen55Sensor.readMeasuredValues(pm1, pm2p5, pm4, pm10, hum, temp, voc, nox);
-        if (readErr == 0) {
-          Serial.printf("  [SEN55 first read] T:%.1f°C H:%.1f%% PM2.5:%.1f VOC:%.0f NOx:%.0f\n", temp, hum, pm2p5, voc, nox);
-        } else {
-          Serial.printf("  [SEN55 first read] pending (err=%d) - will appear in next cycle\n", readErr);
-        }
-      } else {
-        Serial.printf("✗ SEN55 startMeasurement failed (err=%d)\n", sen66Err);
+      sen55Err = sen55.startMeasurement();
+      if (sen55Err == 0) {
+        useSEN55 = true;
+        sen55Detected = true;
+        Serial.println("✓ SEN55 detected (Air Quality: PM, AQI, VOC, NOx – CO2 N/A)");
       }
-    } else {
-      Serial.printf("✗ SEN55 deviceReset failed (err=%d) - check wiring: VDD=5V, SDA=GPIO21, SCL=GPIO22, GND\n", sen66Err);
     }
   }
-#else
-  if (!sen66Detected) {
-    Serial.println("⚠ SEN55 library not installed - install 'Sensirion I2C SEN5x' via Arduino Library Manager");
-  }
-#endif
  
   // Try SDP810 (HEPA Pressure Sensor)
   esp_task_wdt_reset();
@@ -3871,6 +4558,7 @@ void setup()
     Serial.println("✓ SHT45 detected (Temperature & Humidity - Primary for Control)");
   }
  
+  #if ENABLE_DHT22_FALLBACK
   // Try DHT22 fallback (GPIO digital temp/humidity)
   if (!sht45Detected) {
     dht.begin();
@@ -3886,28 +4574,30 @@ void setup()
       Serial.println("⚠ DHT22 not detected on GPIO" + String(DHT_PIN) + " (check DATA wire / pull-up)");
     }
   }
+  #endif
  
-  // Restore tighter timeout for normal operation
-  Wire.setTimeout(50);
-
   // Determine sensor mode and print configuration
   Serial.println("\n--- Sensor Configuration ---");
-  if (sen66Detected && sdp810Detected) {
-    // SEN66 + SDP810 = COMBO mode (SHT45 can be added but doesn't change mode)
+  if ((sen66Detected || sen55Detected) && sdp810Detected) {
+    // SEN6x + SDP810 = COMBO mode (SHT45 can be added but doesn't change mode)
+    const char* aqSensor = sen66Detected ? "SEN66" : "SEN55";
+    const char* aqData   = sen66Detected
+      ? "AQI/PM/VOC/NOx/CO2 (SEN66)"
+      : "AQI/PM/VOC/NOx (SEN55, no CO2)";
     if (sht45Detected) {
-      Serial.println("  Mode: COMBO (SEN66 + SDP810 + SHT45)");
-      Serial.println("  Data: Temp/Hum (SHT45 - Primary), AQI/PM/VOC/NOx/CO2 (SEN66), HEPA Status (SDP810)");
+      Serial.printf("  Mode: COMBO (%s + SDP810 + SHT45)\n", aqSensor);
+      Serial.printf("  Data: Temp/Hum (SHT45 - Primary), %s, HEPA Status (SDP810)\n", aqData);
     } else {
-      Serial.println("  Mode: COMBO (SEN66 + SDP810)");
-      Serial.println("  Data: Temp/Hum/AQI/PM/VOC/NOx/CO2 (SEN66), HEPA Status (SDP810)");
+      Serial.printf("  Mode: COMBO (%s + SDP810)\n", aqSensor);
+      Serial.printf("  Data: Temp/Hum/%s, HEPA Status (SDP810)\n", aqData);
     }
     originalSensorMode = SENSOR_COMBO;
-  } else if (sht45Detected && !sen66Detected && !sdp810Detected) {
+  } else if (sht45Detected && !sen66Detected && !sen55Detected && !sdp810Detected) {
     // Only SHT45 = SHT45 mode
     Serial.println("  Mode: ORIGINAL (SHT45 only)");
     Serial.println("  Data: Temperature, Humidity");
     originalSensorMode = SENSOR_SHT45;
-  } else if (dht22Detected && !sen66Detected && !sdp810Detected) {
+  } else if (dht22Detected && !sen66Detected && !sen55Detected && !sdp810Detected) {
     // DHT22 fallback mode
     Serial.println("  Mode: DHT22 (fallback)");
     Serial.println("  Data: Temperature, Humidity");
@@ -3921,6 +4611,17 @@ void setup()
   esp_task_wdt_reset();
 
   prefs.begin("ahu", false);
+
+  // IR mapping (learned token sets persisted as comma-separated hex strings)
+  loadIrTokenSetFromPrefs("ir_power", irTokensPowerToggle);
+  loadIrTokenSetFromPrefs("ir_power_on", irTokensPowerOn);
+  loadIrTokenSetFromPrefs("ir_power_off", irTokensPowerOff);
+  loadIrTokenSetFromPrefs("ir_temp_up", irTokensTempUp);
+  loadIrTokenSetFromPrefs("ir_temp_down", irTokensTempDown);
+  loadIrTokenSetFromPrefs("ir_fan_cycle", irTokensFanCycle);
+  loadIrTokenSetFromPrefs("ir_fan_low", irTokensFanLow);
+  loadIrTokenSetFromPrefs("ir_fan_med", irTokensFanMed);
+  loadIrTokenSetFromPrefs("ir_fan_high", irTokensFanHigh);
 
   // Display OTA version info if available (from previous OTA update)
   String otaVersion = prefs.getString("ota_version", "");
@@ -4056,11 +4757,14 @@ void setup()
   // ========== STANDALONE MODE: Non-blocking WiFi ==========
   // Start WiFi connection but don't wait - system works without it
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Use provisioned primary WiFi if available; otherwise fallback defaults.
+  const char* ssid = (w1_ssid.length() > 0) ? w1_ssid.c_str() : WIFI_SSID;
+  const char* pass = (w1_pass.length() > 0) ? w1_pass.c_str() : WIFI_PASSWORD;
+  WiFi.begin(ssid, pass);
   WiFi.setAutoReconnect(true);  // Auto-reconnect on disconnect
   WiFi.persistent(true);         // Save WiFi credentials to flash
  
-  Serial.println("\n📡 WiFi: Connecting to '" + String(WIFI_SSID) + "' (non-blocking)");
+  Serial.println("\n📡 WiFi: Connecting to '" + String(ssid) + "' (non-blocking)");
   Serial.println("  📶 ESP32 and RPi both connect to same network");
   Serial.println("  🌐 mDNS: Will connect to '" + mqttHost + "' (works on any network!)");
   Serial.println("  ⚠️  System will work standalone even without WiFi");
@@ -4080,10 +4784,8 @@ void setup()
   // Set keep-alive to 60 seconds (AWS IoT default is 1200s, but 60s is safer)
   client.setKeepAlive(60);
  
-  // TLS+MQTT handshakes can take longer on hospital WiFi/VPN paths.
-  // Keep these conservative to avoid false MQTT_CONNECTION_TIMEOUT (-4).
-  client.setSocketTimeout(20);
-  net.setHandshakeTimeout(25);
+  // Set socket timeout - VERY SHORT timeout to prevent blocking watchdog
+  client.setSocketTimeout(1);  // 1 second max - prevents watchdog resets
 
   // Set the function to handle messages
   client.setCallback(messageHandler);
@@ -4093,10 +4795,7 @@ void setup()
 
   Serial.println("\n📡 MQTT Configuration (Optional):");
   Serial.println("  ☁️  AWS IoT (Cloud):");
-  Serial.println("      📥 Subscribe: " + awsCmdTopic());
-  if (ALLOW_AWS_GENERIC_COMMAND_TOPIC) {
-    Serial.println("      ⚠️ Generic:   " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-  }
+  Serial.println("      📥 Subscribe: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
   Serial.println("      📤 Publish:   " + String(AWS_IOT_PUBLISH_TOPIC));
   Serial.println("  🏠 Local MQTT (Pi): " + mqttHost);
   Serial.println("  🧭 Local topic root: " + baseTopic());
@@ -4118,33 +4817,20 @@ void setup()
     // Quick internet check before AWS attempt
     if (checkInternetAvailable()) {
       Serial.println("✓ Internet available - attempting AWS IoT connection...");
-      if (!syncAwsClock(20000)) {
-        Serial.println("⚠️ Skipping AWS connect on startup - clock not synced yet");
+      esp_task_wdt_reset(); // Feed watchdog before connection
+      if (client.connect(THINGNAME)) {
+        esp_task_wdt_reset(); // Feed watchdog after connection
+        Serial.println("✓ AWS IoT connected on startup (cloud service active)");
+        esp_task_wdt_reset(); // Feed watchdog before subscribe
+        bool subResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
+        esp_task_wdt_reset(); // Feed watchdog after subscribe
+        Serial.print("📥 Subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
+        Serial.println(subResult ? " ✓" : " ✗ FAILED");
+        publishStatusOnline();
       } else {
-        client.disconnect();
-        net.stop();
-        delay(50);
-        esp_task_wdt_reset(); // Feed watchdog before connection
-        if (client.connect(THINGNAME)) {
-          esp_task_wdt_reset(); // Feed watchdog after connection
-          Serial.println("✓ AWS IoT connected on startup (cloud service active)");
-          esp_task_wdt_reset(); // Feed watchdog before subscribe
-          bool subResult = client.subscribe(awsCmdTopic().c_str());
-          esp_task_wdt_reset(); // Feed watchdog after subscribe
-          Serial.print("📥 Subscribed to: " + awsCmdTopic());
-          Serial.println(subResult ? " ✓" : " ✗ FAILED");
-          if (ALLOW_AWS_GENERIC_COMMAND_TOPIC) {
-            bool genericSubResult = client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-            Serial.print("📥 Generic subscribed to: " + String(AWS_IOT_SUBSCRIBE_TOPIC));
-            Serial.println(genericSubResult ? " ✓" : " ✗ FAILED");
-          }
-          publishStatusOnline();
-        } else {
-          esp_task_wdt_reset(); // Feed watchdog after failed connection
-          logAwsConnectFailure("startup");
-          Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
-          Serial.println("  → Local MQTT continues working normally");
-        }
+        esp_task_wdt_reset(); // Feed watchdog after failed connection
+        Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
+        Serial.println("  → Local MQTT continues working normally");
       }
     } else {
       esp_task_wdt_reset();
@@ -4252,6 +4938,18 @@ void setup()
   }
 
   lastLoopTime = millis();
+
+  if (IR_REMOTE_ENABLED) {
+    irrecv.setTolerance(30);
+#if DECODE_HASH
+    irrecv.setUnknownThreshold(6);
+#endif
+    irrecv.enableIRIn();
+    Serial.println("✓ IR receiver started on GPIO" + String(IR_RX_PIN));
+    #if IR_VERBOSE_SERIAL
+    Serial.println("  Use serial: ir learn power|tempup|tempdown|fancycle|fanlow|fanmed|fanhigh");
+    #endif
+  }
 }
 
 void loop()
@@ -4263,6 +4961,10 @@ void loop()
  
   // SELF-HEALING: Perform periodic health check and auto-recovery
   performHealthCheck();
+
+  // Handheld IR remote input path (YY-247 learning + control)
+  handleIrRemote(now);
+  persistIrStateIfDue(now);
  
   // Check for loop hangs (log only, no reset)
   if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
@@ -4323,7 +5025,9 @@ void loop()
         lastWifiReconnectAttempt = now;
         WiFi.disconnect(false, false);
         // No delay - let reconnect happen in background
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        const char* ssid = (w1_ssid.length() > 0) ? w1_ssid.c_str() : WIFI_SSID;
+        const char* pass = (w1_pass.length() > 0) ? w1_pass.c_str() : WIFI_PASSWORD;
+        WiFi.begin(ssid, pass);
         Serial.println("📡 WiFi: Reconnecting in background...");
       }
     }
@@ -4383,45 +5087,28 @@ void loop()
           // Continue to local MQTT - don't try AWS
         } else {
           // Internet available - try AWS connection
-          if (!syncAwsClock(20000)) {
-            selfHealing.mqttAwsFailCount++;
-            if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
-              Serial.printf("⚠️ NTP not synced - delaying AWS connect (attempt %d)\n", selfHealing.mqttAwsFailCount);
-            }
-          } else {
-            // Ensure stale TLS socket state does not carry across retries.
-            client.disconnect();
-            net.stop();
-            delay(50);
-            esp_task_wdt_reset();
-            Serial.println("📡 Connecting to AWS IoT...");
-           
-            if (client.connect(THINGNAME)) {
+          esp_task_wdt_reset();
+          Serial.println("📡 Connecting to AWS IoT...");
+         
+          if (client.connect(THINGNAME)) {
             esp_task_wdt_reset();
             Serial.println("✓ AWS IoT CONNECTED!");
             selfHealing.mqttAwsFailCount = 0;
             selfHealing.mqttAwsHealthy = true;
             selfHealing.totalRecoveries++;
            
-            client.subscribe(awsCmdTopic().c_str());
-            if (ALLOW_AWS_GENERIC_COMMAND_TOPIC) {
-              client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
-            }
+            client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
             publishStatusOnline();
            
             // Notify dashboard of AWS connection status
             publishAwsConnectionStatus(true);
             motorLogMsg("☁️ Cloud connected (AWS IoT)");
-            } else {
-              esp_task_wdt_reset();
-              selfHealing.mqttAwsFailCount++;
-              if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
-                logAwsConnectFailure("runtime");
-              }
-              if (selfHealing.mqttAwsFailCount <= 3) {
-                Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n",
-                              selfHealing.mqttAwsFailCount, retryInterval/1000);
-              }
+          } else {
+            esp_task_wdt_reset();
+            selfHealing.mqttAwsFailCount++;
+            if (selfHealing.mqttAwsFailCount <= 3) {
+              Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n",
+                            selfHealing.mqttAwsFailCount, retryInterval/1000);
             }
           }
         }
@@ -4472,17 +5159,16 @@ void loop()
   // Read appropriate sensors based on what's detected
   // If all 3 sensors or combo sensors detected, use combo reading function
   // Otherwise use single SHT45 reading function
-  if (useSEN66 || useSDP810) {
-    readComboSensorsIfDue();  // Reads all connected sensors (SHT45 + SEN66 + SDP810)
+  if (useSEN66 || useSEN55 || useSDP810) {
+    readComboSensorsIfDue();  // Reads all connected sensors (SHT45 + SEN66/SEN55 + SDP810)
   } else if (useSHT45) {
     readSensorIfDue();  // Only SHT45 available
   } else if (useDHT22) {
     readDht22IfDue();  // DHT22 fallback if SHT45 is not available
   }
  
-  // Always print DHT22/SEN55 raw status for wiring/pin troubleshooting.
+  // Always print DHT22 raw status for wiring/pin troubleshooting.
   debugDht22StatusIfDue();
-  debugSen55StatusIfDue();
  
   // Log significant environmental changes (±5°C or ±5% humidity)
   checkAndLogEnvChanges();
@@ -4499,8 +5185,9 @@ void loop()
     if (now - lastSensorModeLog > 60000) {
     lastSensorModeLog = now;
     esp_task_wdt_reset();
-    Serial.printf("[DEBUG] Sensors: SEN66=%s SDP810=%s SHT45=%s\n",
+    Serial.printf("[DEBUG] Sensors: SEN66=%s SEN55=%s SDP810=%s SHT45=%s\n",
                   useSEN66 ? "Y" : "N",
+                  useSEN55 ? "Y" : "N",
                   useSDP810 ? "Y" : "N",
                   useSHT45 ? "Y" : "N");
     Serial.printf("[DEBUG] Fallback DHT22=%s\n", useDHT22 ? "Y" : "N");

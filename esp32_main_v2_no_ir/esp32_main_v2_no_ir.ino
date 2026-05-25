@@ -27,10 +27,8 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ESPmDNS.h>  // For mDNS hostname resolution
-
-// Keep these types in this file so Arduino auto-generated prototypes can use them.
-enum SensorMode { SENSOR_NONE, SENSOR_SHT45, SENSOR_DHT22, SENSOR_COMBO };
-enum FanSpeed : uint8_t { FAN_OFF = 0, FAN_LOW = 1, FAN_MED = 2, FAN_HIGH = 3 };
+// Must be last include: Arduino inserts forward declarations here; they need SensorMode / FanSpeed.
+#include "ahu_ctrl_types.h"
 
 // Field trial: disable RTC brownout detector as early as possible (before Arduino init / setup()).
 // Brief 3.3V dips (compressor/relay load) can trigger BOR even when mains returns; this only masks
@@ -88,7 +86,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP19_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP30_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -139,8 +137,8 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "AlMed";
-const char WIFI_PASSWORD[] = "AlMed123456";
+const char WIFI_SSID[] = "ttml";
+const char WIFI_PASSWORD[] = "BDHIND123";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -267,55 +265,55 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+MIIDWTCCAkGgAwIBAgIUaDS8CQV+LlNFD8t0Gsvo70GdnDYwDQYJKoZIhvcNAQEL
 BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
-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
+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
 -----END CERTIFICATE-----
 
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
 
 )KEY";
@@ -509,9 +507,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "BDH Industries ltd";    // Kaveri Hospital
-const char* ROOM = "Blister -2 AHT-10";         // Burns Ward
-const char* AHU  = "19";            // AHU 1
+const char* SITE = "BHD";    // Kaveri Hospital
+const char* ROOM = "BLISTER-2 AHT-10";         // Burns Ward
+const char* AHU  = "AHU-30";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -3329,8 +3327,8 @@ void publishStatusOnlineLocal(){
 }
 
 // Publish AWS connection status to Local MQTT (for dashboard cloud indicator)
-void publishAwsConnectionStatus(bool connected){
-  if(!mqttLocal.connected()) return;
+bool publishAwsConnectionStatus(bool connected){
+  if(!mqttLocal.connected()) return false;
  
   StaticJsonDocument<256> doc;
   doc["type"] = "aws_status";
@@ -3346,9 +3344,11 @@ void publishAwsConnectionStatus(bool connected){
  
   // Publish to a dedicated AWS status topic
   String awsStatusTopic = baseTopic() + "/aws_status";
-  mqttLocal.publish(awsStatusTopic.c_str(), (uint8_t*)buf, n, true);  // Retained message
- 
-  Serial.printf("☁️ AWS status published: %s\n", connected ? "CONNECTED" : "DISCONNECTED");
+  bool ok = mqttLocal.publish(awsStatusTopic.c_str(), (uint8_t*)buf, n, true);  // Retained message
+  if (ok) {
+    Serial.printf("☁️ AWS status published: %s\n", connected ? "CONNECTED" : "DISCONNECTED");
+  }
+  return ok;
 }
 
 void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
@@ -3757,6 +3757,10 @@ void ensureMqtt(){
     mqttLocal.subscribe("almed/rpi/ota/status", 1);  // Subscribe to RPi OTA status
     Serial.println("✓ Local MQTT connected");
     publishStateLocal();
+    // Dashboard cloud badge uses retained aws_status — publish if AWS is already up
+    if (onlineMode && client.connected()) {
+      publishAwsConnectionStatus(true);
+    }
   }
   // Silent failure - will retry in 3s
 }
@@ -4438,6 +4442,7 @@ void loop()
   // ========== SELF-HEALING: AWS IoT MQTT (Cloud) ==========
   // Track AWS connection state changes
   static bool wasAwsConnected = false;
+  static bool awsStatusReportedToLocal = false;
  
   if (onlineMode) {
     bool isAwsConnected = client.connected();
@@ -4446,10 +4451,13 @@ void loop()
       client.loop();
       selfHealing.mqttAwsHealthy = true;
      
-      // Just connected - notify dashboard
+      // Notify dashboard when AWS is up (retry until local MQTT accepts retained aws_status)
       if (!wasAwsConnected) {
         wasAwsConnected = true;
-        publishAwsConnectionStatus(true);
+        awsStatusReportedToLocal = false;
+      }
+      if (!awsStatusReportedToLocal && mqttLocal.connected()) {
+        awsStatusReportedToLocal = publishAwsConnectionStatus(true);
       }
     } else {
       selfHealing.mqttAwsHealthy = false;
@@ -4457,6 +4465,7 @@ void loop()
       // Just disconnected - notify dashboard
       if (wasAwsConnected) {
         wasAwsConnected = false;
+        awsStatusReportedToLocal = false;
         publishAwsConnectionStatus(false);
         Serial.println("⚠️ AWS IoT disconnected");
       }
@@ -4502,8 +4511,8 @@ void loop()
             subscribeAwsIotCommandTopics();
             publishStatusOnline();
            
-            // Notify dashboard of AWS connection status
-            publishAwsConnectionStatus(true);
+            // Notify dashboard of AWS connection status (may retry in loop if local MQTT lags)
+            awsStatusReportedToLocal = publishAwsConnectionStatus(true);
             motorLogMsg("☁️ Cloud connected (AWS IoT)");
           } else {
             esp_task_wdt_reset();

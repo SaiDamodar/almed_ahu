@@ -14,6 +14,9 @@ AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '3L6R2WDezRxDZfpPbNen
 AWS_IOT_ENDPOINT = os.getenv('AWS_IOT_ENDPOINT', 'al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com')
 AWS_IOT_TOPIC_PUBLISH = os.getenv('AWS_IOT_TOPIC_PUBLISH', 'esp32/pub')
 AWS_IOT_TOPIC_SUBSCRIBE = os.getenv('AWS_IOT_TOPIC_SUBSCRIBE', 'esp32/sub')
+# OTA: default False — only publish to esp32/<thing_name>/sub so other devices never see the command.
+# Set True only for legacy devices that never subscribed to per-thing topics (still need target_thing in JSON on new firmware).
+OTA_ALSO_PUBLISH_SHARED_SUBSCRIBE = os.getenv('OTA_ALSO_PUBLISH_SHARED_SUBSCRIBE', '').lower() in ('1', 'true', 'yes')
 
 # MongoDB Atlas (historical data storage)
 MONGO_URI = os.getenv(
