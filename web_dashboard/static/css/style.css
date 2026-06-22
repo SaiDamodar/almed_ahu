@@ -743,7 +743,78 @@ body {
   }
 }
 
-/* Login Page Styles */
+/* Hospitals page */
+.hospital-section {
+  margin-bottom: 36px;
+}
+
+.hospital-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.room-section {
+  margin-bottom: 24px;
+}
+
+.room-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.devices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.hospital-device-card {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+
+.hospital-device-body {
+  margin-top: 16px;
+  flex: 1;
+}
+
+.hospital-device-name {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.hospital-device-meta {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.hospital-device-location {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.hospital-device-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.device-card.hidden {
+  display: none !important;
+}
+
 .login-container {
   min-height: 100vh;
   display: flex;

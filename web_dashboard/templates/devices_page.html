@@ -5,6 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Devices - ALMED AHU Control</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .filter-tabs {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .filter-tab {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+            color: var(--text-primary);
+        }
+        .filter-tab:hover {
+            background: var(--bg-tertiary, var(--bg-secondary));
+        }
+        .filter-tab.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        .device-counts {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+        .device-card.hidden {
+            display: none !important;
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -42,6 +77,13 @@
                     <button class="btn btn-primary">+ Add Device</button>
                 </div>
 
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-filter="all" onclick="setDeviceFilter('all')">All AHUs</button>
+                    <button class="filter-tab" data-filter="online" onclick="setDeviceFilter('online')">Online</button>
+                    <button class="filter-tab" data-filter="offline" onclick="setDeviceFilter('offline')">Offline</button>
+                </div>
+                <div class="device-counts" id="device-counts">Loading devices...</div>
+
                 <div id="devices-container">
                     <div class="loading">
                         <div class="spinner"></div>
@@ -53,12 +95,86 @@
 
     <script src="{{ url_for('static', filename='js/api.js') }}"></script>
     <script>
+        let allDevices = [];
+        let deviceOnlineStatus = {};
+        let currentFilter = 'all';
+        let statusRefreshTimer = null;
+        let listRefreshTimer = null;
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : String(text);
+            return div.innerHTML;
+        }
+
+        function safeDomId(deviceId) {
+            return 'device-' + String(deviceId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        }
+
+        function setDeviceFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.filter === filter);
+            });
+            applyDeviceFilters();
+        }
+
+        function deviceMatchesSearch(device, search) {
+            if (!search) return true;
+            const haystack = [
+                device.name,
+                device.site,
+                device.room,
+                device.id,
+                device.ahu
+            ].filter(Boolean).join(' ').toLowerCase();
+            return haystack.includes(search);
+        }
+
+        function applyDeviceFilters() {
+            const searchInput = document.getElementById('device-search');
+            const search = (searchInput ? searchInput.value : '').trim().toLowerCase();
+            let visibleCount = 0;
+
+            document.querySelectorAll('.device-card[data-device-id]').forEach(card => {
+                const deviceId = card.dataset.deviceId;
+                const device = allDevices.find(d => d.id === deviceId);
+                if (!device) return;
+
+                const isOnline = deviceOnlineStatus[deviceId] === true;
+                const statusKey = isOnline ? 'online' : 'offline';
+                const matchesFilter = currentFilter === 'all' || currentFilter === statusKey;
+                const matchesSearch = deviceMatchesSearch(device, search);
+                const show = matchesFilter && matchesSearch;
+
+                card.classList.toggle('hidden', !show);
+                if (show) visibleCount++;
+            });
+
+            updateDeviceCounts(visibleCount);
+        }
+
+        function updateDeviceCounts(visibleCount) {
+            const total = allDevices.length;
+            const online = allDevices.filter(d => deviceOnlineStatus[d.id] === true).length;
+            const offline = total - online;
+            const countsEl = document.getElementById('device-counts');
+
+            if (currentFilter === 'all') {
+                countsEl.textContent = `Showing ${visibleCount} of ${total} devices · ${online} online · ${offline} offline`;
+            } else if (currentFilter === 'online') {
+                countsEl.textContent = `Showing ${visibleCount} online device${visibleCount === 1 ? '' : 's'} (${online} total online)`;
+            } else {
+                countsEl.textContent = `Showing ${visibleCount} offline device${visibleCount === 1 ? '' : 's'} (${offline} total offline)`;
+            }
+        }
+
         async function loadDevices() {
             const container = document.getElementById('devices-container');
-            
+
             try {
                 const response = await api.getDevices();
-                
+
                 if (!response.success || !response.hospitals) {
                     container.innerHTML = `
                         <div class="section-card">
@@ -69,11 +185,11 @@
                             </div>
                         </div>
                     `;
+                    document.getElementById('device-counts').textContent = '0 devices';
                     return;
                 }
 
-                // Flatten all devices
-                const allDevices = [];
+                allDevices = [];
                 for (const [hospital, rooms] of Object.entries(response.hospitals)) {
                     for (const [room, devices] of Object.entries(rooms)) {
                         allDevices.push(...devices);
@@ -84,26 +200,28 @@
                     container.innerHTML = `
                         <div class="section-card">
                             <div class="empty-state">
-                                <div class="empty-icon">
-                                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.5" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                                        <line x1="8" y1="21" x2="16" y2="21"></line>
-                                        <line x1="12" y1="17" x2="12" y2="21"></line>
-                                    </svg>
-                                </div>
+                                <div class="empty-icon">🖥️</div>
                                 <div class="empty-text">No devices found</div>
                                 <div class="empty-subtext">Connect your first device to get started</div>
                             </div>
                         </div>
                     `;
+                    document.getElementById('device-counts').textContent = '0 devices';
                     return;
                 }
 
-                // Render devices in a grid
+                deviceOnlineStatus = {};
+                allDevices.forEach(device => {
+                    deviceOnlineStatus[device.id] = false;
+                });
+
                 container.innerHTML = `
-                    <div class="summary-grid" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));">
+                    <div class="summary-grid" id="devices-grid" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));">
                         ${allDevices.map(device => `
-                            <div class="summary-card" style="cursor: pointer;" onclick="window.location.href='/ahu/${device.id}'">
+                            <div class="summary-card device-card" id="${safeDomId(device.id)}"
+                                 data-device-id="${escapeHtml(device.id)}"
+                                 style="cursor: pointer;"
+                                 onclick="window.location.href='/ahu/${encodeURIComponent(device.id)}'">
                                 <div class="card-header">
                                     <div class="card-icon devices">
                                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -112,24 +230,24 @@
                                             <line x1="12" y1="17" x2="12" y2="21"></line>
                                         </svg>
                                     </div>
-                                    <span class="status-badge offline" id="status-${device.id}">
+                                    <span class="status-badge offline" id="status-${safeDomId(device.id)}">
                                         <span class="status-dot"></span> Offline
                                     </span>
                                 </div>
                                 <div style="margin-top: 16px;">
-                                    <div style="font-size: 20px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">${device.name}</div>
-                                    <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 4px;">${device.site}</div>
-                                    <div style="font-size: 12px; color: var(--text-tertiary);">${device.room}</div>
+                                    <div style="font-size: 20px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">${escapeHtml(device.name)}</div>
+                                    <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 4px;">${escapeHtml(device.site)}</div>
+                                    <div style="font-size: 12px; color: var(--text-tertiary);">${escapeHtml(device.room)}</div>
                                 </div>
                                 <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);">
                                     <div style="display: flex; gap: 16px; font-size: 12px;">
                                         <div>
                                             <div style="color: var(--text-secondary);">Temp</div>
-                                            <div style="color: var(--text-primary); font-weight: 600;" id="temp-${device.id}">--</div>
+                                            <div style="color: var(--text-primary); font-weight: 600;" id="temp-${safeDomId(device.id)}">--</div>
                                         </div>
                                         <div>
                                             <div style="color: var(--text-secondary);">Humidity</div>
-                                            <div style="color: var(--text-primary); font-weight: 600;" id="hum-${device.id}">--</div>
+                                            <div style="color: var(--text-primary); font-weight: 600;" id="hum-${safeDomId(device.id)}">--</div>
                                         </div>
                                     </div>
                                 </div>
@@ -138,17 +256,20 @@
                     </div>
                 `;
 
-                // Load status for each device
-                allDevices.forEach(device => {
-                    loadDeviceStatus(device.id);
-                });
+                allDevices.forEach(device => loadDeviceStatus(device.id));
+                applyDeviceFilters();
 
-                // Refresh every 5 seconds
-                setInterval(() => {
-                    allDevices.forEach(device => {
-                        loadDeviceStatus(device.id);
-                    });
+                if (statusRefreshTimer) clearInterval(statusRefreshTimer);
+                statusRefreshTimer = setInterval(() => {
+                    allDevices.forEach(device => loadDeviceStatus(device.id));
                 }, 5000);
+
+                if (listRefreshTimer) clearInterval(listRefreshTimer);
+                if (allDevices.length === 0) {
+                    listRefreshTimer = setInterval(() => {
+                        if (allDevices.length === 0) loadDevices();
+                    }, 5000);
+                }
 
             } catch (error) {
                 console.error('Error loading devices:', error);
@@ -157,7 +278,7 @@
                         <div class="empty-state">
                             <div class="empty-icon">⚠️</div>
                             <div class="empty-text">Error loading devices</div>
-                            <div class="empty-subtext">${error.message}</div>
+                            <div class="empty-subtext">${escapeHtml(error.message)}</div>
                         </div>
                     </div>
                 `;
@@ -171,34 +292,38 @@
                     const data = response.data;
                     const telemetry = data.telemetry || {};
                     const isOnline = data.status === 'online';
-                    
-                    // Update status badge
-                    const statusBadge = document.getElementById(`status-${deviceId}`);
+                    const id = safeDomId(deviceId);
+
+                    deviceOnlineStatus[deviceId] = isOnline;
+
+                    const statusBadge = document.getElementById(`status-${id}`);
                     if (statusBadge) {
                         statusBadge.className = `status-badge ${isOnline ? 'online' : 'offline'}`;
                         statusBadge.innerHTML = `
                             <span class="status-dot"></span> ${isOnline ? 'Online' : 'Offline'}
                         `;
                     }
-                    
-                    // Update temperature
-                    const tempEl = document.getElementById(`temp-${deviceId}`);
+
+                    const tempEl = document.getElementById(`temp-${id}`);
                     if (tempEl && telemetry.temp !== undefined) {
                         tempEl.textContent = `${telemetry.temp.toFixed(1)}°C`;
                     }
-                    
-                    // Update humidity
-                    const humEl = document.getElementById(`hum-${deviceId}`);
+
+                    const humEl = document.getElementById(`hum-${id}`);
                     if (humEl && telemetry.hum !== undefined) {
                         humEl.textContent = `${telemetry.hum.toFixed(1)}%`;
                     }
+
+                    applyDeviceFilters();
                 }
             } catch (error) {
                 console.error(`Error loading status for ${deviceId}:`, error);
             }
         }
 
-        // Load devices on page load
+        const deviceSearchInput = document.getElementById('device-search');
+        deviceSearchInput.addEventListener('input', applyDeviceFilters);
+        deviceSearchInput.addEventListener('keyup', applyDeviceFilters);
         loadDevices();
     </script>
 </body>
