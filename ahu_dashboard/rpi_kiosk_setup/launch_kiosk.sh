@@ -16,6 +16,14 @@ sleep 5
 
 # Disable screen blanking and power management
 export DISPLAY=:0
+
+# Force panel resolution before the Flutter app starts (fixes tiny UI on Radxa).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/configure_display.sh" ]; then
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/configure_display.sh"
+fi
+
 xset s off 2>/dev/null || true
 xset -dpms 2>/dev/null || true
 xset s noblank 2>/dev/null || true
