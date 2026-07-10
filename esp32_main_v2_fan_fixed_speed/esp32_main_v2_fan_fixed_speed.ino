@@ -93,7 +93,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "test" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP66_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -144,8 +144,8 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "Evona Invitro LLP";
-const char WIFI_PASSWORD[] = "Evona@2026";
+const char WIFI_SSID[] = "Mukharji_5G";
+const char WIFI_PASSWORD[] = "RITE@123#";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -272,24 +272,24 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+MIIDWTCCAkGgAwIBAgIUepVCQeAhW8RG8aAgkTfVWLkwG10wDQYJKoZIhvcNAQEL
 BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
-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
+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
 -----END CERTIFICATE-----
 
 
@@ -297,31 +297,31 @@ kkN+sF+F8gW7Gg4Slfk6UVaCfj4W2ap6x8FJ4tbHGKGkMdCkhiMptH/2RnBl
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
 
 
@@ -516,9 +516,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "Evona Invitro LLP";    // Kaveri Hospital
-const char* ROOM = "Endo OT";         // Burns Ward
-const char* AHU  = "AHU-07";            // AHU 1
+const char* SITE = "Mukerji Nursing Home";    // Kaveri Hospital
+const char* ROOM = "OT";         // Burns Ward
+const char* AHU  = "AHU-66";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -965,8 +965,8 @@ void restoreSystemState(){
       }
       heatWrite(heatOn);
      
-      if (savedFanSpd >= 0 && savedFanSpd <= 3) {
-        setFanSpeed((FanSpeed)savedFanSpd);
+      if (savedFanSpd > 0) {
+        setFanSpeed(FAN_HIGH);
       }
      
       // Restore motor timing state
@@ -1489,7 +1489,13 @@ void m2_start(){ digitalWrite(PIN_MOTOR2, HIGH); m2Active=true; motorLogMsg("Mot
 void m2_stop (){ digitalWrite(PIN_MOTOR2, LOW); m2Active=false; motorLogMsg("Motor-2 OFF"); }
 
 // ---------- Fan Control (PWM to Voltage) ----------
+// Low speed disabled: ignore FAN_LOW; boot/start use HIGH; toggle MED <-> HIGH only.
 void setFanSpeed(FanSpeed speed){
+  if (speed == FAN_LOW) {
+    motorLogMsg("Fan LOW ignored (low speed disabled)");
+    return;
+  }
+
   // Reset HEPA filter when fan speed changes (different pressure ranges)
   if (fanSpeed != speed) {
     filteredPressure = 0.0;
@@ -1822,8 +1828,8 @@ void startSystem(){
     systemWrite(true);
    
     if (fanSpeed == FAN_OFF) {
-      motorLogMsg("[startSystem] Starting fan at LOW");
-      setFanSpeed(FAN_LOW);
+      motorLogMsg("[startSystem] Starting fan at HIGH");
+      setFanSpeed(FAN_HIGH);
     }
    
     if (!m1Active){
@@ -2654,10 +2660,7 @@ void handleSerial(){
           if(mqttLocal.connected()) publishStateLocal();
         }
         else if (fanCmd == "low" || fanCmd == "1") {
-          setFanSpeed(FAN_LOW);
-          prefs.putInt("fanSpeed", 1);
-          if(client.connected()) publishStateAWS();
-          if(mqttLocal.connected()) publishStateLocal();
+          motorLogMsg("Fan LOW ignored (low speed disabled)");
         }
         else if (fanCmd == "med" || fanCmd == "2") {
           setFanSpeed(FAN_MED);
@@ -2857,11 +2860,9 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     } else {
       FanSpeed newSpeed;
       switch(fanSpeed){
-        case FAN_OFF:
-        case FAN_LOW:  newSpeed = FAN_MED;  break;
         case FAN_MED:  newSpeed = FAN_HIGH; break;
-        case FAN_HIGH: newSpeed = FAN_LOW;  break;
-        default:       newSpeed = FAN_LOW;  break;
+        case FAN_HIGH: newSpeed = FAN_MED;  break;
+        default:       newSpeed = FAN_HIGH; break;
       }
       setFanSpeed(newSpeed);
       pendingAwsPrefWrite = true;
@@ -3532,11 +3533,9 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
     } else {
       FanSpeed newSpeed;
       switch(fanSpeed){
-        case FAN_OFF:
-        case FAN_LOW:  newSpeed = FAN_MED;  break;
         case FAN_MED:  newSpeed = FAN_HIGH; break;
-        case FAN_HIGH: newSpeed = FAN_LOW;  break;
-        default:       newSpeed = FAN_LOW;  break;
+        case FAN_HIGH: newSpeed = FAN_MED;  break;
+        default:       newSpeed = FAN_HIGH; break;
       }
       setFanSpeed(newSpeed);
       pendingPrefWrite = true;
@@ -3627,7 +3626,6 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       prefs.putInt("cpMode", (int)cpMode);
       prefs.putBool("dualCpBothOn", false);
       prefs.putInt("cpActive", cpActive);
-      prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
       prefs.putBool("cpSwitchInProgress", true);
      
       Serial.print("✓ CP mode: ");
@@ -3843,10 +3841,10 @@ struct IrRemoteState {
 } irLast;
 
 // Map Daikin remote fan (stdAc::fanspeed_t) to AHU FanSpeed:
-//   0=auto -> MED, 2=low -> LOW, 3=medium -> MED, 5=max(high) -> HIGH
+//   0=auto -> MED, 2=low -> MED (LOW disabled), 3=medium -> MED, 5=max(high) -> HIGH
 FanSpeed irMapFan(uint8_t remoteFan) {
   switch (remoteFan) {
-    case 2:  return FAN_LOW;
+    case 2:  return FAN_MED;
     case 3:  return FAN_MED;
     case 5:  return FAN_HIGH;
     case 0:  return FAN_MED;   // auto -> medium
@@ -4175,6 +4173,7 @@ void setup()
   if (hs>=10 && hs<=90) humSet = hs;
  
   int savedFan = prefs.getInt("fanSpeed", 0);
+  if (savedFan == 1) savedFan = (int)FAN_HIGH;
   if (savedFan >= 0 && savedFan <= 3) fanSpeed = (FanSpeed)savedFan;
 
   // Load operation mode (default to online)
@@ -4851,4 +4850,3 @@ void loop()
   g_loopLastProgressMs = millis();
   esp_task_wdt_reset();
 }
-
