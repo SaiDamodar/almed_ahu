@@ -292,8 +292,6 @@ YEw9udS0LMt85tiJRs41gyo305QZfgcKt6bwPIUCqDH0cytrt9qqibE28/PneWU8
 SHcuTnJ0SN5OnsezIFL5GqjCYhq90xDDajs/mBWMkusoupzpurZi0+UJ22Ny
 -----END CERTIFICATE-----
 
-
-
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
@@ -324,8 +322,6 @@ r8iRy9MCgYEA7PK0jzz1vG66RR3iCCGp1h4HUImtyzQdC8vh5iC3XmZf9sj57MPW
 5bc/HzgUE4cTdQhCap6SHB6r496upWv8J3WPpdYVFRLoSfGp9GWB0QJ48LH+cg1p
 ZZOs3mujjMeb7vQQLMoSbBTxS0bEwP40kWzGQ7tFelRAXjvQ2Gv9Iys=
 -----END RSA PRIVATE KEY-----
-
-
 
 )KEY";
 
@@ -519,8 +515,8 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
 const char* SITE = "TEST";    // Kaveri Hospital
-const char* ROOM = "IR 54";         // Burns Ward
-const char* AHU  = "AHU-54";            // AHU 1
+const char* ROOM = "TEST IR";         // Burns Ward
+const char* AHU  = "AHU-00";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -3815,6 +3811,80 @@ static void startLoopStallMonitor() {
 }
 
 // =====================================================================
+//  AWS IoT (re)connection runs on its own task so the blocking TLS
+//  handshake NEVER stalls loop() (which would delay IR / control).
+//  Ownership rule (keeps the non-reentrant PubSubClient safe without a mutex):
+//    - This task touches `client` ONLY via client.connect(), and ONLY while
+//      it is disconnected.
+//    - The main loop touches `client` (loop()/publish()) ONLY while connected.
+//  Those two states are mutually exclusive. Post-connect subscribe/publish is
+//  handed back to the main loop via g_awsJustConnected.
+// =====================================================================
+static volatile bool g_awsJustConnected = false;
+static volatile bool g_awsConnecting = false;   // true only while client.connect() runs on the task
+
+static void awsConnTask(void* /*param*/) {
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    if (!onlineMode) continue;
+    if (WiFi.status() != WL_CONNECTED) continue;
+    if (client.connected()) continue;
+
+    unsigned long now = millis();
+    unsigned long retryInterval;
+    if (selfHealing.mqttAwsFailCount < 5)       retryInterval = 5000;
+    else if (selfHealing.mqttAwsFailCount < 10) retryInterval = 15000;
+    else                                        retryInterval = 30000;
+    if (now - selfHealing.lastMqttAwsRecovery < retryInterval) continue;
+    selfHealing.lastMqttAwsRecovery = now;
+
+    // DNS check first (this WiFi.hostByName can block for seconds — but here,
+    // off the main loop, so IR/control stay responsive).
+    if (!checkInternetAvailable()) {
+      selfHealing.mqttAwsFailCount++;
+      if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
+        Serial.printf("⚠️ No internet - skipping AWS (attempt %d)\n", selfHealing.mqttAwsFailCount);
+      }
+      continue;
+    }
+
+    // Re-check just before the blocking call; if we switched offline meanwhile, bail.
+    if (!onlineMode) continue;
+    Serial.println("📡 Connecting to AWS IoT...");
+    g_awsConnecting = true;
+    bool ok = client.connect(THINGNAME);   // blocking TLS handshake (this task only)
+    g_awsConnecting = false;
+    if (ok) {
+      selfHealing.mqttAwsFailCount = 0;
+      selfHealing.mqttAwsHealthy = true;
+      selfHealing.totalRecoveries++;
+      g_awsJustConnected = true;            // main loop finalizes subscribe/publish
+      Serial.println("✓ AWS IoT CONNECTED!");
+    } else {
+      selfHealing.mqttAwsFailCount++;
+      if (selfHealing.mqttAwsFailCount <= 3) {
+        Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n",
+                      selfHealing.mqttAwsFailCount, retryInterval / 1000);
+      }
+    }
+  }
+}
+
+static void startAwsConnTask() {
+  // Large stack: the mbedTLS handshake in client.connect() is stack-heavy.
+  BaseType_t ok;
+  if (ESP.getChipCores() > 1) {
+    ok = xTaskCreatePinnedToCore(awsConnTask, "awsConn", 16384, nullptr, 1, nullptr, 0);
+  } else {
+    ok = xTaskCreate(awsConnTask, "awsConn", 16384, nullptr, 1, nullptr);
+  }
+  Serial.println(ok == pdPASS
+                 ? "✓ AWS IoT connect task started (off-loop, non-blocking control)"
+                 : "⚠️ AWS IoT connect task failed to create");
+}
+
+// =====================================================================
 //  IR REMOTE CONTROL  (works in BOTH offline and online mode)
 //  Receiver: VS1838B / TSOP on GPIO27 (power the sensor from 3V3).
 //  The Daikin remote sends its whole A/C state every press; we decode it
@@ -3839,7 +3909,27 @@ struct IrRemoteState {
   int16_t tempC = 0;
   uint8_t fan   = 0;
   uint8_t mode  = 0;
-} irLast;
+} irLast;   // only touched by the IR decode task
+
+// ---- Cross-task IR handoff ----------------------------------------------------
+// The Daikin frame is captured by the IRrecv ISR and decoded by a dedicated task
+// (see irTask) so a blocking network call in loop() can never delay the receiver.
+// The task NEVER touches MQTT / control state directly (PubSubClient is not
+// re-entrant); it only records the *intent* here. The main loop applies it via
+// applyPendingIr() using the normal, MQTT-safe control functions.
+struct IrPending {
+  bool    has     = false;
+  bool    doPower = false;
+  bool    powerOn = false;
+  bool    doTemp  = false;
+  float   tempVal = 0.0f;
+  bool    doFan   = false;
+  uint8_t fanRemote = 0;
+};
+static volatile IrPending g_irPending;
+static portMUX_TYPE g_irMux = portMUX_INITIALIZER_UNLOCKED;
+// Millis of the last decoded remote frame (diagnostic; AWS connect is off-loop).
+static volatile unsigned long g_irLastActivityMs = 0;
 
 // Map Daikin remote fan (stdAc::fanspeed_t) to AHU FanSpeed:
 //   0=auto -> MED, 2=low -> LOW, 3=medium -> MED, 5=max(high) -> HIGH
@@ -3859,19 +3949,13 @@ void irPublishState() {
   if (mqttLocal.connected()) publishStateLocal();
 }
 
-void setupIR() {
-  irRecv.setTolerance(25);
-  irRecv.setUnknownThreshold(12);
-  irRecv.enableIRIn();
-  Serial.println("✓ IR remote receiver started on GPIO27 (offline + online)");
-}
-
-// Call once per loop(). Non-blocking; the frame is captured by the ISR.
-void handleIR() {
-  if (!irRecv.decode(&irResults)) return;
+// Decode one buffered frame (runs on the IR task). Records intent only — never
+// touches MQTT or control state. Returns true if a Daikin frame was consumed.
+static bool irDecodeStep() {
+  if (!irRecv.decode(&irResults)) return false;
 
   // Only the Daikin remote (DAIKIN216) drives the AHU; ignore anything else.
-  if (irResults.decode_type != DAIKIN216) { irRecv.resume(); return; }
+  if (irResults.decode_type != DAIKIN216) { irRecv.resume(); return false; }
   irDaikin.setRaw(irResults.state);
   stdAc::state_t st = irDaikin.toCommon();  // same fan codes (0/2/3/5) as before
   irRecv.resume();           // re-arm immediately
@@ -3886,24 +3970,87 @@ void handleIR() {
     irLast.power = st.power; irLast.tempC = tempC; irLast.fan = fan; irLast.mode = mode;
     Serial.printf("[IR] baseline synced (power=%s temp=%dC fan=%u)\n",
                   st.power ? "ON" : "OFF", tempC, fan);
-    return;
+    return true;
   }
 
+  // Work out which buttons changed vs the previous remote frame. We only record
+  // the desired end-state; the main loop reconciles it against the AHU.
+  bool  chgPower = (st.power != irLast.power);
+  bool  chgTemp  = (tempC   != irLast.tempC);
+  bool  chgFan   = (fan     != irLast.fan);
+
+  float clampedTemp = (float)tempC;
+  if (clampedTemp < IR_TEMP_MIN) clampedTemp = IR_TEMP_MIN;
+  if (clampedTemp > IR_TEMP_MAX) clampedTemp = IR_TEMP_MAX;
+
+  irLast.power = st.power; irLast.tempC = tempC; irLast.fan = fan; irLast.mode = mode;
+
+  if (!chgPower && !chgTemp && !chgFan) return true;  // nothing actionable
+
+  // Merge into the pending snapshot (latest press wins per field).
+  portENTER_CRITICAL(&g_irMux);
+  g_irPending.has = true;
+  if (chgPower) { g_irPending.doPower = true; g_irPending.powerOn = st.power; }
+  if (chgTemp)  { g_irPending.doTemp  = true; g_irPending.tempVal = clampedTemp; }
+  if (chgFan)   { g_irPending.doFan   = true; g_irPending.fanRemote = fan; }
+  portEXIT_CRITICAL(&g_irMux);
+  return true;
+}
+
+// Dedicated IR task: keeps the receiver drained regardless of what loop() is
+// doing, so a press is decoded within a few ms even during a blocking TLS call.
+static void irTask(void* /*param*/) {
+  for (;;) {
+    bool got = irDecodeStep();
+    if (got) g_irLastActivityMs = millis();
+    // Fast enough for a human button press; light enough to not starve core 0.
+    vTaskDelay(pdMS_TO_TICKS(got ? 2 : 10));
+  }
+}
+
+void setupIR() {
+  irRecv.setTolerance(25);
+  irRecv.setUnknownThreshold(12);
+  irRecv.enableIRIn();
+
+  // Decode on core 0 (loop() runs on core 1); action stays on the main loop.
+  BaseType_t ok;
+  if (ESP.getChipCores() > 1) {
+    ok = xTaskCreatePinnedToCore(irTask, "irTask", 6144, nullptr, 3, nullptr, 0);
+  } else {
+    ok = xTaskCreate(irTask, "irTask", 6144, nullptr, 3, nullptr);
+  }
+  Serial.println(ok == pdPASS
+                 ? "✓ IR remote receiver started on GPIO27 (async decode task, offline + online)"
+                 : "⚠️ IR receiver started but decode task failed to create");
+}
+
+// Apply any pending IR intent. MUST run on the main loop task: it uses the
+// normal control functions (which publish MQTT via the non-reentrant clients).
+void applyPendingIr() {
+  bool  doPower, powerOn, doTemp, doFan;
+  float tempVal; uint8_t fanRemote;
+
+  portENTER_CRITICAL(&g_irMux);
+  if (!g_irPending.has) { portEXIT_CRITICAL(&g_irMux); return; }
+  doPower   = g_irPending.doPower;   powerOn   = g_irPending.powerOn;
+  doTemp    = g_irPending.doTemp;    tempVal   = g_irPending.tempVal;
+  doFan     = g_irPending.doFan;     fanRemote = g_irPending.fanRemote;
+  g_irPending.has = false;
+  g_irPending.doPower = g_irPending.doTemp = g_irPending.doFan = false;
+  portEXIT_CRITICAL(&g_irMux);
+
   // POWER button -> mirror remote power onto the AHU.
-  if (st.power != irLast.power) {
-    if (st.power) { motorLogMsg("[IR] POWER -> START"); startSystem(); }
-    else          { motorLogMsg("[IR] POWER -> STOP");  stopSystem();  }
+  if (doPower) {
+    if (powerOn) { motorLogMsg("[IR] POWER -> START"); startSystem(); }
+    else         { motorLogMsg("[IR] POWER -> STOP");  stopSystem();  }
     irPublishState();
   }
 
-  // TEMP up/down button -> mirror the remote's actual setpoint onto the AHU
-  // so the console/dashboard temperature matches the remote display.
-  if (tempC != irLast.tempC) {
-    float newSet = (float)tempC;
-    if (newSet < IR_TEMP_MIN) newSet = IR_TEMP_MIN;
-    if (newSet > IR_TEMP_MAX) newSet = IR_TEMP_MAX;
-    if (newSet != tempSet) {
-      tempSet = newSet;
+  // TEMP up/down -> mirror the remote's setpoint so console/dashboard matches.
+  if (doTemp) {
+    if (tempVal != tempSet) {
+      tempSet = tempVal;
       prefs.putFloat("tempSet", tempSet);
       motorLogMsg("[IR] TEMP set: " + String(tempSet, 1) + "C");
       irPublishState();
@@ -3911,9 +4058,9 @@ void handleIR() {
   }
 
   // FAN button -> map remote fan speed to AHU fan speed (only while running).
-  if (fan != irLast.fan) {
+  if (doFan) {
     if (runState) {
-      FanSpeed fs = irMapFan(fan);
+      FanSpeed fs = irMapFan(fanRemote);
       setFanSpeed(fs);
       prefs.putInt("fanSpeed", (int)fs);
       motorLogMsg("[IR] FAN -> speed " + String((int)fs));
@@ -3922,8 +4069,6 @@ void handleIR() {
       Serial.println("[IR] FAN ignored (system OFF)");
     }
   }
-
-  irLast.power = st.power; irLast.tempC = tempC; irLast.fan = fan; irLast.mode = mode;
 }
 
 void setup()
@@ -4311,6 +4456,7 @@ void setup()
   net.setCertificate(AWS_CERT_CRT);
   net.setPrivateKey(AWS_CERT_PRIVATE);
   net.setTimeout(15);  // Limit TLS read/write stall (seconds) — helps avoid task WDT during long ops
+  net.setHandshakeTimeout(5);  // Cap a failing/slow AWS TLS handshake (default ~120s) so it can't hang the loop
 
   // Connect to the MQTT broker on the AWS endpoint
   client.setServer(AWS_IOT_ENDPOINT, 8883);
@@ -4473,6 +4619,10 @@ void setup()
 
   lastLoopTime = millis();
 
+  // Start the off-loop AWS connect task AFTER the one-time startup connect above,
+  // so the two never run client.connect() concurrently.
+  startAwsConnTask();
+
 }
 
 void loop()
@@ -4481,6 +4631,9 @@ void loop()
 
   // Feed task WDT at iteration start (long sections below also reset explicitly).
   esp_task_wdt_reset();
+  // Service IR first so a remote press is applied at the very start of the loop,
+  // before any potentially-blocking network work below.
+  applyPendingIr();
   processDeferredAhuCmdFromMainLoop();
   if (g_deferredPublishStateLocal) {
     g_deferredPublishStateLocal = false;
@@ -4576,6 +4729,16 @@ void loop()
     if (isAwsConnected) {
       client.loop();
       selfHealing.mqttAwsHealthy = true;
+
+      // Finalize a connection just established by the background awsConnTask.
+      // (Kept off that task so all connected-state client I/O stays on this loop.)
+      if (g_awsJustConnected) {
+        g_awsJustConnected = false;
+        subscribeAwsIotCommandTopics();
+        publishStatusOnline();
+        awsStatusReportedToLocal = publishAwsConnectionStatus(true);
+        motorLogMsg("☁️ Cloud connected (AWS IoT)");
+      }
      
       // Notify dashboard when AWS is up (retry until local MQTT accepts retained aws_status)
       if (!wasAwsConnected) {
@@ -4596,65 +4759,16 @@ void loop()
         Serial.println("⚠️ AWS IoT disconnected");
       }
     }
-   
-    // AWS reconnection - FAST reconnect for hospital reliability
-    // CRITICAL: Check internet availability BEFORE attempting AWS connection
-    // This prevents TLS handshake blocking for 20+ seconds when no internet
-    if (WiFi.status() == WL_CONNECTED && !client.connected()) {
-      // Fast retry: 5 seconds for first 5 attempts, then 15 seconds, then 30 seconds
-      unsigned long retryInterval;
-      if (selfHealing.mqttAwsFailCount < 5) {
-        retryInterval = 5000;
-      } else if (selfHealing.mqttAwsFailCount < 10) {
-        retryInterval = 15000;
-      } else {
-        retryInterval = 30000;  // Back off to 30s after 10 failures
-      }
-     
-      if (now - selfHealing.lastMqttAwsRecovery > retryInterval) {
-        selfHealing.lastMqttAwsRecovery = now;
-       
-        // CHECK INTERNET FIRST - avoids blocking TLS handshake
-        if (!checkInternetAvailable()) {
-          // No internet - skip AWS connection attempt
-          selfHealing.mqttAwsFailCount++;
-          if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
-            Serial.printf("⚠️ No internet - skipping AWS (attempt %d)\n", selfHealing.mqttAwsFailCount);
-          }
-          // Continue to local MQTT - don't try AWS
-        } else {
-          // Internet available - try AWS connection
-          esp_task_wdt_reset();
-          Serial.println("📡 Connecting to AWS IoT...");
-         
-          if (client.connect(THINGNAME)) {
-            esp_task_wdt_reset();
-            Serial.println("✓ AWS IoT CONNECTED!");
-            selfHealing.mqttAwsFailCount = 0;
-            selfHealing.mqttAwsHealthy = true;
-            selfHealing.totalRecoveries++;
-           
-            subscribeAwsIotCommandTopics();
-            publishStatusOnline();
-           
-            // Notify dashboard of AWS connection status (may retry in loop if local MQTT lags)
-            awsStatusReportedToLocal = publishAwsConnectionStatus(true);
-            motorLogMsg("☁️ Cloud connected (AWS IoT)");
-          } else {
-            esp_task_wdt_reset();
-            selfHealing.mqttAwsFailCount++;
-            if (selfHealing.mqttAwsFailCount <= 3) {
-              Serial.printf("⚠️ AWS connection failed (attempt %d, retry in %lus)\n",
-                            selfHealing.mqttAwsFailCount, retryInterval/1000);
-            }
-          }
-        }
-      }
-    }
+
+    // NOTE: AWS (re)connection is handled entirely by awsConnTask (a dedicated
+    // task) so the blocking DNS/TLS handshake can never stall this loop. That is
+    // what keeps IR + control instant in online mode.
   } else {
-    // Offline mode - ensure AWS IoT is disconnected (only once, not every loop)
+    // Offline mode - ensure AWS IoT is disconnected (only once, not every loop).
+    // Skip while awsConnTask is mid-handshake so we never touch `client` from two
+    // tasks at once; it will bail on its next iteration (onlineMode is false).
     static bool offlineModeDisconnected = false;
-    if (!offlineModeDisconnected && client.connected()) {
+    if (!offlineModeDisconnected && client.connected() && !g_awsConnecting) {
       esp_task_wdt_reset(); // Feed watchdog before disconnect
       client.disconnect();
       esp_task_wdt_reset(); // Feed watchdog after disconnect
@@ -4693,8 +4807,8 @@ void loop()
 
   handleSerial();
 
-  // IR remote: process any received button (works in offline AND online mode).
-  handleIR();
+  // IR remote: apply any button decoded by the async IR task (offline AND online).
+  applyPendingIr();
  
   // Read appropriate sensors based on what's detected
   // If all 3 sensors or combo sensors detected, use combo reading function
@@ -4850,4 +4964,3 @@ void loop()
   g_loopLastProgressMs = millis();
   esp_task_wdt_reset();
 }
-
