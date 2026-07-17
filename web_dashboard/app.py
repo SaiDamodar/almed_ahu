@@ -998,6 +998,8 @@ def get_device_status(device_id):
                     'state': payload,
                     'last_update': last_update_ts
                 }
+                if payload.get('thing'):
+                    cache_data['thing'] = str(payload.get('thing'))
                 device_cache[device_id] = cache_data
         
         # Determine status: online if we have recent data (within last 5 minutes)
@@ -1173,11 +1175,38 @@ def get_telemetry(device_id):
             'error': str(e)
         }), 500
 
+def _shared_command_topic():
+    """Legacy broadcast topic every ESP still subscribes to. Never use for device controls."""
+    return (getattr(config, 'AWS_IOT_TOPIC_SUBSCRIBE', None) or 'esp32/sub').strip()
+
+
+def _resolve_thing_name_for_command(device_id):
+    """
+    Resolve AWS IoT thing name for a control command.
+    Prefer cached telemetry `thing`; fall back to device_id (live cache keys are thing names).
+    """
+    cache_data = device_cache.get(device_id, {}) or {}
+    thing_name = cache_data.get('thing')
+    telemetry = cache_data.get('telemetry') or {}
+    state = cache_data.get('state') or {}
+    thing_name = thing_name or telemetry.get('thing') or state.get('thing')
+
+    if not thing_name and device_id and device_id not in ('unknown', 'sub'):
+        # Live dashboard keys devices by thing name — safe per-device fallback.
+        # Old site_room_ahu ids only work if that ESP's THINGNAME matches (no broadcast).
+        thing_name = device_id
+
+    if thing_name is None:
+        return None
+    thing_name = str(thing_name).strip()
+    return thing_name or None
+
+
 @app.route('/api/device/<device_id>/command', methods=['POST'])
 def send_command(device_id):
-    """Send command to device via AWS IoT Core"""
+    """Send command to device via AWS IoT Core (per-device topic only — never esp32/sub)."""
     try:
-        data = request.json
+        data = request.json or {}
         command = data.get('command', {})
         
         if not command:
@@ -1185,8 +1214,6 @@ def send_command(device_id):
                 'success': False,
                 'error': 'Command payload is required'
             }), 400
-        
-        payload = json.dumps(command)
         
         # Check if AWS IoT Data client is available
         if not iot_data:
@@ -1199,88 +1226,63 @@ def send_command(device_id):
                 'details': 'Please check AWS credentials and IoT endpoint configuration in Railway environment variables'
             }), 500
         
-        # Determine the strict per-device topic for this device.
-        # Never publish control commands to a generic topic unless explicitly requested.
-        cache_data = device_cache.get(device_id, {})
-        thing_name = None
-        allow_broadcast = bool(data.get('allow_broadcast', False))
-        
-        # Try to get thing name from cached metadata/telemetry/state.
-        if cache_data:
-            thing_name = cache_data.get('thing')
-            telemetry = cache_data.get('telemetry', {})
-            state = cache_data.get('state', {})
-            thing_name = thing_name or telemetry.get('thing') or state.get('thing')
+        # Controls must go ONLY to esp32/{thing}/sub.
+        # Publishing to shared esp32/sub makes EVERY ESP apply start/stop/temp/fan.
+        # allow_broadcast is intentionally ignored here — never broadcast device controls.
+        if data.get('allow_broadcast'):
+            print(f"[COMMAND] Ignoring allow_broadcast for device {device_id} (controls are per-device only)")
 
-        if not thing_name and not allow_broadcast:
+        thing_name = _resolve_thing_name_for_command(device_id)
+        shared_topic = _shared_command_topic()
+
+        if not thing_name:
             return jsonify({
                 'success': False,
-                'error': 'Missing device thing name; refusing generic broadcast publish',
+                'error': 'Missing device thing name; refusing publish',
                 'details': 'Wait for fresh telemetry/state from this device or re-open the AHU page before retrying.'
             }), 409
 
-        # Build topic list for publish.
-        topics_to_publish = []
-        
-        if thing_name:
-            device_topic = f"esp32/{thing_name}/sub"
-            topics_to_publish.append(device_topic)
-
-        # Explicit opt-in only for broadcast commands.
-        if allow_broadcast:
-            generic_topic = config.AWS_IOT_TOPIC_SUBSCRIBE
-            if generic_topic and generic_topic not in topics_to_publish:
-                topics_to_publish.append(generic_topic)
-            print(f"[COMMAND] WARNING: allow_broadcast=true for device {device_id}")
-        
-        if not topics_to_publish:
+        device_topic = f"esp32/{thing_name}/sub"
+        if device_topic == shared_topic or thing_name.lower() == 'sub':
             return jsonify({
                 'success': False,
-                'error': 'No valid topic configured for this device'
-            }), 500
+                'error': 'Refusing to publish controls to shared MQTT topic',
+                'details': f'Resolved topic would be {device_topic}; that would change every ESP.'
+            }), 400
+
+        # Stamp target so firmware can ignore foreign commands if anything still hits esp32/sub.
+        command_out = dict(command)
+        command_out['target_thing'] = thing_name
+        payload = json.dumps(command_out)
         
         print(f"[COMMAND] Device: {device_id}, Thing: {thing_name}")
-        print(f"[COMMAND] Publishing to topics: {topics_to_publish}")
+        print(f"[COMMAND] Publishing to topic (per-device only): {device_topic}")
         print(f"[COMMAND] Payload: {payload[:200]}")
         
-        # Publish via AWS IoT Core to all applicable topics
         try:
-            published_topics = []
-            last_error = None
-            
-            for topic in topics_to_publish:
-                try:
-                    response = iot_data.publish(
-                        topic=topic,
-                        qos=1,
-                        payload=payload
-                    )
-                    http_status = response.get('ResponseMetadata', {}).get('HTTPStatusCode', 0)
-                    if http_status == 200:
-                        published_topics.append(topic)
-                        print(f"[COMMAND] ✓ Published to {topic} (HTTP {http_status})")
-                    else:
-                        print(f"[COMMAND] ⚠️ Topic {topic} returned HTTP {http_status}")
-                        last_error = f'HTTP {http_status}'
-                except Exception as topic_err:
-                    print(f"[COMMAND] ❌ Failed to publish to {topic}: {topic_err}")
-                    last_error = str(topic_err)
-            
-            if published_topics:
-                primary_topic = published_topics[0]
+            response = iot_data.publish(
+                topic=device_topic,
+                qos=1,
+                payload=payload
+            )
+            http_status = response.get('ResponseMetadata', {}).get('HTTPStatusCode', 0)
+            if http_status == 200:
+                print(f"[COMMAND] ✓ Published to {device_topic} (HTTP {http_status})")
                 return jsonify({
                     'success': True,
                     'message': 'Command sent via AWS IoT Core',
-                    'topic': primary_topic,
-                    'topics': published_topics,
+                    'topic': device_topic,
+                    'topics': [device_topic],
                     'device_id': device_id,
+                    'thing': thing_name,
                     'http_status': 200
                 })
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': f'Failed to publish to any topic: {last_error}'
-                }), 500
+
+            print(f"[COMMAND] ⚠️ Topic {device_topic} returned HTTP {http_status}")
+            return jsonify({
+                'success': False,
+                'error': f'Failed to publish to {device_topic}: HTTP {http_status}'
+            }), 500
                 
         except Exception as e:
             error_msg = str(e)
