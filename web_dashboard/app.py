@@ -1905,10 +1905,10 @@ def api_get_pending_users():
         for user in users:
             user_data = {
                 '_id': str(user['_id']),
-                'email': user['email'],
-                'username': user.get('username', ''),
-                'phone_number': user.get('phone_number', ''),
-                'hospital_name': user.get('hospital_name', ''),
+                'email': user.get('email', '') or '',
+                'username': user.get('username', '') or '',
+                'phone_number': user.get('phone_number', '') or '',
+                'hospital_name': user.get('hospital_name', '') or '',
                 'status': user.get('status', 'pending'),
                 'created_at': user.get('created_at', datetime.utcnow()).isoformat() if isinstance(user.get('created_at'), datetime) else str(user.get('created_at', ''))
             }
@@ -1958,10 +1958,10 @@ def api_get_registered_users():
         for user in users:
             user_data = {
                 '_id': str(user['_id']),
-                'email': user['email'],
-                'username': user.get('username', ''),
-                'phone_number': user.get('phone_number', ''),
-                'hospital_name': user.get('hospital_name', ''),
+                'email': user.get('email', '') or '',
+                'username': user.get('username', '') or '',
+                'phone_number': user.get('phone_number', '') or '',
+                'hospital_name': user.get('hospital_name', '') or '',
                 'status': user.get('status', 'approved'),
                 'access_level': user.get('access_level', 'viewer'),  # viewer or operator
                 'assigned_ahu_ids': user.get('assigned_ahu_ids', []),

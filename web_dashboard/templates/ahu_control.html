@@ -1337,6 +1337,7 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                     <div>
                         <h1 class="page-title" id="device-name">AHU Control</h1>
+                        <div id="device-location" class="page-subtitle" style="margin-bottom: 0;">Location unavailable</div>
                         <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
                             <div class="control-status-dot" id="status-dot"></div>
                             <span id="status-text" style="font-size: 14px; color: var(--text-secondary);">Offline</span>
@@ -1780,8 +1781,12 @@
             const status = deviceData.status || 'offline';
             const isOnline = status === 'online';
 
-            // Update device name
-            document.getElementById('device-name').textContent = `AHU ${deviceId.replace('ahu-', '').replace('AHU_', '').toUpperCase()}`;
+            // Update device name and location using live metadata when available.
+            const ahuName = telemetry.ahu || state.ahu || `AHU ${deviceId.replace('ahu-', '').replace('AHU_', '').toUpperCase()}`;
+            const siteName = telemetry.site || state.site || '';
+            const roomName = telemetry.room || state.room || '';
+            document.getElementById('device-name').textContent = ahuName;
+            document.getElementById('device-location').textContent = [siteName, roomName].filter(Boolean).join(' • ') || 'Location unavailable';
             
             // Update status dot and text
             const statusDot = document.getElementById('status-dot');
