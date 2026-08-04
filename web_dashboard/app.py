@@ -611,7 +611,7 @@ def login_required(f):
 def require_login():
     """Ensure user is logged in before accessing any page (except login, API login, and static files)"""
     # Allow login page and API endpoints that don't require authentication
-    allowed_endpoints = ['login', 'api_login', 'verify_admin', 'api_register', 'api_user_login', 'api_register_google', 'api_user_login_google', 'static', 'health_check']
+    allowed_endpoints = ['login', 'privacy', 'support', 'api_login', 'verify_admin', 'api_register', 'api_user_login', 'api_register_google', 'api_user_login_google', 'static', 'health_check']
     if request.endpoint in allowed_endpoints:
         return None
     # Allow public API endpoints (registration and user login)
@@ -632,6 +632,16 @@ def login():
     if session.get('authenticated'):
         return redirect(url_for('index'))
     return render_template('login.html')
+
+@app.route('/privacy')
+def privacy():
+    """Public privacy policy (required for App Store / Play Store)"""
+    return render_template('privacy.html')
+
+@app.route('/support')
+def support():
+    """Public support contact page"""
+    return render_template('support.html')
 
 @app.route('/logout')
 def logout():

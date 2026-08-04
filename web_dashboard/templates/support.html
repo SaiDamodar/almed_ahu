@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support - ALMED AHU</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .legal-page { max-width: 560px; margin: 0 auto; padding: 2rem 1.25rem 3rem; line-height: 1.65; }
+        .legal-page h1 { font-size: 1.75rem; margin-bottom: 1rem; }
+        .legal-page p { color: var(--text-secondary); margin-bottom: 1rem; }
+        .legal-page a { color: var(--purple-primary); }
+        .legal-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="legal-page">
+        <div class="login-logo-text" style="font-family: Vendura, serif; font-size: 1.5rem; margin-bottom: 0.5rem;">ALMED</div>
+        <h1>Support</h1>
+        <p><strong>ALMED AHU</strong> — mobile app and web dashboard for hospital Air Handling Unit monitoring and control.</p>
+        <p>For app access, contact your hospital administrator or ALMED deployment team. New hospital users must be approved before login.</p>
+        <p>Email: <a href="mailto:alexknight0109@gmail.com">alexknight0109@gmail.com</a></p>
+        <p>Web dashboard: <a href="https://app.almedequipments.in">app.almedequipments.in</a></p>
+        <div class="legal-footer">
+            <a href="{{ url_for('privacy') }}">Privacy Policy</a> ·
+            <a href="{{ url_for('login') }}">Sign in</a>
+        </div>
+    </div>
+</body>
+</html>

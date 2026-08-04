@@ -93,7 +93,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP66_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP_03" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -144,8 +144,8 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "Mukharji_5G";
-const char WIFI_PASSWORD[] = "RITE@123#";
+const char WIFI_SSID[] = "AlMed";
+const char WIFI_PASSWORD[] = "AlMed123456";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -154,6 +154,10 @@ unsigned long M1_POST_RUN  = 6UL * 1000UL;              // Motor 1 runs 6 second
 unsigned long M2_INTERVAL  = 15UL * 60UL * 1000UL;      // Motor 2 runs every 15 minutes
 unsigned long M2_RUN_TIME  = 22UL * 1000UL;             // Motor 2 runs 22 seconds
 unsigned long M2_DELAY_AFTER_M1_STOP = 10UL * 1000UL;   // Motor 2 runs 10 seconds after Motor 1 stops
+
+static const unsigned long M2_INTERVAL_DEFAULT_MS = 15UL * 60UL * 1000UL;
+static const unsigned long M2_INTERVAL_MIN_MS     = 60UL * 1000UL;          // reject bad NVS (e.g. 5–10 s)
+static const unsigned long M2_INTERVAL_MAX_MS     = 2UL * 60UL * 60UL * 1000UL;
 
 // ========================= WATCHDOG CONFIGURATION =========================
 // Task WDT must exceed worst-case WiFi DNS + AWS TLS on slow links. Arduino pre-inits TWDT with a
@@ -272,58 +276,56 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+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
-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
+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
 -----END CERTIFICATE-----
-
 
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
-
 
 )KEY";
 
@@ -516,9 +518,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "Mukerji Nursing Home";    // Kaveri Hospital
-const char* ROOM = "OT";         // Burns Ward
-const char* AHU  = "AHU-66";            // AHU 1
+const char* SITE = "TESTING";    // Kaveri Hospital
+const char* ROOM = "OT81";         // Burns Ward
+const char* AHU  = "AHU-81";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -534,6 +536,23 @@ String tProvBroker()      { return baseTopic()+"/provision/broker"; }
 // ---------- Preferences ----------
 Preferences prefs;
 String w1_ssid, w1_pass, w2_ssid, w2_pass;
+
+static unsigned long clampM2IntervalMs(unsigned long intervalMs) {
+  if (intervalMs < M2_INTERVAL_MIN_MS || intervalMs > M2_INTERVAL_MAX_MS) {
+    return M2_INTERVAL_DEFAULT_MS;
+  }
+  return intervalMs;
+}
+
+static void applyM2IntervalSeconds(unsigned long sec) {
+  unsigned long clamped = clampM2IntervalMs(sec * 1000UL);
+  if (clamped != sec * 1000UL) {
+    Serial.printf("⚠️ M2 interval %lus out of range — clamped to %lus\n",
+                  sec, clamped / 1000UL);
+  }
+  M2_INTERVAL = clamped;
+  prefs.putULong("m2_interval", M2_INTERVAL);
+}
 
 // After prefs.begin("ahu"): increments bootCount, mirrors reset reason to NVS.
 void persistBootDiagnostics() {
@@ -1015,12 +1034,12 @@ void restoreSystemState(){
           if (savedM2NextAtRemaining > 0 && savedM2NextAtRemaining <= M2_INTERVAL) {
             // Subtract 2 seconds as safety margin (worst case: save happened 2 seconds ago)
             unsigned long remaining = (savedM2NextAtRemaining > 2000) ? (savedM2NextAtRemaining - 2000) : 0;
-            m2NextAt = now + remaining;
+            m2NextAt = now + ((remaining > 0) ? remaining : M2_INTERVAL);
           } else if (savedM2LastRunElapsed > 0 && savedM2LastRunElapsed < M2_INTERVAL) {
             // Fallback: Calculate from last run time
             // remaining = M2_INTERVAL - savedM2LastRunElapsed - 2 seconds safety margin
             unsigned long remaining = (savedM2LastRunElapsed + 2000 < M2_INTERVAL) ? (M2_INTERVAL - savedM2LastRunElapsed - 2000) : 0;
-            m2NextAt = now + remaining;
+            m2NextAt = now + ((remaining > 0) ? remaining : M2_INTERVAL);
           } else {
             // Invalid data, wait for normal interval
             m2NextAt = now + M2_INTERVAL;
@@ -1832,11 +1851,16 @@ void startSystem(){
       setFanSpeed(FAN_HIGH);
     }
    
+    // Clear stale M2 schedule — periodic M2 requires m2NextAt > 0 (set after first M2 cycle).
+    m2ScheduledAfterM1 = false;
+    m2StartAt = 0;
+    m2NextAt = 0;
+    if (m2Active) { m2_stop(); }
+
     if (!m1Active){
       motorLogMsg("[startSystem] Starting Motor-1 for " + String(M1_START_RUN/1000) + "s");
       m1_start();
       m1StopAt = millis() + M1_START_RUN;
-      m2ScheduledAfterM1 = false;
     }
     motorLogMsg("[RUN] STARTED - System is now running");
     publishStateLocal();  // Dashboard-compatible: publish state on start
@@ -2784,8 +2808,7 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
     Serial.println("✓ M1 post time updated: " + String(M1_POST_RUN/1000) + "s");
   }
   if (doc.containsKey("m2_interval")) {
-    M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL;
-    prefs.putULong("m2_interval", M2_INTERVAL);
+    applyM2IntervalSeconds(doc["m2_interval"].as<unsigned long>());
     Serial.println("✓ M2 interval updated: " + String(M2_INTERVAL/1000) + "s");
   }
   if (doc.containsKey("m2_run")) {
@@ -3454,7 +3477,7 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
   else if (tStr == tProvMotorTimings()){
     if (doc.containsKey("m1_start")) { M1_START_RUN = doc["m1_start"].as<unsigned long>() * 1000UL; prefs.putULong("m1_start", M1_START_RUN); }
     if (doc.containsKey("m1_post")) { M1_POST_RUN = doc["m1_post"].as<unsigned long>() * 1000UL; prefs.putULong("m1_post", M1_POST_RUN); }
-    if (doc.containsKey("m2_interval")) { M2_INTERVAL = doc["m2_interval"].as<unsigned long>() * 1000UL; prefs.putULong("m2_interval", M2_INTERVAL); }
+    if (doc.containsKey("m2_interval")) { applyM2IntervalSeconds(doc["m2_interval"].as<unsigned long>()); }
     if (doc.containsKey("m2_run")) { M2_RUN_TIME = doc["m2_run"].as<unsigned long>() * 1000UL; prefs.putULong("m2_run", M2_RUN_TIME); }
     if (doc.containsKey("m2_delay")) { M2_DELAY_AFTER_M1_STOP = doc["m2_delay"].as<unsigned long>() * 1000UL; prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP); }
     motorLogMsg("Provision: Motor timings saved");
@@ -4211,7 +4234,16 @@ void setup()
 
   M1_START_RUN = prefs.getULong("m1_start", M1_START_RUN);
   M1_POST_RUN = prefs.getULong("m1_post", M1_POST_RUN);
-  M2_INTERVAL = prefs.getULong("m2_interval", M2_INTERVAL);
+  {
+    unsigned long savedInterval = prefs.getULong("m2_interval", M2_INTERVAL_DEFAULT_MS);
+    unsigned long clamped = clampM2IntervalMs(savedInterval);
+    if (clamped != savedInterval) {
+      Serial.printf("⚠️ Invalid M2_INTERVAL in NVS (%lu ms) — reset to %lu s\n",
+                    savedInterval, clamped / 1000UL);
+      prefs.putULong("m2_interval", clamped);
+    }
+    M2_INTERVAL = clamped;
+  }
   // Load motor timings from preferences (with validation)
   unsigned long savedM2Run = prefs.getULong("m2_run", M2_RUN_TIME);
   unsigned long savedM2Delay = prefs.getULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
@@ -4257,6 +4289,10 @@ void setup()
     prefs.putULong("m2_delay", M2_DELAY_AFTER_M1_STOP);
     Serial.println("✓ Corrected: M2_RUN_TIME=" + String(M2_RUN_TIME/1000) + "s, M2_DELAY=" + String(M2_DELAY_AFTER_M1_STOP/1000) + "s");
   }
+
+  Serial.printf("  Motor timings: M1=%lus | M2 every %lus, run %lus, delay after M1 %lus\n",
+                M1_START_RUN / 1000UL, M2_INTERVAL / 1000UL,
+                M2_RUN_TIME / 1000UL, M2_DELAY_AFTER_M1_STOP / 1000UL);
  
   // Load WiFi credentials (for provisioning - defaults to main WiFi)
   w1_ssid = prefs.getString("w1_ssid", String(WIFI_SSID));
@@ -4381,6 +4417,11 @@ void setup()
   if (pendingRecoveryStart) {
     pendingRecoveryStart = false;
     runState = true;
+    unsigned long now = millis();
+    // Recovery must not leave m2NextAt at 0 — that makes periodic M2 fire every loop.
+    if (!m2ScheduledAfterM1 && m2NextAt == 0) {
+      m2NextAt = now + M2_INTERVAL;
+    }
     motorLogMsg("⚠️ RECOVERY START: System recovered and running (standalone mode)");
   }
 
@@ -4817,7 +4858,7 @@ void loop()
     }
 
     // First M2 run after M1
-    if (m2ScheduledAfterM1 && !m2Active && !m1Active && now >= m2StartAt){
+    if (m2ScheduledAfterM1 && m2StartAt > 0 && !m2Active && !m1Active && now >= m2StartAt){
       m2_start();
       m2StopAt = now + M2_RUN_TIME;
       m2NextAt = now + M2_INTERVAL;
@@ -4828,8 +4869,8 @@ void loop()
       saveSystemState();
     }
 
-    // Periodic M2 runs
-    if (!m2Active && !m1Active && !m2ScheduledAfterM1 && now >= m2NextAt){
+    // Periodic M2 runs (m2NextAt must be > 0 — 0 means "not scheduled yet")
+    if (!m2Active && !m1Active && !m2ScheduledAfterM1 && m2NextAt > 0 && now >= m2NextAt){
       m2_start();
       m2StopAt = now + M2_RUN_TIME;
       m2NextAt = now + M2_INTERVAL;

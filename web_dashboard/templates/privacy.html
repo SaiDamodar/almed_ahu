@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - ALMED AHU</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .legal-page { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem 3rem; line-height: 1.65; }
+        .legal-page h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+        .legal-page .meta { color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.9rem; }
+        .legal-page h2 { font-size: 1.15rem; margin: 1.75rem 0 0.5rem; color: var(--purple-secondary); }
+        .legal-page p, .legal-page li { color: var(--text-secondary); margin-bottom: 0.75rem; }
+        .legal-page ul { padding-left: 1.25rem; margin-bottom: 1rem; }
+        .legal-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.9rem; }
+        .legal-footer a { color: var(--purple-primary); text-decoration: none; }
+        .legal-footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="legal-page">
+        <div class="login-logo-text" style="font-family: Vendura, serif; font-size: 1.5rem; margin-bottom: 0.5rem;">ALMED</div>
+        <h1>Privacy Policy</h1>
+        <p class="meta">Effective date: May 2026 · ALMED Equipments</p>
+
+        <p>ALMED AHU (“the App”) and the ALMED AHU web dashboard (“the Service”) are operated by ALMED Equipments. This policy describes how we collect, use, and protect information when you use our mobile app and cloud services.</p>
+
+        <h2>Information we collect</h2>
+        <ul>
+            <li><strong>Account information:</strong> email address, username, phone number (if provided at registration), hospital or organization name, and authentication credentials (passwords are stored in hashed form on our servers).</li>
+            <li><strong>Authentication data:</strong> if you sign in with Google, we receive your Google account identifier, email, and profile information as permitted by Google Sign-In.</li>
+            <li><strong>Device information:</strong> push notification tokens (Firebase Cloud Messaging) to deliver alerts to your device.</li>
+            <li><strong>Operational data:</strong> Air Handling Unit (AHU) telemetry, status, logs, and control commands transmitted through the Service when you are authorized to access equipment.</li>
+        </ul>
+
+        <h2>How we use information</h2>
+        <ul>
+            <li>Provide and maintain the App and dashboard</li>
+            <li>Authenticate users and manage access permissions</li>
+            <li>Monitor and control AHU equipment as authorized by your organization</li>
+            <li>Send push notifications and system alerts</li>
+            <li>Improve reliability, security, and support</li>
+        </ul>
+
+        <h2>Sharing of information</h2>
+        <p>We do not sell your personal information. We may share data with service providers that help us operate the Service (for example, cloud hosting, Firebase/Google authentication and messaging) under appropriate agreements. We may disclose information if required by law.</p>
+
+        <h2>Data retention</h2>
+        <p>We retain account and operational data for as long as your account is active and as needed to provide the Service, comply with legal obligations, and resolve disputes.</p>
+
+        <h2>Security</h2>
+        <p>We use industry-standard measures including HTTPS encryption for data in transit and access controls on our servers. No method of transmission or storage is 100% secure.</p>
+
+        <h2>Your choices</h2>
+        <p>Hospital staff access is provisioned by your organization’s administrator. To request access, correction, or deletion of your account data, contact your hospital IT administrator or us using the details on our <a href="{{ url_for('support') }}">Support</a> page.</p>
+
+        <h2>Children</h2>
+        <p>The Service is not directed at children under 13. We do not knowingly collect personal information from children.</p>
+
+        <h2>Medical disclaimer</h2>
+        <p>ALMED AHU is an equipment monitoring and control tool for authorized facility staff. It is not a medical device and does not provide medical advice or replace clinical or engineering judgment.</p>
+
+        <h2>Changes</h2>
+        <p>We may update this policy from time to time. Continued use of the App after changes constitutes acceptance of the updated policy.</p>
+
+        <div class="legal-footer">
+            <a href="{{ url_for('support') }}">Support</a> ·
+            <a href="{{ url_for('login') }}">Sign in</a>
+        </div>
+    </div>
+</body>
+</html>

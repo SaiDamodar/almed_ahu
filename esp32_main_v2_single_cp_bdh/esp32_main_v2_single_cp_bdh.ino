@@ -86,7 +86,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP03_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP75_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -141,8 +141,8 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "AlMed";
-const char WIFI_PASSWORD[] = "AlMed123456";
+const char WIFI_SSID[] = "CCU";
+const char WIFI_PASSWORD[] = "NBNC@1999";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -269,54 +269,55 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+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
-SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI2MDUwMTEwNDAx
-N1oXDTQ5MTIzMTIzNTk1OVowHjEcMBoGA1UEAwwTQVdTIElvVCBDZXJ0aWZpY2F0
-ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMV53E/+iEviSnnOha0M
-S6G5dGmm+kyiHGk3MBDLshWRmQG1bPM8RWnrFVGUwIJVAvwqz5AqbtFcBV4kbJnd
-9ztKip2G8rOI8XGIouAHhp3PAPhE9RK1+U8x0AMBq5jqAGlegakUOLoB9SPyGlGT
-xZCq/ci34RdO29fgGR0vfUBh3EuI+H9ShjYU9L8HyNZzcdD3A3N7XGymFfp2z1ln
-SvZ8ohssd1Ngwizr0x/Wx/kWkUXVfheSbiz7kvNxvyNQu2cfIlzhMUmsyvJH5BcL
-f34fJ7UHZgZKM2eytQimrVXCosrLp/ZD+XTyI2ZQEe8hwAEGv4vGn+LqRQ0uKSCh
-KusCAwEAAaNgMF4wHwYDVR0jBBgwFoAUcuJbb0pYz/PsjAzLXxTtY5HeG6YwHQYD
-VR0OBBYEFCOyiKbqBte819gyBhn2g22TOEqTMAwGA1UdEwEB/wQCMAAwDgYDVR0P
-AQH/BAQDAgeAMA0GCSqGSIb3DQEBCwUAA4IBAQCdIj2uyeDtLkkwGFr4kHGRt+Gn
-CT2JUD20fSsfzL1Ghzkgfxp59tD+qxZDwSo/K9S1zNYBx9+zr5wjTMSo2/UKP5SC
-NEYcyMlWzohWyoWIqSr+hs8LWgKCYfkr/HfG3PVFU2TVm1AM25av3aq6utmrGT3/
-CvCDWJL3dm3C0QQBhTqpxzZNcmxqL2IjDmxQCCYJgF8/HBZY+LpGhF3PH7eKyo7K
-TPuuSniUNBsVB51ipmFBP3ERUuqn5yy0cxyNEm0L88gZihumeG2L1+uuX3Gerl3u
-q/93b0UvcL6NS66OGqigWHUzY4OVXITMZH+FARZnqo59PLebF/YESva8SiBP
+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
 -----END CERTIFICATE-----
+
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
 
 )KEY";
@@ -510,9 +511,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "SIR";    // Kaveri Hospital
-const char* ROOM = "OFFICE";         // Burns Ward
-const char* AHU  = "AHU-03";            // AHU 1
+const char* SITE = "Bengal Neuro Centre";    // Kaveri Hospital
+const char* ROOM = "NICU";         // Burns Ward
+const char* AHU  = "AHU-75";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }

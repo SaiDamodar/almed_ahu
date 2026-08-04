@@ -36,15 +36,13 @@
 
 // Must be last include: Arduino inserts forward declarations here; they need SensorMode / FanSpeed.
 #include "ahu_ctrl_types.h"
+#include "buzzer_fun_tunes.h"
 
-// Field trial: disable RTC brownout detector as early as possible (before Arduino init / setup()).
-// Brief 3.3V dips (compressor/relay load) can trigger BOR even when mains returns; this only masks
-// that reset path — fix the supply for production.
-#if defined(ARDUINO_ARCH_ESP32)
-static void __attribute__((constructor(101))) disableBrownoutDetectorEarly() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-}
-#endif
+// Brownout detector is intentionally LEFT ENABLED (Arduino/ESP-IDF default).
+// A brief 3.3V dip from compressor/relay inrush must produce a CLEAN reset (ESP_RST_BROWNOUT) so the
+// controller reboots and restores state from NVS — NOT a masked under-voltage run that garbles the
+// UART ("gibberish serial") and corrupts flash/RAM until it hangs. The real fix is still the supply
+// (separate 5V rail for the ESP, coil flyback diodes / contactor snubber, bulk + local decoupling).
 
 static const char* sensorModeName(SensorMode mode) {
   switch (mode) {
@@ -93,7 +91,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "test" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP03_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -272,55 +270,55 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+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
-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
+SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI2MDUwMTEwNDAx
+N1oXDTQ5MTIzMTIzNTk1OVowHjEcMBoGA1UEAwwTQVdTIElvVCBDZXJ0aWZpY2F0
+ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMV53E/+iEviSnnOha0M
+S6G5dGmm+kyiHGk3MBDLshWRmQG1bPM8RWnrFVGUwIJVAvwqz5AqbtFcBV4kbJnd
+9ztKip2G8rOI8XGIouAHhp3PAPhE9RK1+U8x0AMBq5jqAGlegakUOLoB9SPyGlGT
+xZCq/ci34RdO29fgGR0vfUBh3EuI+H9ShjYU9L8HyNZzcdD3A3N7XGymFfp2z1ln
+SvZ8ohssd1Ngwizr0x/Wx/kWkUXVfheSbiz7kvNxvyNQu2cfIlzhMUmsyvJH5BcL
+f34fJ7UHZgZKM2eytQimrVXCosrLp/ZD+XTyI2ZQEe8hwAEGv4vGn+LqRQ0uKSCh
+KusCAwEAAaNgMF4wHwYDVR0jBBgwFoAUcuJbb0pYz/PsjAzLXxTtY5HeG6YwHQYD
+VR0OBBYEFCOyiKbqBte819gyBhn2g22TOEqTMAwGA1UdEwEB/wQCMAAwDgYDVR0P
+AQH/BAQDAgeAMA0GCSqGSIb3DQEBCwUAA4IBAQCdIj2uyeDtLkkwGFr4kHGRt+Gn
+CT2JUD20fSsfzL1Ghzkgfxp59tD+qxZDwSo/K9S1zNYBx9+zr5wjTMSo2/UKP5SC
+NEYcyMlWzohWyoWIqSr+hs8LWgKCYfkr/HfG3PVFU2TVm1AM25av3aq6utmrGT3/
+CvCDWJL3dm3C0QQBhTqpxzZNcmxqL2IjDmxQCCYJgF8/HBZY+LpGhF3PH7eKyo7K
+TPuuSniUNBsVB51ipmFBP3ERUuqn5yy0cxyNEm0L88gZihumeG2L1+uuX3Gerl3u
+q/93b0UvcL6NS66OGqigWHUzY4OVXITMZH+FARZnqo59PLebF/YESva8SiBP
 -----END CERTIFICATE-----
 
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-MIIEpQIBAAKCAQEA535LHhzOi0YDZXLTnfhBm8cw8m42OadebvuLhRz4GY93qo/U
-14Vsx4OTE7NrDTmtEMjDbN1QGgihqFJHrrYh/VWW0fQAi9nwQV4HM4aSfsNbO44S
-2JAtLpC7NJLkiiOaSFKFBPJ8fsfS7+bcn2xCA5/XxszFRTx/gCusBCnX+bKCMxi0
-gKj7IhWXGvHj4dt/CK9sEpqWj4uKJmnnpWciiYpwcE+7B0qZZ726sqApCwbXMDuK
-GqflOWu4AP/DZqq9x82rZasfs9ssBwxcF5d9o/92aGPHyqvErfmP2o34YQ9dhg3o
-Y7Qm1mHKvp5wVCvKNOhqG2gKLsCFyUCnYXFgfQIDAQABAoIBAQC4G69uYYa7KZGl
-6272Ie08EW2SQakKrVvjdFeAJIwE+B86HW4vgkQDYVdlwboQKKDFyoXyXQlJyzeW
-gOnVv7DEpH9wt1h/4XK86iVcC1kTTBeRA+tlJTVp5V2d8H2mh646erakOp5czluq
-xLcOa7EM5OFdkJoL+JOGwjTqksTcJmMNCWof5wHU8b4lnY/TP+QdbjXyJMawz/2R
-De+nRLREGg2pwh5XnfUNrZDUqVx1nGJ32ntKTc9mmZcGV2HBAHItM1ckhv9nkLbs
-TP4gTfQ1W8pE2YLHCsVnCn7iidd87ZPb2ZcB6v1SZAMY66QEr3t2HgUDiD9Ux1G5
-VtXbvQMZAoGBAPt98H5p94WFT0F9q9VZ1zaMmW0PqR9CtjezHwmpokfpUFD6k40Z
-vXbUp6yHBSyeW/TGbr71AKypmOt2wtOqsrpyfrenqjgMnzK6uRDd7eQ1aEdVLNPR
-576NtyCAz8Me7cgudy0lPu6niDNzv7WoyEBboMRJyxSCEzaf5yBumaozAoGBAOuk
-lU0O9PSOgPzdoFL0gShYyjbEBc46EVvqKhB1YJT+6RBSy5xrZ0sMLCyrgtrfsSQw
-CRKElo/5wsJ7QXvtgXjHsOgNqI5jTpEKX5mgfYpJw4R0UTE+3Zni2I/XHx9ob6JI
-MFnNGWgX5YnUiYngYw5xabLqStqY1MQkRLdGhXqPAoGABGDj7/9+TLfOcnByrms7
-APsfrLNqGV469+tJbgyjA6d/O3mxWfKJxuja5nkPUQCMz00pHm/7jAYD4I2XxMGj
-DPXzWNU1dHZbyzFPCYkjnCaF40ALYMC1zS6AcrNrapU+RI7yijmsx9Do4SRxwQLo
-QZ6WxPQX8gp1tSzBhGIIkNsCgYEAjvTPOuubAg6+BCo0TH9XJ/IN44Gyf/VMeLWs
-BUYgbOPk4ulH60JhbO8akZMPlNdmcSzPJDPZ38jHNhNum89v36VOFsnKe2+Vx3pC
-m0H5R38OpXmnlDeuWuB7P3BjyjsilpIy+xfplPQCZkbRlhrSHX4CgO+Qr+NOGRxj
-r8iRy9MCgYEA7PK0jzz1vG66RR3iCCGp1h4HUImtyzQdC8vh5iC3XmZf9sj57MPW
-5bc/HzgUE4cTdQhCap6SHB6r496upWv8J3WPpdYVFRLoSfGp9GWB0QJ48LH+cg1p
-ZZOs3mujjMeb7vQQLMoSbBTxS0bEwP40kWzGQ7tFelRAXjvQ2Gv9Iys=
+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
 -----END RSA PRIVATE KEY-----
 
 )KEY";
@@ -442,6 +440,9 @@ const float HEPA_REPLACE[4]    = {0.0,  75.0, 120.0, 140.0};  // ~20Pa above max
 #define PIN_CP      23   // Relay IN4 - CP Compressor 1 (220V AC)
 #define PIN_CP2     14   // GPIO 14 - CP Compressor 2 (220V AC) - Changed from GPIO 11
 #define PIN_SYSTEM  18   // Relay IN5 - System Master (220V AC)
+#define PIN_BUZZER  12   // Active buzzer (HIGH=on) — IR receive feedback
+                         // NOTE: GPIO12 is a boot strap pin — must stay LOW at reset
+                         // (buzzer OFF/idle = LOW is correct; do not pull HIGH at boot)
 
 bool runState = false, m1Active = false, m2Active = false, shuttingDown = false;
 unsigned long m1StopAt = 0, m2StopAt = 0, m2NextAt = 0;
@@ -471,6 +472,11 @@ const unsigned long CP_MIN_OFF_MS = 5000;
 const unsigned long CP_MIN_ON_MS  = 3000;
 const unsigned long CP_CYCLE_DELAY_MS = 60UL * 1000UL;  // 1 minute delay between CP cycles
 unsigned long cpLastOnAt  = 0, cpLastOffAt = 0;
+
+// Peak-current staggering: after a CP relay actually changes state, hold briefly so the
+// compressor/relay inrush settles BEFORE the caller's Wi-Fi/MQTT publish + NVS flash-write burst.
+// Those bursts are the biggest ESP current draws; overlapping them with inrush is what sags the rail.
+const unsigned long CP_RELAY_SETTLE_MS = 50;
 
 inline float applyTempReadingOffset(float celsius) {
   return isnan(celsius) ? celsius : (celsius + TEMP_READING_OFFSET_C);
@@ -514,9 +520,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "TEST";    // Kaveri Hospital
+const char* SITE = "SIR OFFICE";    // Kaveri Hospital
 const char* ROOM = "TEST IR";         // Burns Ward
-const char* AHU  = "AHU-00";            // AHU 1
+const char* AHU  = "AHU-03";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -1476,14 +1482,45 @@ void updateHEPAStatus(float pressure) {
 
 // ---------- Relay Control (Active HIGH: HIGH=ON, LOW=OFF) ----------
 inline void systemWrite(bool on){ digitalWrite(PIN_SYSTEM, on ? HIGH : LOW); }
-inline void cpWrite(bool on){ digitalWrite(PIN_CP, on ? HIGH : LOW); }
-inline void cp2Write(bool on){ digitalWrite(PIN_CP2, on ? HIGH : LOW); }
+
+// On a real CP state change, let the compressor/relay inrush settle before the caller's Wi-Fi TX +
+// NVS flash-write burst runs (both follow cpWrite in controlCP). Skip the settle inside MQTT
+// callbacks — those paths already stagger with their own delay(100) and must stay responsive.
+inline void cpRelaySettleAfterEdge(){
+  if (g_inLocalMqttCallback || g_inAwsMqttCallback) return;
+  esp_task_wdt_reset();
+  delay(CP_RELAY_SETTLE_MS);
+  esp_task_wdt_reset();
+}
+inline void cpWrite(bool on){
+  bool changed = (digitalRead(PIN_CP) == HIGH) != on;
+  digitalWrite(PIN_CP, on ? HIGH : LOW);
+  if (changed) cpRelaySettleAfterEdge();
+}
+inline void cp2Write(bool on){
+  bool changed = (digitalRead(PIN_CP2) == HIGH) != on;
+  digitalWrite(PIN_CP2, on ? HIGH : LOW);
+  if (changed) cpRelaySettleAfterEdge();
+}
 inline void heatWrite(bool on){ digitalWrite(PIN_HEAT, on ? HIGH : LOW); }
 
+// Forward declaration (implementation is in IR/buzzer block below).
+void buzzerStart(unsigned long durationMs, bool bypassDebounce);
+
 // ---------- Motor Control (Active HIGH relay) ----------
-void m1_start(){ digitalWrite(PIN_MOTOR1, HIGH); m1Active=true; motorLogMsg("Motor-1 ON (Drain)"); }
+void m1_start(){
+  digitalWrite(PIN_MOTOR1, HIGH);
+  m1Active=true;
+  buzzerStart(2000, true);  // long beep when Motor-1 starts
+  motorLogMsg("Motor-1 ON (Drain)");
+}
 void m1_stop (){ digitalWrite(PIN_MOTOR1, LOW); m1Active=false; motorLogMsg("Motor-1 OFF"); }
-void m2_start(){ digitalWrite(PIN_MOTOR2, HIGH); m2Active=true; motorLogMsg("Motor-2 ON (Filter Clean)"); }
+void m2_start(){
+  digitalWrite(PIN_MOTOR2, HIGH);
+  m2Active=true;
+  buzzerStart(2000, true);  // long beep when Motor-2 starts
+  motorLogMsg("Motor-2 ON (Filter Clean)");
+}
 void m2_stop (){ digitalWrite(PIN_MOTOR2, LOW); m2Active=false; motorLogMsg("Motor-2 OFF"); }
 
 // ---------- Fan Control (PWM to Voltage) ----------
@@ -3897,10 +3934,35 @@ static const uint16_t IR_RX_BUFFER  = 1024;   // fits full-state AC frames
 static const uint8_t  IR_RX_TIMEOUT = 15;     // ms inter-frame gap
 static const float    IR_TEMP_MIN   = 16.0f;  // clamp for mirrored remote temp
 static const float    IR_TEMP_MAX   = 32.0f;  // covers Daikin range so console matches remote
+static const unsigned long BUZZER_BEEP_MS     = 80;   // short click on IR receive
+static const unsigned long BUZZER_DEBOUNCE_MS = 200;  // Daikin often sends 2 frames/press
 
 IRrecv irRecv(IR_RX_PIN, IR_RX_BUFFER, IR_RX_TIMEOUT, true);
 decode_results irResults;
 IRDaikin216 irDaikin(0);   // decode-only helper (pin unused; we never transmit)
+
+// Non-blocking active-buzzer beep (driven from irTask).
+static unsigned long g_buzzerOffAt   = 0;
+static unsigned long g_buzzerLastOn  = 0;
+
+void buzzerStart(unsigned long durationMs, bool bypassDebounce = false) {
+  unsigned long now = millis();
+  if (!bypassDebounce && g_buzzerLastOn != 0 && (now - g_buzzerLastOn) < BUZZER_DEBOUNCE_MS) return;
+  digitalWrite(PIN_BUZZER, HIGH);
+  g_buzzerOffAt  = now + durationMs;
+  g_buzzerLastOn = now;
+}
+
+void buzzerBeep() {
+  buzzerStart(BUZZER_BEEP_MS, false);
+}
+
+void buzzerService() {
+  if (g_buzzerOffAt != 0 && (long)(millis() - g_buzzerOffAt) >= 0) {
+    digitalWrite(PIN_BUZZER, LOW);
+    g_buzzerOffAt = 0;
+  }
+}
 
 // Last decoded remote state, used to detect which button was pressed.
 struct IrRemoteState {
@@ -4002,13 +4064,20 @@ static bool irDecodeStep() {
 static void irTask(void* /*param*/) {
   for (;;) {
     bool got = irDecodeStep();
-    if (got) g_irLastActivityMs = millis();
+    if (got) {
+      g_irLastActivityMs = millis();
+      buzzerBeep();   // feedback click on every valid Daikin frame
+    }
+    buzzerService();
     // Fast enough for a human button press; light enough to not starve core 0.
     vTaskDelay(pdMS_TO_TICKS(got ? 2 : 10));
   }
 }
 
 void setupIR() {
+  pinMode(PIN_BUZZER, OUTPUT);
+  digitalWrite(PIN_BUZZER, LOW);
+
   irRecv.setTolerance(25);
   irRecv.setUnknownThreshold(12);
   irRecv.enableIRIn();
@@ -4023,6 +4092,7 @@ void setupIR() {
   Serial.println(ok == pdPASS
                  ? "✓ IR remote receiver started on GPIO27 (async decode task, offline + online)"
                  : "⚠️ IR receiver started but decode task failed to create");
+  Serial.println("✓ IR feedback buzzer on GPIO12");
 }
 
 // Apply any pending IR intent. MUST run on the main loop task: it uses the
@@ -4050,10 +4120,19 @@ void applyPendingIr() {
   // TEMP up/down -> mirror the remote's setpoint so console/dashboard matches.
   if (doTemp) {
     if (tempVal != tempSet) {
+      float previousTemp = tempSet;
       tempSet = tempVal;
       prefs.putFloat("tempSet", tempSet);
       motorLogMsg("[IR] TEMP set: " + String(tempSet, 1) + "C");
       irPublishState();
+
+      if (tempSet > previousTemp) {
+        motorLogMsg("[IR] TEMP UP -> Nokia ringtone (10s)");
+        playNokiaRingtone10s(PIN_BUZZER);
+      } else if (tempSet < previousTemp) {
+        motorLogMsg("[IR] TEMP DOWN -> Mario tune (10s)");
+        playMarioTune10s(PIN_BUZZER);
+      }
     }
   }
 
@@ -4073,8 +4152,8 @@ void applyPendingIr() {
 
 void setup()
 {
-  // Belt-and-suspenders after early constructor (see disableBrownoutDetectorEarly).
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  // Brownout detector left at its power-on default (ENABLED) so a supply dip forces a clean reboot
+  // instead of an under-voltage hang with gibberish serial. Do NOT write RTC_CNTL_BROWN_OUT_REG here.
 
   Serial.begin(115200);
   delay(500);
@@ -4086,7 +4165,7 @@ void setup()
   Serial.println("HELLO");
   Serial.println("========================================");
   logResetReason();
-  Serial.println("⚠️ RTC brownout detector OFF (field trial — check last reset reason above)");
+  Serial.println("✓ RTC brownout detector ENABLED (supply dips → clean reboot, not gibberish hang)");
 
   // Watch idle tasks on both CPUs (when dual-core): detects CPU starvation, not only loop() TWDT.
   uint32_t twdt_idle_mask = 0;

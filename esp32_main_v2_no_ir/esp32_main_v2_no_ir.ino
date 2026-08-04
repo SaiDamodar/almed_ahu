@@ -27,6 +27,13 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ESPmDNS.h>  // For mDNS hostname resolution
+
+// ---------- IR remote (offline + online control via Daikin remote) ----------
+#include <IRremoteESP8266.h>
+#include <IRrecv.h>
+#include <IRutils.h>
+#include <ir_Daikin.h>   // Daikin216 decoder ONLY — far smaller than full IRac
+
 // Must be last include: Arduino inserts forward declarations here; they need SensorMode / FanSpeed.
 #include "ahu_ctrl_types.h"
 
@@ -86,7 +93,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP30_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP03_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -137,8 +144,8 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "ttml";
-const char WIFI_PASSWORD[] = "BDHIND123";
+const char WIFI_SSID[] = "AlMed";
+const char WIFI_PASSWORD[] = "AlMed123456";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -265,55 +272,55 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+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
-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
+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
 -----END CERTIFICATE-----
 
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
 
 )KEY";
@@ -507,9 +514,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "BHD";    // Kaveri Hospital
-const char* ROOM = "BLISTER-2 AHT-10";         // Burns Ward
-const char* AHU  = "AHU-30";            // AHU 1
+const char* SITE = "REMOTE";    // Kaveri Hospital
+const char* ROOM = "TEST";         // Burns Ward
+const char* AHU  = "AHU-03";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -3803,6 +3810,118 @@ static void startLoopStallMonitor() {
   }
 }
 
+// =====================================================================
+//  IR REMOTE CONTROL  (works in BOTH offline and online mode)
+//  Receiver: VS1838B / TSOP on GPIO27 (power the sensor from 3V3).
+//  The Daikin remote sends its whole A/C state every press; we decode it
+//  semantically, detect which field (button) changed, and drive the SAME
+//  control paths used by Serial / MQTT: startSystem / stopSystem /
+//  tempSet / setFanSpeed. Nothing else in the firmware is modified.
+// =====================================================================
+static const uint8_t  IR_RX_PIN     = 27;     // VS1838B OUT -> GPIO27
+static const uint16_t IR_RX_BUFFER  = 1024;   // fits full-state AC frames
+static const uint8_t  IR_RX_TIMEOUT = 15;     // ms inter-frame gap
+static const float    IR_TEMP_MIN   = 16.0f;  // clamp for mirrored remote temp
+static const float    IR_TEMP_MAX   = 32.0f;  // covers Daikin range so console matches remote
+
+IRrecv irRecv(IR_RX_PIN, IR_RX_BUFFER, IR_RX_TIMEOUT, true);
+decode_results irResults;
+IRDaikin216 irDaikin(0);   // decode-only helper (pin unused; we never transmit)
+
+// Last decoded remote state, used to detect which button was pressed.
+struct IrRemoteState {
+  bool    valid = false;
+  bool    power = false;
+  int16_t tempC = 0;
+  uint8_t fan   = 0;
+  uint8_t mode  = 0;
+} irLast;
+
+// Map Daikin remote fan (stdAc::fanspeed_t) to AHU FanSpeed:
+//   0=auto -> MED, 2=low -> LOW, 3=medium -> MED, 5=max(high) -> HIGH
+FanSpeed irMapFan(uint8_t remoteFan) {
+  switch (remoteFan) {
+    case 2:  return FAN_LOW;
+    case 3:  return FAN_MED;
+    case 5:  return FAN_HIGH;
+    case 0:  return FAN_MED;   // auto -> medium
+    default: return FAN_MED;
+  }
+}
+
+// Publish state on whichever transport is up (same pattern as Serial handler).
+void irPublishState() {
+  if (client.connected())    publishStateAWS();
+  if (mqttLocal.connected()) publishStateLocal();
+}
+
+void setupIR() {
+  irRecv.setTolerance(25);
+  irRecv.setUnknownThreshold(12);
+  irRecv.enableIRIn();
+  Serial.println("✓ IR remote receiver started on GPIO27 (offline + online)");
+}
+
+// Call once per loop(). Non-blocking; the frame is captured by the ISR.
+void handleIR() {
+  if (!irRecv.decode(&irResults)) return;
+
+  // Only the Daikin remote (DAIKIN216) drives the AHU; ignore anything else.
+  if (irResults.decode_type != DAIKIN216) { irRecv.resume(); return; }
+  irDaikin.setRaw(irResults.state);
+  stdAc::state_t st = irDaikin.toCommon();  // same fan codes (0/2/3/5) as before
+  irRecv.resume();           // re-arm immediately
+
+  int16_t tempC = (int16_t)(st.degrees + 0.5f);
+  uint8_t fan   = (uint8_t)st.fanspeed;
+  uint8_t mode  = (uint8_t)st.mode;
+
+  // First frame after boot: sync baseline only, take no action.
+  if (!irLast.valid) {
+    irLast.valid = true;
+    irLast.power = st.power; irLast.tempC = tempC; irLast.fan = fan; irLast.mode = mode;
+    Serial.printf("[IR] baseline synced (power=%s temp=%dC fan=%u)\n",
+                  st.power ? "ON" : "OFF", tempC, fan);
+    return;
+  }
+
+  // POWER button -> mirror remote power onto the AHU.
+  if (st.power != irLast.power) {
+    if (st.power) { motorLogMsg("[IR] POWER -> START"); startSystem(); }
+    else          { motorLogMsg("[IR] POWER -> STOP");  stopSystem();  }
+    irPublishState();
+  }
+
+  // TEMP up/down button -> mirror the remote's actual setpoint onto the AHU
+  // so the console/dashboard temperature matches the remote display.
+  if (tempC != irLast.tempC) {
+    float newSet = (float)tempC;
+    if (newSet < IR_TEMP_MIN) newSet = IR_TEMP_MIN;
+    if (newSet > IR_TEMP_MAX) newSet = IR_TEMP_MAX;
+    if (newSet != tempSet) {
+      tempSet = newSet;
+      prefs.putFloat("tempSet", tempSet);
+      motorLogMsg("[IR] TEMP set: " + String(tempSet, 1) + "C");
+      irPublishState();
+    }
+  }
+
+  // FAN button -> map remote fan speed to AHU fan speed (only while running).
+  if (fan != irLast.fan) {
+    if (runState) {
+      FanSpeed fs = irMapFan(fan);
+      setFanSpeed(fs);
+      prefs.putInt("fanSpeed", (int)fs);
+      motorLogMsg("[IR] FAN -> speed " + String((int)fs));
+      irPublishState();
+    } else {
+      Serial.println("[IR] FAN ignored (system OFF)");
+    }
+  }
+
+  irLast.power = st.power; irLast.tempC = tempC; irLast.fan = fan; irLast.mode = mode;
+}
+
 void setup()
 {
   // Belt-and-suspenders after early constructor (see disableBrownoutDetectorEarly).
@@ -3899,6 +4018,9 @@ void setup()
  
   // PWM Fan Init
   ledcAttach(PIN_FAN_PWM, FAN_PWM_FREQ, FAN_PWM_RESOLUTION);
+
+  // IR remote receiver (offline + online control). Uses GPIO27 + LEDC-free HW timer.
+  setupIR();
   ledcWrite(PIN_FAN_PWM, FAN_PWM_OFF);
   Serial.println("✓ PWM fan control initialized (25 kHz, 8-bit)");
  
@@ -4566,6 +4688,9 @@ void loop()
   }
 
   handleSerial();
+
+  // IR remote: process any received button (works in offline AND online mode).
+  handleIR();
  
   // Read appropriate sensors based on what's detected
   // If all 3 sensors or combo sensors detected, use combo reading function
