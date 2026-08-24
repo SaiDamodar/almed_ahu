@@ -36,7 +36,6 @@
 
 // Must be last include: Arduino inserts forward declarations here; they need SensorMode / FanSpeed.
 #include "ahu_ctrl_types.h"
-#include "buzzer_fun_tunes.h"
 
 // Brownout detector is intentionally LEFT ENABLED (Arduino/ESP-IDF default).
 // A brief 3.3V dip from compressor/relay inrush must produce a CLEAN reset (ESP_RST_BROWNOUT) so the
@@ -91,7 +90,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP03_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "AHU_ESP75_CTRL" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -142,8 +141,8 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "AlMed";
-const char WIFI_PASSWORD[] = "AlMed123456";
+const char WIFI_SSID[] = "CCU";
+const char WIFI_PASSWORD[] = "NBNC@1999";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -270,55 +269,55 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+MIIDWTCCAkGgAwIBAgIUQZpcCZ6sIhQXmwluGGM/UfQ8TicwDQYJKoZIhvcNAQEL
 BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
-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
+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
 -----END CERTIFICATE-----
 
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+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
 -----END RSA PRIVATE KEY-----
 
 )KEY";
@@ -410,6 +409,9 @@ float sen66_humidity = 0.0, sen66_temperature = 0.0;
 float sen66_vocIndex = 0.0, sen66_noxIndex = 0.0;
 uint16_t sen66_co2 = 0;
 int sen66_aqi = 0;
+// True only while the AQ sensor (SEN66/SEN55) is actually responding.
+// Temperature may come from SHT45/DHT22, so it cannot vouch for this sensor.
+bool aqDataValid = false;
 
 // SDP810 readings
 float sdp810_pressure = 0.0;
@@ -440,9 +442,6 @@ const float HEPA_REPLACE[4]    = {0.0,  75.0, 120.0, 140.0};  // ~20Pa above max
 #define PIN_CP      23   // Relay IN4 - CP Compressor 1 (220V AC)
 #define PIN_CP2     14   // GPIO 14 - CP Compressor 2 (220V AC) - Changed from GPIO 11
 #define PIN_SYSTEM  18   // Relay IN5 - System Master (220V AC)
-#define PIN_BUZZER  12   // Active buzzer (HIGH=on) — IR receive feedback
-                         // NOTE: GPIO12 is a boot strap pin — must stay LOW at reset
-                         // (buzzer OFF/idle = LOW is correct; do not pull HIGH at boot)
 
 bool runState = false, m1Active = false, m2Active = false, shuttingDown = false;
 unsigned long m1StopAt = 0, m2StopAt = 0, m2NextAt = 0;
@@ -520,9 +519,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "SIR OFFICE";    // Kaveri Hospital
-const char* ROOM = "TEST IR";         // Burns Ward
-const char* AHU  = "AHU-03";            // AHU 1
+const char* SITE = "Bengal Neuro Centre";    // Kaveri Hospital
+const char* ROOM = "NICU";         // Burns Ward
+const char* AHU  = "AHU-75";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -842,6 +841,9 @@ void saveSystemState(){
   prefs.putBool("shuttingDown", shuttingDown);
   prefs.putInt("fanSpeed", (int)fanSpeed);
   prefs.putBool("onlineMode", onlineMode);
+  prefs.putInt("cpMode", (int)cpMode);
+  prefs.putInt("cpActive", cpActive);
+  prefs.putULong("cpLastSwitchAt", cpLastSwitchAt);
   prefs.putULong("saveTime", now);
  
   // Save CP timing state (for 1-minute cycle delay)
@@ -1504,23 +1506,10 @@ inline void cp2Write(bool on){
 }
 inline void heatWrite(bool on){ digitalWrite(PIN_HEAT, on ? HIGH : LOW); }
 
-// Forward declaration (implementation is in IR/buzzer block below).
-void buzzerStart(unsigned long durationMs, bool bypassDebounce);
-
 // ---------- Motor Control (Active HIGH relay) ----------
-void m1_start(){
-  digitalWrite(PIN_MOTOR1, HIGH);
-  m1Active=true;
-  buzzerStart(2000, true);  // long beep when Motor-1 starts
-  motorLogMsg("Motor-1 ON (Drain)");
-}
+void m1_start(){ digitalWrite(PIN_MOTOR1, HIGH); m1Active=true; motorLogMsg("Motor-1 ON (Drain)"); }
 void m1_stop (){ digitalWrite(PIN_MOTOR1, LOW); m1Active=false; motorLogMsg("Motor-1 OFF"); }
-void m2_start(){
-  digitalWrite(PIN_MOTOR2, HIGH);
-  m2Active=true;
-  buzzerStart(2000, true);  // long beep when Motor-2 starts
-  motorLogMsg("Motor-2 ON (Filter Clean)");
-}
+void m2_start(){ digitalWrite(PIN_MOTOR2, HIGH); m2Active=true; motorLogMsg("Motor-2 ON (Filter Clean)"); }
 void m2_stop (){ digitalWrite(PIN_MOTOR2, LOW); m2Active=false; motorLogMsg("Motor-2 OFF"); }
 
 // ---------- Fan Control (PWM to Voltage) ----------
@@ -1946,11 +1935,15 @@ void publishTelemetryAWS(){
  
   // Indicate which sensor type is active
   doc["sensorType"] = useSEN66 ? "combo" : (useSEN55 ? "sen55" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none")));
+  doc["aqPresent"] = (useSEN66 || useSEN55) && aqDataValid;
+  doc["hepaPresent"] = useSDP810;
  
   // Add SEN66/SEN55 data - always include fields for web dashboard compatibility
   if (useSEN66 || useSEN55) {
-    // Only add values if temperature is valid (indicates successful read)
-    if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
+    // Publish readings only while the AQ sensor itself is responding. Gating
+    // on temperature kept stale PM/VOC alive after the sensor was unplugged,
+    // because SHT45/DHT22 still supplied a valid temperature.
+    if (aqDataValid) {
       doc["aqi"] = sen66_aqi;
       doc["pm1p0"] = sen66_pm1p0;
       doc["pm2p5"] = sen66_pm2p5;
@@ -1970,16 +1963,6 @@ void publishTelemetryAWS(){
       doc["nox"] = nullptr;
       doc["co2"] = nullptr;
     }
-  } else {
-    // Always include fields even if sensor not detected (send 0 for web dashboard)
-    doc["aqi"] = 0;
-    doc["pm1p0"] = 0.0;
-    doc["pm2p5"] = 0.0;
-    doc["pm4p0"] = 0.0;
-    doc["pm10p0"] = 0.0;
-    doc["voc"] = 0.0;
-    doc["nox"] = 0.0;
-    doc["co2"] = 0;
   }
  
   // Add SDP810 data - always include fields for web dashboard compatibility
@@ -1996,11 +1979,6 @@ void publishTelemetryAWS(){
       doc["hepaStatus"] = "Normal";  // Still show Normal
       doc["hepaHealth"] = 100;  // Always show 100% health
     }
-  } else {
-    // Always include fields even if sensor not detected (send defaults for web dashboard)
-    doc["diffPressure"] = 0.0;
-    doc["hepaStatus"] = "Normal";  // Show Normal instead of Unknown
-    doc["hepaHealth"] = 100;  // Always show 100% health
   }
  
   char buf[1024];
@@ -2050,11 +2028,15 @@ void publishTelemetryLocal(){
  
   // Indicate which sensor type is active
   doc["sensorType"] = useSEN66 ? "combo" : (useSEN55 ? "sen55" : (useSHT45 ? "sht45" : (useDHT22 ? "dht22" : "none")));
+  doc["aqPresent"] = (useSEN66 || useSEN55) && aqDataValid;
+  doc["hepaPresent"] = useSDP810;
  
   // Add SEN66/SEN55 data - always include fields for web dashboard compatibility
   if (useSEN66 || useSEN55) {
-    // Only add values if temperature is valid (indicates successful read)
-    if (!isnan(filtTempC) && filtTempC != 0.0 && filtTempC >= -40.0 && filtTempC <= 125.0) {
+    // Publish readings only while the AQ sensor itself is responding. Gating
+    // on temperature kept stale PM/VOC alive after the sensor was unplugged,
+    // because SHT45/DHT22 still supplied a valid temperature.
+    if (aqDataValid) {
       doc["aqi"] = sen66_aqi;
       doc["pm1p0"] = sen66_pm1p0;
       doc["pm2p5"] = sen66_pm2p5;
@@ -2074,16 +2056,6 @@ void publishTelemetryLocal(){
       doc["nox"] = nullptr;
       doc["co2"] = nullptr;
     }
-  } else {
-    // Always include fields even if sensor not detected (send 0 for web dashboard)
-    doc["aqi"] = 0;
-    doc["pm1p0"] = 0.0;
-    doc["pm2p5"] = 0.0;
-    doc["pm4p0"] = 0.0;
-    doc["pm10p0"] = 0.0;
-    doc["voc"] = 0.0;
-    doc["nox"] = 0.0;
-    doc["co2"] = 0;
   }
  
   // Add SDP810 data - always include fields for web dashboard compatibility
@@ -2100,11 +2072,6 @@ void publishTelemetryLocal(){
       doc["hepaStatus"] = "Normal";  // Still show Normal
       doc["hepaHealth"] = 100;  // Always show 100% health
     }
-  } else {
-    // Always include fields even if sensor not detected (send defaults for web dashboard)
-    doc["diffPressure"] = 0.0;
-    doc["hepaStatus"] = "Normal";  // Show Normal instead of Unknown
-    doc["hepaHealth"] = 100;  // Always show 100% health
   }
  
   char buf[896];
@@ -2274,8 +2241,11 @@ void readSensorIfDue(){
     selfHealing.i2cFailCount++;
    
     if (selfHealing.sensorFailCount > 3) {
-      useLastGoodSensorValues();
+      // Do not keep publishing the last good reading — dashboard must show "--".
+      filtTempC = NAN;
+      filtHum = NAN;
       selfHealing.sensorHealthy = false;
+      publishTelemetryLocal();
     }
   }
 }
@@ -2341,8 +2311,11 @@ void readDht22IfDue() {
     Serial.println("⚠ [DHT22 GPIO" + String(DHT_PIN) + "] Read failed (try another pin / check pull-up)");
     selfHealing.sensorFailCount++;
     if (selfHealing.sensorFailCount > 3) {
-      useLastGoodSensorValues();
+      // Do not keep publishing the last good reading — dashboard must show "--".
+      filtTempC = NAN;
+      filtHum = NAN;
       selfHealing.sensorHealthy = false;
+      publishTelemetryLocal();
     }
   }
 }
@@ -2516,6 +2489,7 @@ void readComboSensorsIfDue() {
        
         sen66Success = true;
         consecutiveSEN66Failures = 0;
+        aqDataValid = true;
        
         Serial.printf("[SEN66] PM2.5:%.1f AQI:%d VOC:%.0f NOx:%.0f CO2:%d\n",
                       sen66_pm2p5, sen66_aqi, sen66_vocIndex, sen66_noxIndex, sen66_co2);
@@ -2536,6 +2510,9 @@ void readComboSensorsIfDue() {
         Serial.println("[SEN66] Multiple failures - marking values as invalid");
       }
     }
+
+    // Unplugged / unresponsive: stop reporting its readings to the dashboard.
+    if (consecutiveSEN66Failures >= 3) aqDataValid = false;
   }
 
   // Read SEN55 (Air Quality – substitute for SEN66, no CO2)
@@ -2565,6 +2542,7 @@ void readComboSensorsIfDue() {
 
         sen55Success = true;
         consecutiveSEN55Failures = 0;
+        aqDataValid = true;
         Serial.printf("[SEN55] PM2.5:%.1f AQI:%d VOC:%.0f NOx:%.0f (no CO2)\n",
                       sen66_pm2p5, sen66_aqi,
                       sen66_vocIndex, sen66_noxIndex);
@@ -2583,6 +2561,9 @@ void readComboSensorsIfDue() {
         Serial.println("[SEN55] Multiple failures – marking values as invalid");
       }
     }
+
+    // Unplugged / unresponsive: stop reporting its readings to the dashboard.
+    if (consecutiveSEN55Failures >= 3) aqDataValid = false;
   }
  
   // Read SDP810 (Differential Pressure) - Feed watchdog before I2C operation
@@ -2633,11 +2614,14 @@ void readComboSensorsIfDue() {
     selfHealing.sensorFailCount++;
     selfHealing.i2cFailCount++;  // Also track I2C failures
    
-    // SELF-HEALING: Use last known good values (graceful degradation)
+    // After sustained failure, publish null so the dashboard shows "--"
+    // instead of freezing on the last good reading.
     if (selfHealing.sensorFailCount > 3) {
-      useLastGoodSensorValues();
+      filtTempC = NAN;
+      filtHum = NAN;
       selfHealing.sensorHealthy = false;
-      Serial.println("⚠️ [SELF-HEAL] Using last good sensor values");
+      Serial.println("⚠️ [SELF-HEAL] Sensor failed — publishing null readings");
+      publishTelemetryLocal();
     }
   }
 }
@@ -3658,7 +3642,8 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       cpSwitchStartedAt = millis();
       cpSwitchInProgress = true;
      
-      // Save state
+      // Save state (cpMode must persist across hard reset / power cycle)
+      prefs.putInt("cpMode", (int)cpMode);
       prefs.putBool("dualCpBothOn", false);
       prefs.putInt("cpActive", cpActive);
      
@@ -3934,35 +3919,10 @@ static const uint16_t IR_RX_BUFFER  = 1024;   // fits full-state AC frames
 static const uint8_t  IR_RX_TIMEOUT = 15;     // ms inter-frame gap
 static const float    IR_TEMP_MIN   = 16.0f;  // clamp for mirrored remote temp
 static const float    IR_TEMP_MAX   = 32.0f;  // covers Daikin range so console matches remote
-static const unsigned long BUZZER_BEEP_MS     = 80;   // short click on IR receive
-static const unsigned long BUZZER_DEBOUNCE_MS = 200;  // Daikin often sends 2 frames/press
 
 IRrecv irRecv(IR_RX_PIN, IR_RX_BUFFER, IR_RX_TIMEOUT, true);
 decode_results irResults;
 IRDaikin216 irDaikin(0);   // decode-only helper (pin unused; we never transmit)
-
-// Non-blocking active-buzzer beep (driven from irTask).
-static unsigned long g_buzzerOffAt   = 0;
-static unsigned long g_buzzerLastOn  = 0;
-
-void buzzerStart(unsigned long durationMs, bool bypassDebounce = false) {
-  unsigned long now = millis();
-  if (!bypassDebounce && g_buzzerLastOn != 0 && (now - g_buzzerLastOn) < BUZZER_DEBOUNCE_MS) return;
-  digitalWrite(PIN_BUZZER, HIGH);
-  g_buzzerOffAt  = now + durationMs;
-  g_buzzerLastOn = now;
-}
-
-void buzzerBeep() {
-  buzzerStart(BUZZER_BEEP_MS, false);
-}
-
-void buzzerService() {
-  if (g_buzzerOffAt != 0 && (long)(millis() - g_buzzerOffAt) >= 0) {
-    digitalWrite(PIN_BUZZER, LOW);
-    g_buzzerOffAt = 0;
-  }
-}
 
 // Last decoded remote state, used to detect which button was pressed.
 struct IrRemoteState {
@@ -4064,20 +4024,13 @@ static bool irDecodeStep() {
 static void irTask(void* /*param*/) {
   for (;;) {
     bool got = irDecodeStep();
-    if (got) {
-      g_irLastActivityMs = millis();
-      buzzerBeep();   // feedback click on every valid Daikin frame
-    }
-    buzzerService();
+    if (got) g_irLastActivityMs = millis();
     // Fast enough for a human button press; light enough to not starve core 0.
     vTaskDelay(pdMS_TO_TICKS(got ? 2 : 10));
   }
 }
 
 void setupIR() {
-  pinMode(PIN_BUZZER, OUTPUT);
-  digitalWrite(PIN_BUZZER, LOW);
-
   irRecv.setTolerance(25);
   irRecv.setUnknownThreshold(12);
   irRecv.enableIRIn();
@@ -4092,7 +4045,6 @@ void setupIR() {
   Serial.println(ok == pdPASS
                  ? "✓ IR remote receiver started on GPIO27 (async decode task, offline + online)"
                  : "⚠️ IR receiver started but decode task failed to create");
-  Serial.println("✓ IR feedback buzzer on GPIO12");
 }
 
 // Apply any pending IR intent. MUST run on the main loop task: it uses the
@@ -4120,19 +4072,10 @@ void applyPendingIr() {
   // TEMP up/down -> mirror the remote's setpoint so console/dashboard matches.
   if (doTemp) {
     if (tempVal != tempSet) {
-      float previousTemp = tempSet;
       tempSet = tempVal;
       prefs.putFloat("tempSet", tempSet);
       motorLogMsg("[IR] TEMP set: " + String(tempSet, 1) + "C");
       irPublishState();
-
-      if (tempSet > previousTemp) {
-        motorLogMsg("[IR] TEMP UP -> Nokia ringtone (10s)");
-        playNokiaRingtone10s(PIN_BUZZER);
-      } else if (tempSet < previousTemp) {
-        motorLogMsg("[IR] TEMP DOWN -> Mario tune (10s)");
-        playMarioTune10s(PIN_BUZZER);
-      }
     }
   }
 
