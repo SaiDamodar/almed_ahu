@@ -22,8 +22,6 @@
 #include "esp_idf_version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ESPmDNS.h>  // For mDNS hostname resolution
@@ -36,15 +34,6 @@
 
 // Must be last include: Arduino inserts forward declarations here; they need SensorMode / FanSpeed.
 #include "ahu_ctrl_types.h"
-
-// Field trial: disable RTC brownout detector as early as possible (before Arduino init / setup()).
-// Brief 3.3V dips (compressor/relay load) can trigger BOR even when mains returns; this only masks
-// that reset path — fix the supply for production.
-#if defined(ARDUINO_ARCH_ESP32)
-static void __attribute__((constructor(101))) disableBrownoutDetectorEarly() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-}
-#endif
 
 static const char* sensorModeName(SensorMode mode) {
   switch (mode) {
@@ -93,7 +82,7 @@ static void logResetReason() {
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub" // Shared subscribe (legacy); OTA on this topic requires JSON target_thing
 #define AWS_IOT_PUBLISH_TOPIC "esp32/pub"   // MQTT topic to publish telemetry/state
 
-#define THINGNAME "AHU_ESP30_CTRL" // Kaveri Hospital Burns Ward AHU 1
+#define THINGNAME "test" // Kaveri Hospital Burns Ward AHU 1
 
 // Matches web_dashboard: esp32/{thing_name}/sub — preferred path for OTA so other things never see the command.
 static inline String awsIotCmdTopicForThisThing() {
@@ -129,7 +118,7 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 // Build version for OTA verification
 #define BUILD_VERSION "v2.6.2-DCP"
 #define BUILD_DATE "2026-01-21"
-#define BUILD_FEATURES "dual-CP for cloud, BOD-off-field"
+#define BUILD_FEATURES "dual-CP for cloud, BOD-on, T+3C, H-9%"
 
 // ============ GitHub OTA Configuration (Hardcoded) ============
 #define GITHUB_REPO_OWNER "ESPUpdaterzaid"
@@ -144,8 +133,8 @@ static bool otaAwsPayloadTargetsThisDevice(const char* topic, JsonDocument& doc)
 
 // ============ WiFi Configuration ============
 // Both ESP32 and Raspberry Pi connect to this same network
-const char WIFI_SSID[] = "ttml";
-const char WIFI_PASSWORD[] = "BDHIND123";
+const char WIFI_SSID[] = "AlMed";
+const char WIFI_PASSWORD[] = "AlMed123456";
 const char AWS_IOT_ENDPOINT[] = "al924mkqhctlg-ats.iot.ap-south-1.amazonaws.com"; // Your AWS IoT endpoint
 
 // ========================= DEFAULT MOTOR TIMINGS (Adjustable via Admin) =========================
@@ -180,6 +169,17 @@ static volatile bool g_inLocalMqttCallback = false;
 static volatile bool g_inAwsMqttCallback = false;
 static volatile bool g_deferredPublishStateLocal = false;
 static volatile bool g_deferredPublishStateAws = false;
+
+// AWS net-task handoff flags (defined early — used by serial/MQTT handlers before awsNetTask).
+static volatile bool g_awsJustConnected = false;       // one-shot: main publishes local aws_status
+static volatile bool g_awsConnecting = false;          // mid client.connect()
+static volatile bool g_awsRequestDisconnect = false;   // main/local asked to drop AWS
+static volatile bool g_awsIsConnected = false;         // mirror for main loop (avoid racing client)
+
+// IR apply must not wait on NVS: flash writes stall for seconds while WiFi/TLS is busy.
+static volatile bool g_deferPrefTemp = false;
+static volatile bool g_deferPrefHum  = false;
+static volatile bool g_deferPrefFan  = false;
 
 struct LocalMqttCallbackGuard {
   LocalMqttCallbackGuard() { g_inLocalMqttCallback = true; }
@@ -272,56 +272,58 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 static const char AWS_CERT_CRT[] PROGMEM = R"KEY(
 -----BEGIN CERTIFICATE-----
-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
+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
-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
+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
 -----END CERTIFICATE-----
+
 
 )KEY";
 
 static const char AWS_CERT_PRIVATE[] PROGMEM = R"KEY(
 -----BEGIN RSA PRIVATE KEY-----
-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
+MIIEpQIBAAKCAQEA535LHhzOi0YDZXLTnfhBm8cw8m42OadebvuLhRz4GY93qo/U
+14Vsx4OTE7NrDTmtEMjDbN1QGgihqFJHrrYh/VWW0fQAi9nwQV4HM4aSfsNbO44S
+2JAtLpC7NJLkiiOaSFKFBPJ8fsfS7+bcn2xCA5/XxszFRTx/gCusBCnX+bKCMxi0
+gKj7IhWXGvHj4dt/CK9sEpqWj4uKJmnnpWciiYpwcE+7B0qZZ726sqApCwbXMDuK
+GqflOWu4AP/DZqq9x82rZasfs9ssBwxcF5d9o/92aGPHyqvErfmP2o34YQ9dhg3o
+Y7Qm1mHKvp5wVCvKNOhqG2gKLsCFyUCnYXFgfQIDAQABAoIBAQC4G69uYYa7KZGl
+6272Ie08EW2SQakKrVvjdFeAJIwE+B86HW4vgkQDYVdlwboQKKDFyoXyXQlJyzeW
+gOnVv7DEpH9wt1h/4XK86iVcC1kTTBeRA+tlJTVp5V2d8H2mh646erakOp5czluq
+xLcOa7EM5OFdkJoL+JOGwjTqksTcJmMNCWof5wHU8b4lnY/TP+QdbjXyJMawz/2R
+De+nRLREGg2pwh5XnfUNrZDUqVx1nGJ32ntKTc9mmZcGV2HBAHItM1ckhv9nkLbs
+TP4gTfQ1W8pE2YLHCsVnCn7iidd87ZPb2ZcB6v1SZAMY66QEr3t2HgUDiD9Ux1G5
+VtXbvQMZAoGBAPt98H5p94WFT0F9q9VZ1zaMmW0PqR9CtjezHwmpokfpUFD6k40Z
+vXbUp6yHBSyeW/TGbr71AKypmOt2wtOqsrpyfrenqjgMnzK6uRDd7eQ1aEdVLNPR
+576NtyCAz8Me7cgudy0lPu6niDNzv7WoyEBboMRJyxSCEzaf5yBumaozAoGBAOuk
+lU0O9PSOgPzdoFL0gShYyjbEBc46EVvqKhB1YJT+6RBSy5xrZ0sMLCyrgtrfsSQw
+CRKElo/5wsJ7QXvtgXjHsOgNqI5jTpEKX5mgfYpJw4R0UTE+3Zni2I/XHx9ob6JI
+MFnNGWgX5YnUiYngYw5xabLqStqY1MQkRLdGhXqPAoGABGDj7/9+TLfOcnByrms7
+APsfrLNqGV469+tJbgyjA6d/O3mxWfKJxuja5nkPUQCMz00pHm/7jAYD4I2XxMGj
+DPXzWNU1dHZbyzFPCYkjnCaF40ALYMC1zS6AcrNrapU+RI7yijmsx9Do4SRxwQLo
+QZ6WxPQX8gp1tSzBhGIIkNsCgYEAjvTPOuubAg6+BCo0TH9XJ/IN44Gyf/VMeLWs
+BUYgbOPk4ulH60JhbO8akZMPlNdmcSzPJDPZ38jHNhNum89v36VOFsnKe2+Vx3pC
+m0H5R38OpXmnlDeuWuB7P3BjyjsilpIy+xfplPQCZkbRlhrSHX4CgO+Qr+NOGRxj
+r8iRy9MCgYEA7PK0jzz1vG66RR3iCCGp1h4HUImtyzQdC8vh5iC3XmZf9sj57MPW
+5bc/HzgUE4cTdQhCap6SHB6r496upWv8J3WPpdYVFRLoSfGp9GWB0QJ48LH+cg1p
+ZZOs3mujjMeb7vQQLMoSbBTxS0bEwP40kWzGQ7tFelRAXjvQ2Gv9Iys=
 -----END RSA PRIVATE KEY-----
+
 
 )KEY";
 
@@ -466,14 +468,23 @@ bool dualCpBothOn = false;  // True = both CPs are running (rapid cooling phase)
 
 float  tempSet = 22.0;
 const float TEMP_READING_OFFSET_C = 3.0;
+const float HUM_READING_OFFSET_PCT = -9.0;
 const float TEMP_DEADBAND = 1.0;
 const unsigned long CP_MIN_OFF_MS = 5000;
 const unsigned long CP_MIN_ON_MS  = 3000;
 const unsigned long CP_CYCLE_DELAY_MS = 60UL * 1000UL;  // 1 minute delay between CP cycles
+// After START, wait this long before any CP may turn ON (fan/motors settle + compressor protection).
+const unsigned long CP_STARTUP_DELAY_MS = 120UL * 1000UL;  // 2 min after START / power restore / ESP reset
 unsigned long cpLastOnAt  = 0, cpLastOffAt = 0;
+unsigned long cpStartAllowAt = 0;  // millis() when CP may turn ON; 0 = no startup gate
 
 inline float applyTempReadingOffset(float celsius) {
   return isnan(celsius) ? celsius : (celsius + TEMP_READING_OFFSET_C);
+}
+
+inline float applyHumReadingOffset(float percent) {
+  if (isnan(percent)) return percent;
+  return constrain(percent + HUM_READING_OFFSET_PCT, 0.0f, 100.0f);
 }
 
 // CP Switch Safety Delay - prevents both CPs from running during switch
@@ -722,9 +733,9 @@ void pushMotorHTML(const String& line) { motorHead = (motorHead + 1) % LOG_MAX; 
 
 // ---------- Local MQTT Topics (for Raspberry Pi) ----------
 const char* ORG  = "almed";
-const char* SITE = "BHD";    // Kaveri Hospital
-const char* ROOM = "BLISTER-2 AHT-10";         // Burns Ward
-const char* AHU  = "AHU-30";            // AHU 1
+const char* SITE = "7 Seg Display";    // Kaveri Hospital
+const char* ROOM = "TEST";         // Burns Ward
+const char* AHU  = "AHU-00";            // AHU 1
 
 String baseTopic()        { return String(ORG)+"/ahu/"+SITE+"/"+ROOM+"/"+AHU; }
 String tTelemetry()       { return baseTopic()+"/telemetry"; }
@@ -1115,8 +1126,6 @@ void restoreSystemState(){
   // Fresh upload has saveTime = 0, so don't restore anything
   if (saveTime > 0 && now < 300000) {
     bool wasRunning = prefs.getBool("runState", false);
-    bool wasCpOn = prefs.getBool("cpOn", false);
-    bool wasCp2On = prefs.getBool("cp2On", false);
     cpMode = (CpMode)prefs.getInt("cpMode", CP_DUAL_AUTO);
     cpActive = prefs.getInt("cpActive", 1);
     cpLastSwitchAt = prefs.getULong("cpLastSwitchAt", 0);
@@ -1132,46 +1141,22 @@ void restoreSystemState(){
       systemWrite(true);
       Serial.println("✓ System relay turned ON (recovery mode)");
      
-      cpOn = wasCpOn;
-      cp2On = wasCp2On;
+      // Remember preferred dual mode for after the startup timer — but NEVER
+      // re-energize compressors immediately after ESP reset / power return.
+      // Lights-out / brownout / reboot must wait CP_STARTUP_DELAY_MS (2 min).
       dualCpBothOn = prefs.getBool("dualCpBothOn", false);
       heatOn = wasHeatOn;
+
+      cpOn = false;
+      cp2On = false;
+      cpWrite(false);
+      cp2Write(false);
+      // Startup gate owns the 2‑min wait; don't also stack a full cycle delay on top.
+      cpLastOffAt = now - CP_CYCLE_DELAY_MS;
+      cpStartAllowAt = now + CP_STARTUP_DELAY_MS;
+      Serial.printf("✓ CP held OFF after power/reset — ON allowed in %lu s\n",
+                    CP_STARTUP_DELAY_MS / 1000UL);
      
-      // Restore CP timing state
-      unsigned long savedCpLastOffElapsed = prefs.getULong("cpLastOffElapsed", 0);
-      if (savedCpLastOffElapsed > 0) {
-        // Calculate when CP last turned off based on saved elapsed time
-        // Account for time that may have passed during reset
-        unsigned long elapsedSinceSave = 0;
-        if (saveTime > 0 && now > saveTime) {
-          elapsedSinceSave = now - saveTime;
-        }
-        // Restore cpLastOffAt
-        cpLastOffAt = now - (savedCpLastOffElapsed + elapsedSinceSave);
-        // Ensure minimum off time is respected
-        if (now - cpLastOffAt < CP_MIN_OFF_MS) {
-          cpLastOffAt = now - CP_MIN_OFF_MS;
-        }
-      } else {
-        // No saved timing - allow immediate operation
-        cpLastOffAt = now - CP_MIN_OFF_MS;
-      }
-     
-      // Restore CP states based on dual mode (both on) or single active CP
-      if (dualCpBothOn && cpMode == CP_DUAL_AUTO) {
-        // Both CPs were running in rapid cooling mode
-        cpWrite(cpOn);
-        cp2Write(cp2On);
-        Serial.println("✓ Restored dual CP mode (both CPs)");
-      } else if (cpActive == 1) {
-        cpWrite(cpOn);
-        cp2Write(false);
-        cp2On = false;
-      } else {
-        cpWrite(false);
-        cpOn = false;
-        cp2Write(cp2On);
-      }
       heatWrite(heatOn);
      
       if (savedFanSpd >= 0 && savedFanSpd <= 3) {
@@ -1311,12 +1296,15 @@ void clearSystemState(){
 }
 
 // ---------- Logging (Serial + MQTT to Dashboard) ----------
+// When true, motorLogMsg skips local MQTT publish (IR must act before any socket I/O).
+static volatile bool g_inIrApply = false;
+
 void motorLogMsg(const String& s){
   Serial.println(s);
   pushMotorHTML(s);
 
   // Avoid mqttLocal.publish while handling incoming local MQTT or AWS MQTT (nested client use).
-  if (g_inLocalMqttCallback || g_inAwsMqttCallback) {
+  if (g_inLocalMqttCallback || g_inAwsMqttCallback || g_inIrApply) {
     return;
   }
   // STOP/shutdown fires many motorLogMsg + flash + PWM; MQTT log spam here correlates with field
@@ -1757,10 +1745,26 @@ void controlCP(float t){
   // CP must wait 1 minute after turning off before turning on again (compressor protection)
   bool canTurnOn = (now - cpLastOffAt) >= CP_CYCLE_DELAY_MS;
   bool canTurnOff = (now - cpLastOnAt) >= CP_MIN_ON_MS;
+
+  // Startup gate: after machine START, hold CP OFF until cpStartAllowAt
+  if (cpStartAllowAt != 0) {
+    if (now < cpStartAllowAt) {
+      canTurnOn = false;
+      static unsigned long lastStartupDelayLog = 0;
+      if (now - lastStartupDelayLog >= 10000) {
+        lastStartupDelayLog = now;
+        unsigned long remaining = (cpStartAllowAt - now + 999) / 1000;
+        motorLogMsg("⏳ CP startup timer: " + String(remaining) + "s until CP may turn ON");
+      }
+    } else {
+      cpStartAllowAt = 0;  // gate expired — clear so we don't keep checking
+      motorLogMsg("✓ CP startup timer done — CP may turn ON if temp requires");
+    }
+  }
  
   // Log countdown when waiting for cycle delay (every 10 seconds)
   static unsigned long lastCycleDelayLog = 0;
-  if (!canTurnOn && (cpOn == false && cp2On == false) && (now - lastCycleDelayLog >= 10000)) {
+  if (!canTurnOn && cpStartAllowAt == 0 && (cpOn == false && cp2On == false) && (now - lastCycleDelayLog >= 10000)) {
     lastCycleDelayLog = now;
     unsigned long elapsed = now - cpLastOffAt;
     unsigned long remaining = (CP_CYCLE_DELAY_MS - elapsed) / 1000;
@@ -2029,6 +2033,10 @@ void startSystem(){
    
     motorLogMsg("[startSystem] Turning on system relay");
     systemWrite(true);
+
+    // Hold compressors OFF for CP_STARTUP_DELAY_MS after START (countdown in controlCP).
+    cpStartAllowAt = millis() + CP_STARTUP_DELAY_MS;
+    motorLogMsg("[startSystem] CP ON timer: " + String(CP_STARTUP_DELAY_MS / 1000) + "s before CP may turn ON");
    
     if (fanSpeed == FAN_OFF) {
       motorLogMsg("[startSystem] Starting fan at LOW");
@@ -2042,7 +2050,7 @@ void startSystem(){
       m2ScheduledAfterM1 = false;
     }
     motorLogMsg("[RUN] STARTED - System is now running");
-    publishStateLocal();  // Dashboard-compatible: publish state on start
+    g_deferredPublishStateLocal = true;  // don't block START on MQTT (esp. IR path)
   } else {
     motorLogMsg("[RUN] Already running");
   }
@@ -2061,6 +2069,7 @@ void stopSystem(){
 
   Serial.println("[stopSystem] Initiating shutdown (MQTT log publish paused during shutdown)");
   esp_task_wdt_reset();
+  cpStartAllowAt = 0;  // cancel any pending CP startup timer
   setFanSpeed(FAN_OFF);
   esp_task_wdt_reset();
   clearSystemState();
@@ -2388,7 +2397,7 @@ void readSensorIfDue(){
   bool got = (!isnan(te.temperature) && !isnan(he.relative_humidity));
   if (got){
     float newT = applyTempReadingOffset(te.temperature);
-    float newH = he.relative_humidity;
+    float newH = applyHumReadingOffset(he.relative_humidity);
 
     bool acceptT = true, acceptH = true;
 
@@ -2461,7 +2470,7 @@ void readDht22IfDue() {
   if (now - lastSensorAt < SENSOR_PERIOD) return;
   lastSensorAt = now;
 
-  float newH = dht.readHumidity();
+  float newH = applyHumReadingOffset(dht.readHumidity());
   float newT = applyTempReadingOffset(dht.readTemperature());
   dhtTempRaw = newT;
   dhtHumRaw = newH;
@@ -2572,7 +2581,7 @@ void readComboSensorsIfDue() {
     bool got = (!isnan(te.temperature) && !isnan(he.relative_humidity));
     if (got) {
       float newT = applyTempReadingOffset(te.temperature);
-      float newH = he.relative_humidity;
+      float newH = applyHumReadingOffset(he.relative_humidity);
      
       bool acceptT = true, acceptH = true;
      
@@ -2619,7 +2628,7 @@ void readComboSensorsIfDue() {
   #if ENABLE_DHT22_FALLBACK
   // Read DHT22 as fallback temp/humidity source when SHT45 is unavailable.
   if (!useSHT45 && useDHT22) {
-    float newH = dht.readHumidity();
+    float newH = applyHumReadingOffset(dht.readHumidity());
     float newT = applyTempReadingOffset(dht.readTemperature());
     dhtTempRaw = newT;
     dhtHumRaw = newH;
@@ -2681,6 +2690,7 @@ void readComboSensorsIfDue() {
           sen66_humidity >= 0.0 && sen66_humidity <= 100.0 &&
           sen66_pm2p5 >= 0.0 && sen66_pm2p5 <= 1000.0) {
         sen66_temperature = applyTempReadingOffset(sen66_temperature);
+        sen66_humidity = applyHumReadingOffset(sen66_humidity);
         // Use SEN66 temp/humidity only when neither SHT45 nor DHT22 are active
         if (!useSHT45 && !useDHT22) {
           filtTempC = sen66_temperature;
@@ -2730,6 +2740,7 @@ void readComboSensorsIfDue() {
           sen66_humidity >= 0.0 && sen66_humidity <= 100.0 &&
           sen66_pm2p5 >= 0.0 && sen66_pm2p5 <= 1000.0) {
         sen66_temperature = applyTempReadingOffset(sen66_temperature);
+        sen66_humidity = applyHumReadingOffset(sen66_humidity);
         // Use SEN55 temp/humidity only when neither SHT45 nor DHT22 are active
         if (!useSHT45 && !useDHT22) {
           filtTempC = sen66_temperature;
@@ -2840,7 +2851,7 @@ void handleSerial(){
           tempSet=sp;
           prefs.putFloat("tempSet",tempSet);
           motorLogMsg("Temp set: "+String(tempSet,1)+"C");
-          if(client.connected()) publishStateAWS();
+          if (g_awsIsConnected) g_deferredPublishStateAws = true;
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
@@ -2850,7 +2861,7 @@ void handleSerial(){
           humSet=hs;
           prefs.putFloat("humSet",humSet);
           motorLogMsg("Hum set: "+String(humSet,1)+"%");
-          if(client.connected()) publishStateAWS();
+          if (g_awsIsConnected) g_deferredPublishStateAws = true;
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
@@ -2859,25 +2870,25 @@ void handleSerial(){
         if (fanCmd == "off" || fanCmd == "0") {
           setFanSpeed(FAN_OFF);
           prefs.putInt("fanSpeed", 0);
-          if(client.connected()) publishStateAWS();
+          if (g_awsIsConnected) g_deferredPublishStateAws = true;
           if(mqttLocal.connected()) publishStateLocal();
         }
         else if (fanCmd == "low" || fanCmd == "1") {
           setFanSpeed(FAN_LOW);
           prefs.putInt("fanSpeed", 1);
-          if(client.connected()) publishStateAWS();
+          if (g_awsIsConnected) g_deferredPublishStateAws = true;
           if(mqttLocal.connected()) publishStateLocal();
         }
         else if (fanCmd == "med" || fanCmd == "2") {
           setFanSpeed(FAN_MED);
           prefs.putInt("fanSpeed", 2);
-          if(client.connected()) publishStateAWS();
+          if (g_awsIsConnected) g_deferredPublishStateAws = true;
           if(mqttLocal.connected()) publishStateLocal();
         }
         else if (fanCmd == "high" || fanCmd == "3") {
           setFanSpeed(FAN_HIGH);
           prefs.putInt("fanSpeed", 3);
-          if(client.connected()) publishStateAWS();
+          if (g_awsIsConnected) g_deferredPublishStateAws = true;
           if(mqttLocal.connected()) publishStateLocal();
         }
       }
@@ -3109,13 +3120,8 @@ void messageHandler(char* topic, byte* payload, unsigned int length)
       // Defer preference write
       Serial.println("✓ Mode: " + String(onlineMode ? "ONLINE" : "OFFLINE"));
       if (!onlineMode) {
-        // Disconnect AWS IoT when switching to offline mode
-        if (client.connected()) {
-          esp_task_wdt_reset(); // Feed watchdog before disconnect
-          client.disconnect();
-          esp_task_wdt_reset(); // Feed watchdog after disconnect
-          Serial.println("  → AWS IoT disconnected (offline mode)");
-        }
+        g_awsRequestDisconnect = true;
+        Serial.println("  → AWS IoT disconnect requested (offline mode)");
       }
       stateChanged = true;
     }
@@ -3786,13 +3792,8 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       // Defer preference write
       Serial.println("✓ Operation mode changed (Local): " + String(onlineMode ? "ONLINE (Cloud + Local)" : "OFFLINE (Local only)"));
       if (!onlineMode) {
-        // Disconnect AWS IoT when switching to offline mode
-        if (client.connected()) {
-          esp_task_wdt_reset(); // Feed watchdog before disconnect
-          client.disconnect();
-          esp_task_wdt_reset(); // Feed watchdog after disconnect
-          Serial.println("  → AWS IoT disconnected (offline mode)");
-        }
+        g_awsRequestDisconnect = true;
+        Serial.println("  → AWS IoT disconnect requested (offline mode)");
       }
       stateChanged = true;
     }
@@ -3942,11 +3943,9 @@ void onMqttMessageLocal(char* topic, byte* payload, unsigned int len){
       esp_task_wdt_reset();
     }
    
-    // AWS MQTT (optional, can be slow)
-    if (onlineMode && client.connected()) {
-      esp_task_wdt_reset();
-      publishStateAWS();
-      esp_task_wdt_reset();
+    // AWS MQTT via awsNetTask (never block this callback / main loop on TLS)
+    if (onlineMode && g_awsIsConnected) {
+      g_deferredPublishStateAws = true;
     }
    
     esp_task_wdt_reset();
@@ -3987,7 +3986,7 @@ void ensureMqtt(){
     Serial.println("✓ Local MQTT connected");
     publishStateLocal();
     // Dashboard cloud badge uses retained aws_status — publish if AWS is already up
-    if (onlineMode && client.connected()) {
+    if (onlineMode && g_awsIsConnected) {
       publishAwsConnectionStatus(true);
     }
   }
@@ -4033,25 +4032,66 @@ static void startLoopStallMonitor() {
 }
 
 // =====================================================================
-//  AWS IoT (re)connection runs on its own task so the blocking TLS
-//  handshake NEVER stalls loop() (which would delay IR / control).
-//  Ownership rule (keeps the non-reentrant PubSubClient safe without a mutex):
-//    - This task touches `client` ONLY via client.connect(), and ONLY while
-//      it is disconnected.
-//    - The main loop touches `client` (loop()/publish()) ONLY while connected.
-//  Those two states are mutually exclusive. Post-connect subscribe/publish is
-//  handed back to the main loop via g_awsJustConnected.
+//  AWS IoT network task — owns the AWS PubSubClient completely so the
+ //  main loop NEVER blocks on TLS (connect / loop / publish). That is what
+//  made IR feel 3–4s slow in onlineMode while offlineMode stayed instant.
+//
+//  Ownership (no mutex needed):
+//    - This task is the ONLY place that calls client.connect/loop/publish/
+//      subscribe/disconnect (except one-time setup() connect before start).
+//    - Main loop / IR only set flags: g_deferredPublishStateAws,
+//      g_awsRequestDisconnect. Callbacks from client.loop() already defer
+//      AHU commands via g_deferredAhuCmd.
+//  Flags: g_awsJustConnected / g_awsConnecting / g_awsRequestDisconnect /
+//         g_awsIsConnected — declared with the other deferred globals above.
 // =====================================================================
-static volatile bool g_awsJustConnected = false;
-static volatile bool g_awsConnecting = false;   // true only while client.connect() runs on the task
+static void awsNetTask(void* /*param*/) {
+  unsigned long lastAwsPub = 0;
 
-static void awsConnTask(void* /*param*/) {
   for (;;) {
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(20));  // responsive; TLS work still happens here not in loop()
 
-    if (!onlineMode) continue;
-    if (WiFi.status() != WL_CONNECTED) continue;
-    if (client.connected()) continue;
+    // Offline / explicit disconnect request
+    if (!onlineMode || g_awsRequestDisconnect) {
+      g_awsRequestDisconnect = false;
+      if (client.connected()) {
+        client.disconnect();
+        Serial.println("✓ AWS IoT disconnected (offline / request)");
+      }
+      g_awsIsConnected = false;
+      selfHealing.mqttAwsHealthy = false;
+      continue;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+      g_awsIsConnected = client.connected();
+      continue;
+    }
+
+    // ---- Connected path: loop + deferred/periodic publishes ----
+    if (client.connected()) {
+      g_awsIsConnected = true;
+      selfHealing.mqttAwsHealthy = true;
+
+      client.loop();  // may run messageHandler; AHU cmds are deferred
+
+      if (g_deferredPublishStateAws) {
+        g_deferredPublishStateAws = false;
+        publishStateAWS();
+      }
+
+      unsigned long now = millis();
+      if (now - lastAwsPub >= 2000) {
+        lastAwsPub = now;
+        publishTelemetryAWS();
+        publishStateAWS();
+      }
+      continue;
+    }
+
+    // ---- Disconnected: reconnect with backoff ----
+    g_awsIsConnected = false;
+    selfHealing.mqttAwsHealthy = false;
 
     unsigned long now = millis();
     unsigned long retryInterval;
@@ -4061,8 +4101,6 @@ static void awsConnTask(void* /*param*/) {
     if (now - selfHealing.lastMqttAwsRecovery < retryInterval) continue;
     selfHealing.lastMqttAwsRecovery = now;
 
-    // DNS check first (this WiFi.hostByName can block for seconds — but here,
-    // off the main loop, so IR/control stay responsive).
     if (!checkInternetAvailable()) {
       selfHealing.mqttAwsFailCount++;
       if (selfHealing.mqttAwsFailCount <= 3 || selfHealing.mqttAwsFailCount % 10 == 0) {
@@ -4071,17 +4109,20 @@ static void awsConnTask(void* /*param*/) {
       continue;
     }
 
-    // Re-check just before the blocking call; if we switched offline meanwhile, bail.
     if (!onlineMode) continue;
     Serial.println("📡 Connecting to AWS IoT...");
     g_awsConnecting = true;
-    bool ok = client.connect(THINGNAME);   // blocking TLS handshake (this task only)
+    bool ok = client.connect(THINGNAME);
     g_awsConnecting = false;
     if (ok) {
       selfHealing.mqttAwsFailCount = 0;
       selfHealing.mqttAwsHealthy = true;
       selfHealing.totalRecoveries++;
-      g_awsJustConnected = true;            // main loop finalizes subscribe/publish
+      g_awsIsConnected = true;
+      subscribeAwsIotCommandTopics();
+      publishStatusOnline();
+      g_awsJustConnected = true;  // main loop: local mqtt aws_status + log
+      lastAwsPub = 0;
       Serial.println("✓ AWS IoT CONNECTED!");
     } else {
       selfHealing.mqttAwsFailCount++;
@@ -4094,16 +4135,16 @@ static void awsConnTask(void* /*param*/) {
 }
 
 static void startAwsConnTask() {
-  // Large stack: the mbedTLS handshake in client.connect() is stack-heavy.
+  // Large stack: mbedTLS handshake + JSON publish buffers.
   BaseType_t ok;
   if (ESP.getChipCores() > 1) {
-    ok = xTaskCreatePinnedToCore(awsConnTask, "awsConn", 16384, nullptr, 1, nullptr, 0);
+    ok = xTaskCreatePinnedToCore(awsNetTask, "awsNet", 20480, nullptr, 1, nullptr, 0);
   } else {
-    ok = xTaskCreate(awsConnTask, "awsConn", 16384, nullptr, 1, nullptr);
+    ok = xTaskCreate(awsNetTask, "awsNet", 20480, nullptr, 1, nullptr);
   }
   Serial.println(ok == pdPASS
-                 ? "✓ AWS IoT connect task started (off-loop, non-blocking control)"
-                 : "⚠️ AWS IoT connect task failed to create");
+                 ? "✓ AWS IoT net task started (connect+loop+publish off main loop)"
+                 : "⚠️ AWS IoT net task failed to create");
 }
 
 // =====================================================================
@@ -4196,12 +4237,24 @@ static bool irHasPending() {
   return has;
 }
 
-// Publish state after an IR action. Local MQTT stays synchronous (fast, offline-safe).
-// AWS is deferred — TLS writes can stall for seconds in onlineMode and would make the
-// remote feel laggy even after the relay/PWM action has already happened.
+// True only while a decoded IR command is queued for applyPendingIr().
+// Keep this narrow: broad time-based gating can make dashboard/state look stuck.
+static bool irBusy() {
+  return irHasPending();
+}
+
+static void flushDeferredIrPrefs() {
+  if (g_deferPrefTemp) { g_deferPrefTemp = false; prefs.putFloat("tempSet", tempSet); }
+  if (g_deferPrefHum)  { g_deferPrefHum  = false; prefs.putFloat("humSet", humSet); }
+  if (g_deferPrefFan)  { g_deferPrefFan  = false; prefs.putInt("fanSpeed", (int)fanSpeed); }
+}
+
+// Publish state after an IR action.
+// Keep IR path non-blocking: set flags only; network tasks/periodic loop publishes later.
 void irPublishState() {
-  if (client.connected())    g_deferredPublishStateAws = true;
-  if (mqttLocal.connected()) publishStateLocal();
+  if (g_awsIsConnected)      g_deferredPublishStateAws = true;
+  // Local state publish is also deferred, but serviced immediately at loop top.
+  g_deferredPublishStateLocal = true;
 }
 
 static uint8_t irBitCount(uint8_t v) {
@@ -4217,7 +4270,7 @@ void irAdjustHum(float delta) {
   if (newSet > IR_HUM_MAX) newSet = IR_HUM_MAX;
   if (newSet == humSet) return;
   humSet = newSet;
-  prefs.putFloat("humSet", humSet);
+  g_deferPrefHum = true;  // NVS later — don't stall IR/7-seg on flash
   motorLogMsg("[IR] HUM set: " + String(humSet, 1) + "%");
   irPublishState();
 }
@@ -4344,6 +4397,9 @@ void applyPendingIr() {
   g_irPending.humDelta = 0.0f;
   portEXIT_CRITICAL(&g_irMux);
 
+  // Act first (relays/PWM), log without MQTT, defer cloud/local state publish.
+  g_inIrApply = true;
+
   // POWER button -> mirror remote power onto the AHU.
   if (doPower) {
     if (powerOn) { motorLogMsg("[IR] POWER -> START"); startSystem(); }
@@ -4355,7 +4411,7 @@ void applyPendingIr() {
   if (doTemp) {
     if (tempVal != tempSet) {
       tempSet = tempVal;
-      prefs.putFloat("tempSet", tempSet);
+      g_deferPrefTemp = true;
       motorLogMsg("[IR] TEMP set: " + String(tempSet, 1) + "C");
       irPublishState();
     }
@@ -4366,7 +4422,7 @@ void applyPendingIr() {
     if (runState) {
       FanSpeed fs = irMapFan(fanRemote);
       setFanSpeed(fs);
-      prefs.putInt("fanSpeed", (int)fs);
+      g_deferPrefFan = true;
       motorLogMsg("[IR] FAN -> speed " + String((int)fs));
       irPublishState();
     } else {
@@ -4378,13 +4434,12 @@ void applyPendingIr() {
   if (doHum) {
     irAdjustHum(humDelta);
   }
+
+  g_inIrApply = false;
 }
 
 void setup()
 {
-  // Belt-and-suspenders after early constructor (see disableBrownoutDetectorEarly).
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-
   Serial.begin(115200);
   delay(500);
 
@@ -4395,7 +4450,7 @@ void setup()
   Serial.println("HELLO");
   Serial.println("========================================");
   logResetReason();
-  Serial.println("⚠️ RTC brownout detector OFF (field trial — check last reset reason above)");
+  Serial.println("RTC brownout detector ON (unexpected resets → check last reset reason above)");
 
   // Watch idle tasks on both CPUs (when dual-core): detects CPU starvation, not only loop() TWDT.
   uint32_t twdt_idle_mask = 0;
@@ -4774,7 +4829,7 @@ void setup()
   net.setPrivateKey(AWS_CERT_PRIVATE);
   // Keep AWS TLS stalls short: onlineMode used to feel 3–5s laggy on IR because
   // client.loop()/publish() blocked the main loop for the full socket timeout.
-  net.setTimeout(2);           // TLS read/write stall cap (seconds)
+  net.setTimeout(1);           // TLS stall cap on awsNetTask only (main loop never waits on AWS)
   net.setHandshakeTimeout(5);  // Cap a failing/slow AWS TLS handshake (default ~120s)
 
   // Connect to the MQTT broker on the AWS endpoint
@@ -4826,6 +4881,8 @@ void setup()
         esp_task_wdt_reset();
         subscribeAwsIotCommandTopics();
         publishStatusOnline();
+        g_awsIsConnected = true;
+        g_awsJustConnected = true;  // main loop will push local aws_status
       } else {
         esp_task_wdt_reset(); // Feed watchdog after failed connection
         Serial.println("✗ AWS IoT connection failed on startup (will retry in loop)");
@@ -4846,6 +4903,11 @@ void setup()
   if (pendingRecoveryStart) {
     pendingRecoveryStart = false;
     runState = true;
+    // Always enforce the same 2‑min CP ON timer after reset / power return.
+    if (cpStartAllowAt == 0) {
+      cpStartAllowAt = millis() + CP_STARTUP_DELAY_MS;
+    }
+    motorLogMsg("⚠️ RECOVERY START: CP ON timer " + String((cpStartAllowAt - millis() + 999) / 1000) + "s (no immediate CP)");
     motorLogMsg("⚠️ RECOVERY START: System recovered and running (standalone mode)");
   }
 
@@ -4961,20 +5023,11 @@ void loop()
       publishStateLocal();
     }
   }
-  // Deferred AWS publish (e.g. from IR). Re-check IR first, and skip this slice
-  // if another press arrived — cloud can wait one more loop iteration.
-  if (g_deferredPublishStateAws) {
-    applyPendingIr();
-    if (!irHasPending()) {
-      g_deferredPublishStateAws = false;
-      if (client.connected()) {
-        publishStateAWS();
-      }
-    }
-  }
+  // AWS state publish is handled by awsNetTask (g_deferredPublishStateAws).
+  if (!irBusy()) flushDeferredIrPrefs();
 
   // SELF-HEALING: Perform periodic health check and auto-recovery
-  performHealthCheck();
+  if (!irBusy()) performHealthCheck();
 
   // Check for loop hangs (log only, no reset)
   if (now - lastLoopTime > LOOP_TIMEOUT_MS) {
@@ -4991,7 +5044,7 @@ void loop()
     // Motor 2 is waiting and has less than 60s remaining - save every 30 seconds
     saveInterval = 30000;  // (was 2s - too frequent, caused flash wear)
   }
-  if (runState && (now - lastStateSave > saveInterval)) {
+  if (runState && (now - lastStateSave > saveInterval) && !irBusy()) {
     esp_task_wdt_reset();  // Feed watchdog before flash write
     saveSystemState();
     lastStateSave = now;
@@ -5044,34 +5097,25 @@ void loop()
   }
 
   // ========== SELF-HEALING: AWS IoT MQTT (Cloud) ==========
-  // Track AWS connection state changes
+  // Track AWS connection state changes for the *local* dashboard badge only.
+  // All AWS TLS I/O (loop/publish/connect) runs on awsNetTask — never here.
   static bool wasAwsConnected = false;
   static bool awsStatusReportedToLocal = false;
+  static bool offlineModeDisconnectRequested = false;
  
   if (onlineMode) {
-    bool isAwsConnected = client.connected();
+    offlineModeDisconnectRequested = false;
+    bool isAwsConnected = g_awsIsConnected;
    
     if (isAwsConnected) {
-      // Prefer IR over AWS TLS I/O: client.loop() can stall the main loop for the
-      // full net timeout and is exactly what made onlineMode feel 3–5s slower.
-      applyPendingIr();
-      if (!irHasPending()) {
-        client.loop();
-        applyPendingIr();  // in case a frame arrived during client.loop()
-      }
       selfHealing.mqttAwsHealthy = true;
 
-      // Finalize a connection just established by the background awsConnTask.
-      // (Kept off that task so all connected-state client I/O stays on this loop.)
       if (g_awsJustConnected) {
         g_awsJustConnected = false;
-        subscribeAwsIotCommandTopics();
-        publishStatusOnline();
         awsStatusReportedToLocal = publishAwsConnectionStatus(true);
         motorLogMsg("☁️ Cloud connected (AWS IoT)");
       }
      
-      // Notify dashboard when AWS is up (retry until local MQTT accepts retained aws_status)
       if (!wasAwsConnected) {
         wasAwsConnected = true;
         awsStatusReportedToLocal = false;
@@ -5082,7 +5126,6 @@ void loop()
     } else {
       selfHealing.mqttAwsHealthy = false;
      
-      // Just disconnected - notify dashboard
       if (wasAwsConnected) {
         wasAwsConnected = false;
         awsStatusReportedToLocal = false;
@@ -5090,25 +5133,14 @@ void loop()
         Serial.println("⚠️ AWS IoT disconnected");
       }
     }
-
-    // NOTE: AWS (re)connection is handled entirely by awsConnTask (a dedicated
-    // task) so the blocking DNS/TLS handshake can never stall this loop. That is
-    // what keeps IR + control instant in online mode.
   } else {
-    // Offline mode - ensure AWS IoT is disconnected (only once, not every loop).
-    // Skip while awsConnTask is mid-handshake so we never touch `client` from two
-    // tasks at once; it will bail on its next iteration (onlineMode is false).
-    static bool offlineModeDisconnected = false;
-    if (!offlineModeDisconnected && client.connected() && !g_awsConnecting) {
-      esp_task_wdt_reset(); // Feed watchdog before disconnect
-      client.disconnect();
-      esp_task_wdt_reset(); // Feed watchdog after disconnect
-      offlineModeDisconnected = true;
-      Serial.println("✓ Offline mode - AWS IoT disconnected");
+    // Ask awsNetTask to drop the session (do not touch `client` from this loop).
+    if (!offlineModeDisconnectRequested) {
+      g_awsRequestDisconnect = true;
+      offlineModeDisconnectRequested = true;
+      wasAwsConnected = false;
+      Serial.println("✓ Offline mode - AWS IoT disconnect requested");
       Serial.println("  → Local MQTT only (no cloud service)");
-    } else if (onlineMode) {
-      // Reset flag when switching back to online mode
-      offlineModeDisconnected = false;
     }
   }
  
@@ -5118,13 +5150,16 @@ void loop()
     if (now - lastMqttStatusLog > 60000) {
       lastMqttStatusLog = now;
       Serial.printf("[DEBUG] AWS: %s | WiFi: %s\n",
-                    client.connected() ? "OK" : "OFF",
+                    g_awsIsConnected ? "OK" : "OFF",
                     WiFi.status() == WL_CONNECTED ? "OK" : "OFF");
     }
   }
 
   // ========== SELF-HEALING: Local MQTT (Raspberry Pi) ==========
-  if (WiFi.status() == WL_CONNECTED) {
+  // Skip while IR is busy: mqttLocal.loop()/connect can stall 1–2s each and is
+  // the remaining online-only lag (temp ~4s, humidity ~7s depending on when
+  // the press lands relative to the 2s telemetry publish).
+  if (WiFi.status() == WL_CONNECTED && !irBusy()) {
     ensureMqtt();  // Non-blocking reconnection with self-healing
     if (mqttLocal.connected()) {
       mqttLocal.loop();
@@ -5140,6 +5175,7 @@ void loop()
 
   // IR remote: apply any button decoded by the async IR task (offline AND online).
   applyPendingIr();
+  updateSevenSegDisplay();
  
   // Read appropriate sensors based on what's detected
   // If all 3 sensors or combo sensors detected, use combo reading function
@@ -5182,27 +5218,12 @@ void loop()
     Serial.printf("[DEBUG] Fallback DHT22=%s\n", useDHT22 ? "Y" : "N");
   }
 
-  // Publish to AWS every 2 seconds (only in online mode). Skip a cycle if an IR
-  // press is waiting — cloud telemetry can wait a loop; the remote cannot.
-  static unsigned long lastAWS = 0;
-  if (onlineMode && client.connected() && (now - lastAWS >= 2000)) {
-    applyPendingIr();
-    if (!irHasPending()) {
-      lastAWS = now;
-      publishTelemetryAWS();
-      applyPendingIr();
-      if (!irHasPending()) {
-        publishStateAWS();
-      } else {
-        g_deferredPublishStateAws = true;
-      }
-    }
-  }
+  // AWS telemetry/state every 2s is published by awsNetTask (never block loop() on TLS).
  
   // Publish to Local MQTT every 2 seconds (telemetry and state only - status less often)
   static unsigned long lastLocal = 0;
   static unsigned long lastLocalStatus = 0;
-  if (mqttLocal.connected()) {
+  if (mqttLocal.connected() && !irBusy()) {
     if (now - lastLocal >= 2000) {
       lastLocal = now;
       esp_task_wdt_reset();  // Feed watchdog before MQTT operations
